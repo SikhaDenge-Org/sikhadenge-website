@@ -1,0 +1,125 @@
+name: WhatsApp Agent Phase17 Stage2 Exact Drift Recovery
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-phase17-stage2-exact-drift-recovery.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  preserve-and-recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_LIVE_SHA: 2b3efe35b8920082cc94dce989d1847842fb8825
+      RECOVERY_ID: stage2-drift-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$SSH_HOST"; test -n "$SSH_USER"; test -n "$SSH_PRIVATE_KEY"; test -n "$SSH_HOST_KEY"
+          if [[ -z "${SSH_PORT:-}" ]]; then printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "${SSH_PORT:-22}" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Preserve exact drift and restore canonical tracked source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' RECOVERY_ID='$RECOVERY_ID' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          LIVE_APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          test "$(id -u)" = "0"
+          test "$(git -C "$LIVE_APP" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
+          repo_root="$(git -C "$LIVE_APP" rev-parse --show-toplevel)"
+          paths=(
+            apps/whatsapp-agent-dashboard/app/login-page01-left-image.css
+            apps/whatsapp-agent-dashboard/app/login/page.tsx
+            apps/whatsapp-agent-dashboard/next-env.d.ts
+          )
+          actual="$(git -C "$repo_root" diff HEAD --name-only --no-renames | LC_ALL=C sort)"
+          expected="$(printf '%s\n' "${paths[@]}" | LC_ALL=C sort)"
+          if [[ "$actual" != "$expected" ]]; then
+            printf 'FAIL: EXACT_DIRTY_SET_CHANGED\n' >&2
+            printf '%s\n' "$actual" >&2
+            exit 41
+          fi
+
+          backup_dir="/root/sikhadenge-backups/$RECOVERY_ID"
+          install -d -m 700 "$backup_dir"
+          patch="$backup_dir/tracked-drift.patch"
+          manifest="$backup_dir/tracked-drift-manifest.txt"
+          git -C "$repo_root" diff HEAD --binary -- "${paths[@]}" > "$patch"
+          test -s "$patch"
+          chmod 600 "$patch"
+          {
+            printf 'FORMAT_VERSION=1\n'
+            printf 'RECOVERY_ID=%s\n' "$RECOVERY_ID"
+            printf 'LIVE_SHA=%s\n' "$EXPECTED_LIVE_SHA"
+            printf 'PATCH_SHA256=%s\n' "$(sha256sum "$patch" | awk '{print $1}')"
+            printf 'CAPTURED_UTC=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            printf 'STATUS_BEGIN\n'
+            git -C "$repo_root" status --porcelain --untracked-files=no -- "${paths[@]}"
+            printf 'STATUS_END\n'
+            printf 'NUMSTAT_BEGIN\n'
+            git -C "$repo_root" diff HEAD --numstat --no-renames -- "${paths[@]}"
+            printf 'NUMSTAT_END\n'
+            for path in "${paths[@]}"; do
+              printf 'FILE path=%s mtime=%s working_sha256=%s head_blob=%s head_sha256=%s\n' \
+                "$path" \
+                "$(stat -c '%y' "$repo_root/$path")" \
+                "$(sha256sum "$repo_root/$path" | awk '{print $1}')" \
+                "$(git -C "$repo_root" rev-parse "HEAD:$path")" \
+                "$(git -C "$repo_root" show "HEAD:$path" | sha256sum | awk '{print $1}')"
+            done
+          } > "$manifest"
+          chmod 600 "$manifest"
+          cp "$patch" /tmp/phase17-stage2-tracked-drift.patch
+          cp "$manifest" /tmp/phase17-stage2-tracked-drift-manifest.txt
+          chmod 600 /tmp/phase17-stage2-tracked-drift.patch /tmp/phase17-stage2-tracked-drift-manifest.txt
+          printf 'PASS: DRIFT_BACKUP_PRESERVED patch_sha256=%s\n' "$(sha256sum "$patch" | awk '{print $1}')"
+
+          git -C "$repo_root" restore --source=HEAD --worktree -- "${paths[@]}"
+          test -z "$(git -C "$repo_root" status --porcelain --untracked-files=no)"
+          test "$(git -C "$repo_root" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
+          printf 'PASS: EXACT_THREE_FILE_DRIFT_CANONICALIZED\n'
+          REMOTE
+
+      - name: Collect preserved source-only recovery evidence
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p recovery-evidence
+          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST:/tmp/phase17-stage2-tracked-drift.patch" recovery-evidence/tracked-drift.patch
+          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST:/tmp/phase17-stage2-tracked-drift-manifest.txt" recovery-evidence/tracked-drift-manifest.txt
+          chmod 600 recovery-evidence/* 2>/dev/null || true
+          exit 0
+
+      - name: Upload preserved drift evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase17-stage2-production-drift-${{ env.RECOVERY_ID }}
+          path: recovery-evidence
+          if-no-files-found: warn
+          retention-days: 14
