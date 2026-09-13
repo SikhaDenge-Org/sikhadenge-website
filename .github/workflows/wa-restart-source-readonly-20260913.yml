@@ -21,7 +21,7 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     environment: whatsapp-agent-production
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - name: Configure pinned SSH
         shell: bash
@@ -48,6 +48,15 @@ jobs:
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
           set -Eeuo pipefail
+
+          redact() {
+            sed -E \
+              -e 's/[0-9]{1,3}(\.[0-9]{1,3}){3}/IP_REDACTED/g' \
+              -e 's#(postgres(ql)?://)[^[:space:]]+#\1REDACTED#g' \
+              -e 's#(Bearer[[:space:]]+)[A-Za-z0-9._~+/-]+#\1REDACTED#g' \
+              -e 's#((TOKEN|SECRET|PASSWORD|PASS|API_KEY|ACCESS_KEY|DATABASE_URL)[A-Za-z0-9_]*[=:][[:space:]]*)[^[:space:]]+#\1REDACTED#gI'
+          }
+
           echo '=== MODE ==='
           echo 'MODE=READ_ONLY'
           echo 'DB_MUTATION=NONE'
@@ -55,41 +64,75 @@ jobs:
           echo 'SYSTEMD_MUTATION=NONE'
           echo 'ENV_MUTATION=NONE'
 
-          echo '=== SYSTEMD TIMER ==='
-          systemctl cat sikhadenge-funnel-golden-guard.timer || true
-          systemctl show sikhadenge-funnel-golden-guard.timer -p ActiveState -p SubState -p Unit -p NextElapseUSecRealtime -p LastTriggerUSec -p Triggers || true
-
-          echo '=== SYSTEMD SERVICE ==='
-          systemctl cat sikhadenge-funnel-golden-guard.service || true
-          systemctl show sikhadenge-funnel-golden-guard.service -p ActiveState -p SubState -p ExecMainStartTimestamp -p ExecMainExitTimestamp -p ExecMainStatus -p Result || true
-
-          echo '=== INSTALLED GUARD ==='
-          test -r /usr/local/sbin/sikhadenge-funnel-golden-guard
-          sha256sum /usr/local/sbin/sikhadenge-funnel-golden-guard
-          grep -nE 'restart_app\(|pm2 restart|app_online|AI_APP|CLAUDE_APP|AI_PORT|CLAUDE_PORT' /usr/local/sbin/sikhadenge-funnel-golden-guard || true
-
-          echo '=== GOLDEN STATE SAFE KEYS ==='
+          echo '=== GOLDEN GUARD EXCLUSION CHECK ==='
           STATE='/var/lib/sikhadenge-funnel-golden-lock/current/state.env'
           if [[ -r "$STATE" ]]; then
             grep -E '^(SEALED_AT|AI_APP|CLAUDE_APP|AI_PORT|CLAUDE_PORT)=' "$STATE" || true
-          else
-            echo 'STATE_ENV=UNREADABLE'
           fi
-
-          echo '=== GOLDEN GUARD RECENT EVENTS ==='
           LOG='/var/log/sikhadenge-funnel-golden-lock.log'
           if [[ -r "$LOG" ]]; then
-            tail -500 "$LOG" | grep -E 'REPAIR pm2 restart|DRIFT .*origin|PASS seal=|CRITICAL|PUBLIC_MISMATCH|ASSET_MISMATCH' | tail -160 || true
-          else
-            echo 'GUARD_LOG=UNREADABLE'
+            tail -700 "$LOG" | grep -E 'REPAIR pm2 restart|DRIFT .*origin|CRITICAL|PASS seal=' | tail -80 || true
           fi
 
-          echo '=== SYSTEMD UNIT JOURNAL ==='
-          journalctl -u sikhadenge-funnel-golden-guard.service --since '2026-09-13 16:00:00' --no-pager -o short-iso | tail -220 || true
+          echo '=== WA PM2 CURRENT STATE ==='
+          pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const p=JSON.parse(b).find(x=>x.name==="sikhadenge-whatsapp-agent");if(!p){console.log("WA_PM2=MISSING");process.exit(2)};const e=p.pm2_env||{};console.log(["pid="+p.pid,"status="+e.status,"restarts="+e.restart_time,"unstable_restarts="+e.unstable_restarts,"uptime="+e.pm_uptime,"watch="+e.watch,"cron_restart="+(e.cron_restart??"unset"),"cwd="+e.pm_cwd].join("|"));});'
 
-          echo '=== PM2 SAFE APP STATE ==='
-          pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{for(const p of JSON.parse(b)){const n=p.name||"";if(n==="sikhadenge-whatsapp-agent"||n==="sikhadenge-dashboard-revenue"||/claude|video|funnel/i.test(n)){const e=p.pm2_env||{};console.log(["name="+n,"pid="+p.pid,"status="+e.status,"restarts="+e.restart_time,"unstable_restarts="+e.unstable_restarts,"cwd="+e.pm_cwd].join("|"));}}});'
+          echo '=== PM2 MASTER LOG — RECENT WA CONTROL EVENTS ==='
+          PM2LOG='/root/.pm2/pm2.log'
+          if [[ -r "$PM2LOG" ]]; then
+            grep -E 'sikhadenge-whatsapp-agent|App \[[^]]+:.*\] (starting|online|exited)|Stopping app:' "$PM2LOG" | tail -180 | redact || true
+          else
+            echo 'PM2_MASTER_LOG=UNREADABLE'
+          fi
 
-          echo '=== FINAL ==='
+          echo '=== EXACT WA STOP TIMESTAMPS ==='
+          if [[ -r "$PM2LOG" ]]; then
+            grep 'Stopping app:sikhadenge-whatsapp-agent' "$PM2LOG" | tail -30 || true
+          fi
+
+          echo '=== ROOT HISTORY — EXPLICIT WA PM2 COMMANDS ONLY ==='
+          if [[ -r /root/.bash_history ]]; then
+            grep -Ein 'pm2[[:space:]]+(restart|reload|start|stop|delete).*sikhadenge-whatsapp-agent|sikhadenge-whatsapp-agent.*pm2' /root/.bash_history | tail -80 | redact || true
+          fi
+
+          echo '=== ALL LOCAL SHELL HISTORIES — EXPLICIT WA PM2 COMMANDS ONLY ==='
+          for H in /root/.bash_history /home/*/.bash_history; do
+            [[ -r "$H" ]] || continue
+            MATCH="$(grep -Ein 'pm2[[:space:]]+(restart|reload|start|stop|delete).*sikhadenge-whatsapp-agent|sikhadenge-whatsapp-agent.*pm2' "$H" 2>/dev/null | tail -40 || true)"
+            if [[ -n "$MATCH" ]]; then
+              echo "HISTORY_FILE=$H"
+              printf '%s\n' "$MATCH" | redact
+            fi
+          done
+
+          echo '=== SYSTEMD / CRON REFERENCES TO WA PROCESS ==='
+          grep -RInE --exclude='*.journal' --exclude='*.log' 'sikhadenge-whatsapp-agent|pm2[[:space:]]+(restart|reload).*(whatsapp|agent)' \
+            /etc/systemd/system /etc/cron.d /etc/crontab /usr/local/sbin /usr/local/bin 2>/dev/null | head -240 | redact || true
+
+          echo '=== SERVER SCRIPT REFERENCES TO EXPLICIT WA RESTART ==='
+          find /root /opt /var/www/sikhadenge-whatsapp-agent \
+            -xdev -maxdepth 6 \
+            \( -path '*/node_modules' -o -path '*/node_modules/*' -o -path '*/.next' -o -path '*/.next/*' -o -path '*/.git' -o -path '*/.git/*' -o -path '*/migration-evidence' -o -path '*/migration-evidence/*' \) -prune -o \
+            -type f -size -2M \
+            \( -name '*.sh' -o -name '*.bash' -o -name '*.js' -o -name '*.mjs' -o -name '*.cjs' -o -name '*.ts' -o -name '*.service' -o -name '*.timer' -o -name 'ecosystem*.config.*' -o -name 'package.json' \) \
+            -print0 2>/dev/null | \
+          xargs -0 -r grep -HnE 'pm2[[:space:]]+(restart|reload|start|stop|delete)[[:space:]]+.*sikhadenge-whatsapp-agent|sikhadenge-whatsapp-agent.*pm2[[:space:]]+(restart|reload|start|stop|delete)' 2>/dev/null | head -240 | redact || true
+
+          echo '=== SSH / SUDO / CRON CORRELATION SINCE 17:25 IST ==='
+          journalctl --since '2026-09-13 17:25:00' --no-pager -o short-iso 2>/dev/null | \
+            grep -Ei 'sshd|sudo|CRON|session opened|session closed|pm2|whatsapp-agent' | \
+            tail -420 | redact || true
+
+          echo '=== ROOT LOGIN WINDOWS ==='
+          last -F root 2>/dev/null | head -25 | redact || true
+
+          echo '=== PROCESSES WITH WA/PM2 CONTROL SIGNATURES ==='
+          ps -eo pid=,ppid=,user=,lstart=,etimes=,args= | \
+            grep -Ei '[p]m2|sikhadenge-whatsapp-agent|whatsapp.*(restart|reload)|(?:restart|reload).*whatsapp' | \
+            tail -80 | redact || true
+
+          echo '=== FINAL WA PM2 STATE ==='
+          pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const p=JSON.parse(b).find(x=>x.name==="sikhadenge-whatsapp-agent");const e=p?.pm2_env||{};console.log("status="+e.status+"|pid="+p?.pid+"|restarts="+e.restart_time+"|unstable_restarts="+e.unstable_restarts);});'
+
           echo 'READ_ONLY_FORENSICS=PASS'
           REMOTE
