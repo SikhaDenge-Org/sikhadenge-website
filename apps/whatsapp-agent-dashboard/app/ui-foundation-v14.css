@@ -1,0 +1,376 @@
+/* EngageOS UI Foundation V14
+ * Global typography, spacing, radius and control rhythm.
+ * Manrope is the single product typeface across whatsapp.sikhadenge.in.
+ */
+
+:root {
+  --ui-font-sans: var(--font-manrope), Manrope, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  /* 4px spacing system */
+  --ui-space-1: 4px;
+  --ui-space-2: 8px;
+  --ui-space-3: 12px;
+  --ui-space-4: 16px;
+  --ui-space-5: 20px;
+  --ui-space-6: 24px;
+  --ui-space-7: 28px;
+  --ui-space-8: 32px;
+  --ui-space-10: 40px;
+  --ui-space-12: 48px;
+
+  /* Product type scale */
+  --ui-text-micro: 11px;
+  --ui-text-xs: 12px;
+  --ui-text-sm: 13px;
+  --ui-text-md: 14px;
+  --ui-text-base: 16px;
+  --ui-text-lg: 18px;
+  --ui-text-xl: 20px;
+  --ui-text-2xl: 24px;
+  --ui-text-3xl: 28px;
+  --ui-text-display: 36px;
+
+  --ui-leading-micro: 16px;
+  --ui-leading-xs: 16px;
+  --ui-leading-sm: 18px;
+  --ui-leading-md: 20px;
+  --ui-leading-base: 24px;
+  --ui-leading-lg: 26px;
+  --ui-leading-xl: 28px;
+  --ui-leading-2xl: 32px;
+  --ui-leading-3xl: 36px;
+  --ui-leading-display: 40px;
+
+  --ui-weight-regular: 400;
+  --ui-weight-medium: 500;
+  --ui-weight-semibold: 600;
+  --ui-weight-bold: 700;
+  --ui-weight-extrabold: 800;
+
+  /* Standard component geometry */
+  --ui-control-compact: 36px;
+  --ui-control-default: 44px;
+  --ui-control-large: 52px;
+  --ui-radius-sm: 8px;
+  --ui-radius-md: 12px;
+  --ui-radius-lg: 16px;
+  --ui-radius-xl: 20px;
+  --ui-card-padding: 24px;
+  --ui-section-gap: 24px;
+  --ui-field-gap: 16px;
+  --ui-label-gap: 8px;
+}
+
+html {
+  font-family: var(--ui-font-sans);
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--ui-font-sans) !important;
+  font-size: var(--ui-text-md);
+  line-height: var(--ui-leading-md);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Force one UI typeface without disturbing code/technical surfaces. */
+body *:not(code):not(pre):not(kbd):not(samp) {
+  font-family: var(--ui-font-sans) !important;
+}
+
+button,
+input,
+textarea,
+select,
+option {
+  font-family: var(--ui-font-sans) !important;
+  font-size: var(--ui-text-md);
+  line-height: var(--ui-leading-md);
+}
+
+button,
+[role="button"],
+a,
+input,
+textarea,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Keep controls usable and visually consistent across modules. */
+button:not([aria-hidden="true"]),
+[role="button"]:not([aria-hidden="true"]) {
+  min-height: 36px;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+select {
+  min-height: var(--ui-control-default);
+}
+
+textarea {
+  min-height: 88px;
+}
+
+:focus-visible {
+  outline: 2px solid #2f78ff;
+  outline-offset: 2px;
+}
+
+/* Semantic defaults. More specific module CSS can opt into denser variants. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--ui-font-sans) !important;
+  font-weight: var(--ui-weight-bold);
+  text-wrap: balance;
+}
+
+p,
+li,
+dd,
+dt,
+label,
+small,
+span {
+  text-wrap: pretty;
+}
+
+/* =========================================================
+   PAGE 01 RIGHT AUTH — standardized desktop rhythm
+   ========================================================= */
+
+.split01__signin[data-auth-ui="right-auth-v12"] .split01__signin-inner {
+  width: min(80%, 560px) !important;
+  max-width: 560px !important;
+}
+
+.split01__signin[data-auth-ui="right-auth-v12"] .split01__signin-brand {
+  margin-bottom: var(--ui-space-7) !important;
+}
+
+.split01__signin[data-auth-ui="right-auth-v12"] .split01__signin-heading {
+  margin-bottom: var(--ui-space-6) !important;
+}
+
+.split01__signin[data-auth-ui="right-auth-v12"] .split01__signin-heading p {
+  margin: 0 0 var(--ui-space-3) !important;
+  font-size: var(--ui-text-xs) !important;
+  line-height: var(--ui-leading-xs) !important;
+  font-weight: var(--ui-weight-bold) !important;
+  letter-spacing: .24em !important;
+}
+
+.split01__signin[data-auth-ui="right-auth-v12"] .split01__signin-heading h2 {
+  margin: 0 0 var(--ui-space-3) !important;
+  font-size: var(--ui-text-display) !important;
+  line-height: var(--ui-leading-display) !important;
+  font-weight: var(--ui-weight-bold) !important;
+  letter-spacing: -.04em !important;
+}
+
+.split01__signin[data-auth-ui="right-auth-v12"] .split01__signin-heading > span {
+  display: block;
+  margin: 0;
+  max-width: 520px !important;
+  font-size: var(--ui-text-base) !important;
+  line-height: var(--ui-leading-base) !important;
+  font-weight: var(--ui-weight-regular) !important;
+  letter-spacing: -.01em;
+}
+
+.split01__signin[data-auth-ui="right-auth-v12"] .split01__form-card {
+  padding: var(--ui-card-padding) !important;
+  border-radius: var(--ui-radius-lg) !important;
+}
+
+.split01__signin[data-auth-ui="right-auth-v12"] .split01-form__field {
+  margin-bottom: var(--ui-field-gap) !important;
+}
+
+.split01__signin[data-auth-ui="right-auth-v12"] .split01-form__label-row {
+  margin-bottom: var(--ui-label-gap) !important;
+}
+
+.split01__signin[data-auth-ui="right-auth-v12"] .split01-form__label-row label,
+.split01__signin[data-auth-ui="right-auth-v12"] .split01-form__field > label {
+  font-size: var(--ui-text-md) !important;
+  line-height: var(--ui-leading-md) !important;
+  font-weight: var(--ui-weight-bold) !important;
+}
+
+.split01__signin[data-auth-ui="right-auth-v12"] .split01-form__forgot {
+  min-height: 24px;
+  font-size: var(--ui-text-xs) !important;
+  line-height: var(--ui-leading-xs) !important;
+  font-weight: var(--ui-weight-bold) !important;
+}
+
+.split01__signin[data-auth-ui="right-auth-v12"] .split01-form__control,
+.split01__signin[data-auth-ui="right-auth-v12"] .split01-form__submit,
+.split01__signin[data-auth-ui="right-auth-v12"] .split01-form__reset-submit {
+  height: var(--ui-control-large) !important;
+  min-height: var(--ui-control-large) !important;
+  border-radius: var(--ui-radius-md) !important;
+}
+
+.split01__signin[data-auth-ui="right-auth-v12"] .split01-form__control input {
+  height: 100%;
+  font-size: var(--ui-text-base) !important;
+  line-height: var(--ui-leading-base) !important;
+}
+
+.split01__signin[data-auth-ui="right-auth-v12"] .split01-form__submit,
+.split01__signin[data-auth-ui="right-auth-v12"] .split01-form__reset-submit {
+  font-size: var(--ui-text-base) !important;
+  line-height: var(--ui-leading-base) !important;
+  font-weight: var(--ui-weight-bold) !important;
+}
+
+.split01__signin[data-auth-ui="right-auth-v12"] .split01-form__meta,
+.split01__signin[data-auth-ui="right-auth-v12"] .split01__access-note,
+.split01__signin[data-auth-ui="right-auth-v12"] .split01__tagline {
+  font-size: var(--ui-text-xs) !important;
+  line-height: var(--ui-leading-xs) !important;
+}
+
+.split01__signin[data-auth-ui="right-auth-v12"] .split01__access-note {
+  margin-top: var(--ui-space-4) !important;
+  padding-top: var(--ui-space-4) !important;
+}
+
+/* Brand lockup follows the same Manrope scale. */
+.split01__signin .split01__product-name {
+  font-size: var(--ui-text-lg) !important;
+  line-height: var(--ui-leading-lg) !important;
+  font-weight: var(--ui-weight-bold) !important;
+  letter-spacing: -.025em !important;
+}
+
+.split01__signin .split01__product-kicker {
+  font-size: 9px !important;
+  line-height: 12px !important;
+  font-weight: var(--ui-weight-bold) !important;
+  letter-spacing: .16em !important;
+}
+
+/* =========================================================
+   Shared dashboard primitives — conservative standardization
+   ========================================================= */
+
+.topbar h1,
+.module-page h1,
+.module-shell h1,
+.enterprise-page h1,
+.page-header h1 {
+  font-size: var(--ui-text-2xl) !important;
+  line-height: var(--ui-leading-2xl) !important;
+  font-weight: var(--ui-weight-bold) !important;
+  letter-spacing: -.025em !important;
+}
+
+.panel-heading h2,
+.chat-header h2,
+.lead-card-head h2,
+.module-page h2,
+.enterprise-page h2 {
+  font-size: var(--ui-text-lg) !important;
+  line-height: var(--ui-leading-lg) !important;
+  font-weight: var(--ui-weight-bold) !important;
+  letter-spacing: -.015em !important;
+}
+
+.eyebrow,
+.section-kicker,
+.overline {
+  font-size: var(--ui-text-micro) !important;
+  line-height: var(--ui-leading-micro) !important;
+  font-weight: var(--ui-weight-bold) !important;
+}
+
+.secondary-button,
+.primary-button,
+.send-button,
+.action-button,
+.toolbar-button {
+  min-height: var(--ui-control-default) !important;
+  border-radius: var(--ui-radius-md) !important;
+  font-size: var(--ui-text-sm) !important;
+  line-height: var(--ui-leading-sm) !important;
+  font-weight: var(--ui-weight-bold) !important;
+}
+
+.icon-button,
+.rail-button {
+  min-width: 40px;
+  min-height: 40px !important;
+}
+
+.search-box,
+.composer textarea {
+  border-radius: var(--ui-radius-md) !important;
+}
+
+.metric-card {
+  border-radius: var(--ui-radius-lg) !important;
+}
+
+@media (max-height: 820px) and (min-width: 901px) {
+  .split01__signin[data-auth-ui="right-auth-v12"] .split01__signin-brand {
+    margin-bottom: var(--ui-space-5) !important;
+  }
+
+  .split01__signin[data-auth-ui="right-auth-v12"] .split01__signin-heading {
+    margin-bottom: var(--ui-space-4) !important;
+  }
+
+  .split01__signin[data-auth-ui="right-auth-v12"] .split01__form-card {
+    padding: var(--ui-space-5) var(--ui-space-6) !important;
+  }
+
+  .split01__signin[data-auth-ui="right-auth-v12"] .split01-form__control,
+  .split01__signin[data-auth-ui="right-auth-v12"] .split01-form__submit,
+  .split01__signin[data-auth-ui="right-auth-v12"] .split01-form__reset-submit {
+    height: 48px !important;
+    min-height: 48px !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .split01__signin[data-auth-ui="right-auth-v12"] .split01__signin-inner {
+    width: min(560px, 100%) !important;
+  }
+
+  .split01__signin[data-auth-ui="right-auth-v12"] .split01__signin-heading h2 {
+    font-size: 34px !important;
+    line-height: 38px !important;
+  }
+}
+
+@media (max-width: 620px) {
+  :root {
+    --ui-card-padding: 20px;
+  }
+
+  .split01__signin[data-auth-ui="right-auth-v12"] .split01__signin-heading h2 {
+    font-size: 32px !important;
+    line-height: 36px !important;
+  }
+
+  .split01__signin[data-auth-ui="right-auth-v12"] .split01__signin-heading > span {
+    font-size: 15px !important;
+    line-height: 22px !important;
+  }
+
+  .split01__signin[data-auth-ui="right-auth-v12"] .split01__form-card {
+    border-radius: var(--ui-radius-lg) !important;
+  }
+}
