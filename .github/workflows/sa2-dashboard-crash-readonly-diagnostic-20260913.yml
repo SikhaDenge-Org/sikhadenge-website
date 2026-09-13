@@ -1,0 +1,112 @@
+name: SA2 Dashboard Crash Readonly Diagnostic 20260913
+
+on:
+  push:
+    branches:
+      - ops/sa2-dashboard-runtime-preflight-20260913
+    paths:
+      - '.github/workflows/sa2-dashboard-crash-readonly-diagnostic-20260913.yml'
+
+permissions:
+  contents: read
+
+env:
+  SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+  SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+  SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+  SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+  SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    environment: whatsapp-agent-production
+    timeout-minutes: 10
+    steps:
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SSH_PORT="${SSH_PORT:-22}"
+          echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
+          install -d -m 700 "$HOME/.ssh"
+          KEY="$HOME/.ssh/prod"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"
+          fi
+          chmod 600 "$KEY"
+          read -r _ kt km _ <<< "$SSH_HOST_KEY"
+          test "$kt" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Read-only dashboard crash diagnostic
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          APP='sikhadenge-dashboard-revenue'
+          WA='sikhadenge-whatsapp-agent'
+          OLD='/opt/sikhadenge-dashboard-releases/sa1-20260911-221949-d60ab5a4'
+          NEW='/opt/sikhadenge-dashboard-releases/sa2-20260913-143436-c02e6e06'
+
+          echo '=== READONLY_DASHBOARD_CRASH_DIAGNOSTIC ==='
+          date -Is
+          echo 'MUTATION_COMMANDS_RUN=NO'
+
+          pm2 jlist | node -e '
+            let b=""; process.stdin.on("data",d=>b+=d); process.stdin.on("end",()=>{
+              const ps=JSON.parse(b);
+              for (const name of process.argv.slice(1)) {
+                const p=ps.find(x=>x.name===name); if(!p){console.log(`${name}=MISSING`); continue;}
+                const e=p.pm2_env||{};
+                const enabled=v=>String(v||"").trim().toLowerCase()==="true";
+                const bad=["SALES_AI_ENABLED","WHATSAPP_SA2_DOMAIN_PROCESSING_ENABLED","WHATSAPP_SA2_PRIVACY_ACTIONS_ENABLED","WHATSAPP_OUTBOUND_ENABLED","WHATSAPP_AI_REPLY_ENABLED","WHATSAPP_FOLLOWUP_ENABLED","WHATSAPP_PAYMENT_LINK_ACTION_ENABLED"];
+                console.log(`${name}|pid=${p.pid}|status=${e.status}|cwd=${e.pm_cwd}|restart=${e.restart_time}|unstable=${e.unstable_restarts}|script=${e.pm_exec_path}|args=${JSON.stringify(e.args||[])}|mode=${e.exec_mode}`);
+                if(name==="sikhadenge-dashboard-revenue"){
+                  console.log(`DASH_ENV|NODE_ENV=${e.NODE_ENV||"<unset>"}|INGEST=${enabled(e.WHATSAPP_INGEST_ENABLED)}|DANGEROUS_TRUE=${bad.filter(k=>enabled(e[k])).join(",")||"none"}|DATABASE_URL_PRESENT=${Boolean(e.DATABASE_URL)}|NEXTAUTH_SECRET_PRESENT=${Boolean(e.NEXTAUTH_SECRET)}|SESSION_SECRET_PRESENT=${Boolean(e.SESSION_SECRET)}|PM_ERR_LOG=${e.pm_err_log||"<unset>"}|PM_OUT_LOG=${e.pm_out_log||"<unset>"}`);
+                }
+              }
+            });' "$APP" "$WA"
+
+          echo '--- PORTS ---'
+          printf 'PORT3400_HTTP='; curl --max-time 3 -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3400/ 2>/dev/null || echo 'curl_failed'
+          printf 'PORT3100_HTTP='; curl --max-time 3 -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3100/ 2>/dev/null || echo 'curl_failed'
+          ss -ltn 2>/dev/null | awk 'NR==1 || /:3400[[:space:]]|:3100[[:space:]]/' || true
+
+          echo '--- RELEASE INTEGRITY ---'
+          for d in "$OLD" "$NEW"; do
+            echo "RELEASE=$d"
+            test -d "$d" && echo 'DIR=YES' || echo 'DIR=NO'
+            test -f "$d/package.json" && echo "START_SCRIPT=$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.scripts?.start||"")' "$d/package.json")" || true
+            test -f "$d/.next/BUILD_ID" && echo "BUILD_ID=$(cat "$d/.next/BUILD_ID")" || echo 'BUILD_ID=MISSING'
+            test -x "$d/node_modules/.bin/next" && "$d/node_modules/.bin/next" --version || echo 'NEXT_BINARY=MISSING_OR_FAILED'
+            test -f "$d/.release-sha" && echo "RELEASE_SHA=$(cat "$d/.release-sha")" || echo 'RELEASE_SHA=<none>'
+          done
+
+          echo '--- DASHBOARD ERROR SIGNATURES ONLY ---'
+          ERR_LOG="$(pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const p=JSON.parse(b).find(x=>x.name===process.argv[1]);process.stdout.write(p?.pm2_env?.pm_err_log||"")})' "$APP")"
+          if [ -n "$ERR_LOG" ] && [ -f "$ERR_LOG" ]; then
+            echo "ERR_LOG_PATH=$ERR_LOG"
+            tail -n 160 "$ERR_LOG" | grep -Eai 'error|err!|cannot|eaddr|module|prisma|typeerror|referenceerror|syntaxerror|failed|invalid|permission|enoent|heap|killed|signal|uncaught|exception' | tail -n 80 | sed -E 's#(postgres(ql)?://)[^[:space:]]+#\1[REDACTED]#g; s#(Bearer[[:space:]]+)[^[:space:]]+#\1[REDACTED]#g' || true
+          else
+            echo 'ERR_LOG=UNAVAILABLE'
+          fi
+
+          echo '--- DASHBOARD OUT LOG TAIL ---'
+          OUT_LOG="$(pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const p=JSON.parse(b).find(x=>x.name===process.argv[1]);process.stdout.write(p?.pm2_env?.pm_out_log||"")})' "$APP")"
+          if [ -n "$OUT_LOG" ] && [ -f "$OUT_LOG" ]; then
+            tail -n 40 "$OUT_LOG" | sed -E 's#(postgres(ql)?://)[^[:space:]]+#\1[REDACTED]#g; s#(Bearer[[:space:]]+)[^[:space:]]+#\1[REDACTED]#g' || true
+          else
+            echo 'OUT_LOG=UNAVAILABLE'
+          fi
+
+          echo '--- SYSTEM SIGNALS ---'
+          free -h || true
+          df -h /opt || true
+          journalctl -k --since '30 minutes ago' --no-pager 2>/dev/null | grep -Eai 'oom|out of memory|killed process' | tail -n 20 || true
+          echo 'READONLY_DASHBOARD_CRASH_DIAGNOSTIC=PASS'
+          REMOTE
