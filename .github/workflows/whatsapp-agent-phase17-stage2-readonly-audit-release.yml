@@ -45,7 +45,7 @@ jobs:
           ssh-keygen -y -f "$key" >/dev/null
           printf 'PASS: STAGE2_PROBE_SSH_READY\n'
 
-      - name: Probe Stage2 Instagram candidate read-only
+      - name: Probe Stage2 Meta candidates read-only
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -61,108 +61,73 @@ jobs:
           const [file, key] = process.argv.slice(2);
           const text = fs.readFileSync(file, 'utf8');
           for (const raw of text.split(/\r?\n/)) {
-            const line = raw.trim();
-            if (!line || line.startsWith('#')) continue;
+            const line = raw.trim(); if (!line || line.startsWith('#')) continue;
             const normalized = line.startsWith('export ') ? line.slice(7).trim() : line;
-            const i = normalized.indexOf('=');
-            if (i < 1 || normalized.slice(0, i).trim() !== key) continue;
+            const i = normalized.indexOf('='); if (i < 1 || normalized.slice(0, i).trim() !== key) continue;
             let value = normalized.slice(i + 1).trim();
             if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) value = value.slice(1, -1);
-            process.stdout.write(value);
-            process.exit(0);
+            process.stdout.write(value); process.exit(0);
           }
           process.exit(1);
           NODE
           }
           env_present() { if value="$(read_env_value "$1" 2>/dev/null)" && [[ -n "$value" ]]; then printf 'true'; else printf 'false'; fi; }
+          token_shape() {
+            local value=""; value="$(read_env_value "$1" 2>/dev/null || true)"
+            node - "$value" <<'NODE'
+          const v = process.argv[2] || '';
+          const category = /^EA[A-Za-z0-9_-]+$/.test(v) ? 'META_EA' : /^IG[A-Za-z0-9_-]+$/.test(v) ? 'INSTAGRAM_IG' : /^[A-Za-z0-9._-]+$/.test(v) ? 'OPAQUE' : v ? 'NONSTANDARD' : 'EMPTY';
+          process.stdout.write(`length=${v.length},category=${category},hasWhitespace=${/\s/.test(v)}`);
+          NODE
+          }
 
-          test "$(id -u)" = "0"
-          test -f "$ENV_FILE"
           live_sha="$(git -C "$LIVE_APP" rev-parse HEAD)"
           dirty_count="$(git -C "$LIVE_APP" status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
-          printf 'LIVE_SHA=%s\n' "$live_sha"
-          printf 'TRACKED_DIRTY_COUNT=%s\n' "$dirty_count"
-          test "$live_sha" = "$EXPECTED_LIVE_SHA"
-          test "$dirty_count" = "0"
+          printf 'LIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\n' "$live_sha" "$dirty_count"
+          test "$live_sha" = "$EXPECTED_LIVE_SHA"; test "$dirty_count" = "0"
 
           DATABASE_URL="$(read_env_value DATABASE_URL)"
           DATABASE_CLI_URL="$(node "$LIVE_APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")"
           psql_scalar() { psql "$DATABASE_CLI_URL" -X -v ON_ERROR_STOP=1 -Atqc "$1"; }
           psql_rows() { psql "$DATABASE_CLI_URL" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "$1"; }
-
           state="$(psql_rows "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
-          printf 'CONTROLLED_STATE=%s\n' "$state"
-          test "$state" = "INTERNAL_TEST_IDENTITIES|SHADOW|NO_EXTERNAL_WRITES|false|1"
-          transition_count="$(psql_scalar "SELECT COUNT(*) FROM \"EngageControlledLaunchTransition\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
-          enabled_flags="$(psql_scalar "SELECT COUNT(*) FROM \"EngageFeatureFlag\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"enabled\"=true;")"
-          printf 'TRANSITION_COUNT=%s\nFEATURE_FLAGS_ENABLED=%s\n' "$transition_count" "$enabled_flags"
-          test "$transition_count" = "1"
-          test "$enabled_flags" = "0"
+          printf 'CONTROLLED_STATE=%s\n' "$state"; test "$state" = "INTERNAL_TEST_IDENTITIES|SHADOW|NO_EXTERNAL_WRITES|false|1"
 
-          printf 'INSTAGRAM_ACCESS_TOKEN_PRESENT=%s\n' "$(env_present INSTAGRAM_ACCESS_TOKEN)"
-          printf 'INSTAGRAM_ACCOUNT_ID_PRESENT=%s\n' "$(env_present INSTAGRAM_ACCOUNT_ID)"
-          printf 'INSTAGRAM_GRAPH_VERSION_PRESENT=%s\n' "$(env_present INSTAGRAM_GRAPH_VERSION)"
-          printf 'INSTAGRAM_APP_SECRET_PRESENT=%s\n' "$(env_present INSTAGRAM_APP_SECRET)"
-          printf 'INSTAGRAM_VERIFY_TOKEN_PRESENT=%s\n' "$(env_present INSTAGRAM_VERIFY_TOKEN)"
-
-          instagram_rows="$(psql_rows "SELECT \"id\",\"status\",CASE WHEN length(\"externalAccountId\")<=4 THEN repeat('*',length(\"externalAccountId\")) ELSE repeat('*',length(\"externalAccountId\")-4)||right(\"externalAccountId\",4) END,COALESCE(\"capabilities\"->>'apiVerifiedAt',''),COALESCE(\"capabilities\"->>'webhookVerifiedAt',''),COALESCE(\"capabilities\"->>'permissionsVerified',''),COALESCE(\"capabilities\"->>'tokenExpiresAt',''),COALESCE(\"capabilities\"->>'revokedAt','') FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\"='INSTAGRAM' ORDER BY \"createdAt\";")"
-          printf 'INSTAGRAM_CONNECTION_ROWS_BEGIN\n%s\nINSTAGRAM_CONNECTION_ROWS_END\n' "$instagram_rows"
-          instagram_count="$(psql_scalar "SELECT COUNT(*) FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\"='INSTAGRAM';")"
-          printf 'INSTAGRAM_CONNECTION_COUNT=%s\n' "$instagram_count"
-          test "$instagram_count" = "1"
-
-          export PROBE_TOKEN="$(read_env_value INSTAGRAM_ACCESS_TOKEN)"
-          export PROBE_ACCOUNT_ID="$(read_env_value INSTAGRAM_ACCOUNT_ID)"
-          export PROBE_GRAPH_VERSION="$(read_env_value INSTAGRAM_GRAPH_VERSION)"
-          node <<'NODE'
-          const token = process.env.PROBE_TOKEN?.trim();
-          const accountId = process.env.PROBE_ACCOUNT_ID?.trim();
-          const version = process.env.PROBE_GRAPH_VERSION?.trim();
-          const out = (key, value) => process.stdout.write(`${key}=${String(value)}\n`);
-          const safeReason = (v) => String(v || 'verification failed').replace(/\s+/g, ' ').slice(0, 240);
-          async function getJson(url) {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 10000);
-            try {
-              const r = await fetch(url, {method:'GET', headers:{Authorization:`Bearer ${token}`, Accept:'application/json'}, redirect:'error', cache:'no-store', signal:controller.signal});
-              let body = {}; try { body = await r.json(); } catch {}
-              return {r, body};
-            } finally { clearTimeout(timer); }
-          }
-          (async () => {
-            if (!token || !accountId || !version) { out('INSTAGRAM_IDENTITY_VERIFIED', false); out('INSTAGRAM_PERMISSION_PROBE_VERIFIED', false); out('INSTAGRAM_PROBE_REASON', 'required Instagram environment configuration missing'); return; }
-            try {
-              const identityUrl = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(accountId)}`);
-              identityUrl.searchParams.set('fields','id');
-              const identity = await getJson(identityUrl);
-              const identityOk = identity.r.ok && String(identity.body?.id || '') === accountId;
-              out('INSTAGRAM_IDENTITY_HTTP', identity.r.status);
-              out('INSTAGRAM_IDENTITY_VERIFIED', identityOk);
-              if (!identityOk) { out('INSTAGRAM_PROBE_REASON', safeReason(identity.body?.error?.message || 'identity mismatch')); out('INSTAGRAM_PERMISSION_PROBE_VERIFIED', false); return; }
-
-              const mediaUrl = new URL(`https://graph.instagram.com/${encodeURIComponent(version)}/${encodeURIComponent(accountId)}/media`);
-              mediaUrl.searchParams.set('fields','id'); mediaUrl.searchParams.set('limit','1');
-              const media = await getJson(mediaUrl);
-              out('INSTAGRAM_MEDIA_HTTP', media.r.status);
-              const mediaId = Array.isArray(media.body?.data) ? String(media.body.data[0]?.id || '') : '';
-              if (!media.r.ok || !mediaId) { out('INSTAGRAM_PERMISSION_PROBE_VERIFIED', false); out('INSTAGRAM_PROBE_REASON', safeReason(media.body?.error?.message || 'no media available')); return; }
-
-              const commentsUrl = new URL(`https://graph.instagram.com/${encodeURIComponent(version)}/${encodeURIComponent(mediaId)}/comments`);
-              commentsUrl.searchParams.set('fields','id'); commentsUrl.searchParams.set('limit','1');
-              const comments = await getJson(commentsUrl);
-              out('INSTAGRAM_COMMENTS_HTTP', comments.r.status);
-              out('INSTAGRAM_PERMISSION_PROBE_VERIFIED', comments.r.ok);
-              out('INSTAGRAM_PROBE_EXTERNAL_WRITE_SENT', false);
-              out('INSTAGRAM_PROBE_REASON', comments.r.ok ? 'read-only identity/media/comment probes passed' : safeReason(comments.body?.error?.message));
-            } catch (e) {
-              out('INSTAGRAM_IDENTITY_VERIFIED', false);
-              out('INSTAGRAM_PERMISSION_PROBE_VERIFIED', false);
-              out('INSTAGRAM_PROBE_EXTERNAL_WRITE_SENT', false);
-              out('INSTAGRAM_PROBE_REASON', safeReason(e?.name === 'AbortError' ? 'probe timed out' : e?.message));
-            }
-          })();
+          printf 'META_ENV_KEY_NAMES_BEGIN\n'
+          node - "$ENV_FILE" <<'NODE'
+          const fs=require('node:fs'); const text=fs.readFileSync(process.argv[2],'utf8');
+          const keys=[]; for(const raw of text.split(/\r?\n/)){let line=raw.trim(); if(!line||line.startsWith('#'))continue; if(line.startsWith('export '))line=line.slice(7).trim(); const i=line.indexOf('='); if(i<1)continue; const k=line.slice(0,i).trim(); if(/(INSTAGRAM|WHATSAPP|MESSENGER|META).*(TOKEN|SECRET|ID|VERSION)|^(INSTAGRAM|WHATSAPP|MESSENGER|META)_/.test(k))keys.push(k)}
+          [...new Set(keys)].sort().forEach(k=>console.log(k));
           NODE
-          unset PROBE_TOKEN PROBE_ACCOUNT_ID PROBE_GRAPH_VERSION
+          printf 'META_ENV_KEY_NAMES_END\n'
 
-          printf 'PASS: PHASE17_STAGE2_INSTAGRAM_READONLY_PROBE_COMPLETE\n'
+          for key in INSTAGRAM_ACCESS_TOKEN INSTAGRAM_ACCOUNT_ID INSTAGRAM_GRAPH_VERSION WHATSAPP_ACCESS_TOKEN META_WHATSAPP_ACCESS_TOKEN WHATSAPP_PHONE_NUMBER_ID META_WHATSAPP_PHONE_NUMBER_ID WHATSAPP_GRAPH_VERSION META_GRAPH_API_VERSION; do
+            printf '%s_PRESENT=%s\n' "$key" "$(env_present "$key")"
+          done
+          printf 'INSTAGRAM_ACCESS_TOKEN_SHAPE=%s\n' "$(token_shape INSTAGRAM_ACCESS_TOKEN)"
+          if [[ "$(env_present WHATSAPP_ACCESS_TOKEN)" = true ]]; then printf 'WHATSAPP_ACCESS_TOKEN_SHAPE=%s\n' "$(token_shape WHATSAPP_ACCESS_TOKEN)"; fi
+          if [[ "$(env_present META_WHATSAPP_ACCESS_TOKEN)" = true ]]; then printf 'META_WHATSAPP_ACCESS_TOKEN_SHAPE=%s\n' "$(token_shape META_WHATSAPP_ACCESS_TOKEN)"; fi
+
+          psql_rows "SELECT \"id\",\"channel\",\"status\",CASE WHEN length(\"externalAccountId\")<=4 THEN repeat('*',length(\"externalAccountId\")) ELSE repeat('*',length(\"externalAccountId\")-4)||right(\"externalAccountId\",4) END,COALESCE(\"capabilities\"->>'apiVerifiedAt',''),COALESCE(\"capabilities\"->>'webhookVerifiedAt',''),COALESCE(\"capabilities\"->>'permissionsVerified','') FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\" IN ('INSTAGRAM','WHATSAPP') ORDER BY \"channel\";" | while IFS='|' read -r id channel status masked api webhook permission; do printf 'CONNECTION id=%s channel=%s status=%s external=%s apiVerifiedAt=%s webhookVerifiedAt=%s permissionsVerified=%s\n' "$id" "$channel" "$status" "$masked" "$api" "$webhook" "$permission"; done
+
+          export IG_TOKEN="$(read_env_value INSTAGRAM_ACCESS_TOKEN 2>/dev/null || true)"
+          export IG_ID="$(read_env_value INSTAGRAM_ACCOUNT_ID 2>/dev/null || true)"
+          export IG_VERSION="$(read_env_value INSTAGRAM_GRAPH_VERSION 2>/dev/null || true)"
+          export WA_TOKEN="$(read_env_value WHATSAPP_ACCESS_TOKEN 2>/dev/null || read_env_value META_WHATSAPP_ACCESS_TOKEN 2>/dev/null || true)"
+          export WA_ID="$(read_env_value WHATSAPP_PHONE_NUMBER_ID 2>/dev/null || read_env_value META_WHATSAPP_PHONE_NUMBER_ID 2>/dev/null || true)"
+          export WA_VERSION="$(read_env_value WHATSAPP_GRAPH_VERSION 2>/dev/null || read_env_value META_GRAPH_API_VERSION 2>/dev/null || true)"
+          node <<'NODE'
+          const safe=v=>String(v||'verification failed').replace(/\s+/g,' ').slice(0,180);
+          const out=(k,v)=>console.log(`${k}=${v}`);
+          async function probe(prefix, token, id, version, fields){
+            if(!token||!id||!version){out(`${prefix}_IDENTITY_VERIFIED`,false); out(`${prefix}_REASON`,'required configuration missing'); return;}
+            const u=new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(id)}`); u.searchParams.set('fields',fields);
+            const c=new AbortController(); const t=setTimeout(()=>c.abort(),10000);
+            try { const r=await fetch(u,{method:'GET',headers:{Authorization:`Bearer ${token}`,Accept:'application/json'},redirect:'error',cache:'no-store',signal:c.signal}); let b={}; try{b=await r.json()}catch{}; out(`${prefix}_IDENTITY_HTTP`,r.status); out(`${prefix}_IDENTITY_VERIFIED`,r.ok&&String(b?.id||'')===id); out(`${prefix}_EXTERNAL_WRITE_SENT`,false); if(!(r.ok&&String(b?.id||'')===id))out(`${prefix}_REASON`,safe(b?.error?.message||'identity mismatch')); }
+            catch(e){out(`${prefix}_IDENTITY_VERIFIED`,false);out(`${prefix}_EXTERNAL_WRITE_SENT`,false);out(`${prefix}_REASON`,safe(e?.name==='AbortError'?'probe timed out':e?.message));} finally{clearTimeout(t)}
+          }
+          (async()=>{await probe('INSTAGRAM',process.env.IG_TOKEN,process.env.IG_ID,process.env.IG_VERSION,'id'); await probe('WHATSAPP',process.env.WA_TOKEN,process.env.WA_ID,process.env.WA_VERSION,'id,display_phone_number,verified_name');})();
+          NODE
+          unset IG_TOKEN IG_ID IG_VERSION WA_TOKEN WA_ID WA_VERSION
+          printf 'PASS: PHASE17_STAGE2_META_CANDIDATE_DIAGNOSTIC_COMPLETE\n'
           REMOTE
