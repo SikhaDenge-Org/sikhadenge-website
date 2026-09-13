@@ -1,0 +1,87 @@
+name: Phase17 Governance Audit Provenance Codemod
+
+on:
+  push:
+    branches: [phase17-stage2-governance-v15-20260913]
+    paths:
+      - ".github/workflows/phase17-governance-audit-provenance-codemod.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase17-stage2-governance-v15-20260913
+          fetch-depth: 0
+      - name: Harden governance audit provenance checks
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('.github/workflows/whatsapp-agent-phase17-stage2-governance-v15.yml')
+          text = path.read_text()
+          old = '''          attest_sha(){
+            local gate="$1" action="$2" extra="${3:-}" count
+            count="$(q "SELECT COUNT(*) FROM \\"EngageSecurityAuditEvent\\" WHERE \\"workspaceId\\"='${WORKSPACE_ID}' AND \\"action\\"='${action}' AND \\"outcome\\"='VERIFIED' AND COALESCE(\\"metadata\\"->>'liveSha','')='${EXPECTED_LIVE_SHA}' ${extra}")"
+            [[ "$count" -gt 0 ]] && proven "$gate" || unknown "$gate"
+          }
+          attest_sha CRITICAL_INCIDENTS PHASE17_CRITICAL_INCIDENT_REVIEW "AND COALESCE(\\"metadata\\"->>'unresolvedCriticalIncidents','')='0'"
+          attest_sha DUPLICATE_SENDS PHASE17_DUPLICATE_SEND_REVIEW "AND COALESCE(\\"metadata\\"->>'unexplainedDuplicateSends','')='0'"
+          attest_sha ROLLBACK_TESTED PHASE17_ROLLBACK_REHEARSAL
+          attest_sha MONITORING_ACTIVE PHASE17_MONITORING_ACTIVE
+          attest_sha POLICY_VERIFIED PHASE17_POLICY_VERIFIED
+          attest_sha SCOPE_APPROVED PHASE17_STAGE2_SCOPE_APPROVED "AND COALESCE(\\"metadata\\"->>'candidateId','')='${CANDIDATE_ID}'"
+          attest_sha AUTHENTICATED_SMOKE PHASE17_AUTHENTICATED_SMOKE
+          attest_sha SUPPORT_RUNBOOK_ACTIVE PHASE17_SUPPORT_RUNBOOK_ACTIVE
+          attest_sha OBSERVATION_WINDOW_COMPLETE PHASE17_OBSERVATION_WINDOW_COMPLETE
+          attest_sha PRODUCTION_EVIDENCE_RECORDED PHASE17_PRODUCTION_EVIDENCE_RECORDED
+'''
+          new = '''          operator_attest(){
+            local gate="$1" action="$2" extra="${3:-}" count
+            count="$(q "SELECT COUNT(*) FROM \\"EngageSecurityAuditEvent\\" WHERE \\"workspaceId\\"='${WORKSPACE_ID}' AND \\"action\\"='${action}' AND \\"outcome\\"='VERIFIED' AND COALESCE(\\"entityType\\",'')='CONTROLLED_LAUNCH_GOVERNANCE' AND COALESCE(\\"entityId\\",'')='${EXPECTED_LIVE_SHA}' AND COALESCE(\\"reasonCode\\",'')='OPERATOR_VERIFIED_EXACT_SHA' AND COALESCE(\\"actorId\\",'')<>'' AND COALESCE(\\"requestId\\",'')<>'' AND COALESCE(\\"metadata\\"->>'liveSha','')='${EXPECTED_LIVE_SHA}' AND COALESCE(\\"metadata\\"->>'proofRef','')<>'' AND COALESCE(\\"metadata\\"->>'verifiedAt','')<>'' ${extra}")"
+            [[ "$count" -gt 0 ]] && proven "$gate" || unknown "$gate"
+          }
+          machine_attest(){
+            local gate="$1" action="$2" extra="${3:-}" count
+            count="$(q "SELECT COUNT(*) FROM \\"EngageSecurityAuditEvent\\" WHERE \\"workspaceId\\"='${WORKSPACE_ID}' AND \\"action\\"='${action}' AND \\"outcome\\"='VERIFIED' AND COALESCE(\\"entityType\\",'')='CONTROLLED_LAUNCH_GOVERNANCE' AND COALESCE(\\"entityId\\",'')='${EXPECTED_LIVE_SHA}' AND COALESCE(\\"reasonCode\\",'')='MACHINE_VERIFIED_EXACT_SHA' AND \\"actorId\\" IS NULL AND COALESCE(\\"requestId\\",'')<>'' AND COALESCE(\\"metadata\\"->>'liveSha','')='${EXPECTED_LIVE_SHA}' ${extra}")"
+            [[ "$count" -gt 0 ]] && proven "$gate" || unknown "$gate"
+          }
+          operator_attest CRITICAL_INCIDENTS PHASE17_CRITICAL_INCIDENT_REVIEW "AND COALESCE(\\"metadata\\"->>'unresolvedCriticalIncidents','')='0'"
+          operator_attest DUPLICATE_SENDS PHASE17_DUPLICATE_SEND_REVIEW "AND COALESCE(\\"metadata\\"->>'unexplainedDuplicateSends','')='0'"
+          operator_attest ROLLBACK_TESTED PHASE17_ROLLBACK_REHEARSAL "AND COALESCE(\\"metadata\\"->>'result','')='PASS'"
+          operator_attest MONITORING_ACTIVE PHASE17_MONITORING_ACTIVE "AND COALESCE(\\"metadata\\"->>'monitoringStatus','')='ACTIVE'"
+          machine_attest POLICY_VERIFIED PHASE17_POLICY_VERIFIED "AND COALESCE(\\"metadata\\"->>'source','')='github-actions-phase17-stage2-machine-evidence' AND COALESCE(\\"metadata\\"->>'policyRunId','')<>'' AND COALESCE(\\"metadata\\"->>'policyCommitSha','')='${EXPECTED_LIVE_SHA}' AND COALESCE(\\"metadata\\"->'checks','[]'::jsonb) @> '[\\"typecheck\\",\\"phase17-controlled-launch\\",\\"phase17-production-readiness\\",\\"stage2-governance-evidence\\",\\"stage2-machine-evidence-policy\\"]'::jsonb"
+          operator_attest SCOPE_APPROVED PHASE17_STAGE2_SCOPE_APPROVED "AND COALESCE(\\"metadata\\"->>'candidateId','')='${CANDIDATE_ID}' AND COALESCE(\\"metadata\\"->>'decision','')='APPROVED'"
+          operator_attest AUTHENTICATED_SMOKE PHASE17_AUTHENTICATED_SMOKE "AND COALESCE(\\"metadata\\"->>'result','')='PASS' AND COALESCE(\\"metadata\\"->>'authenticated','')='true' AND COALESCE(\\"metadata\\"->>'readOnly','')='true' AND COALESCE(\\"metadata\\"->>'externalWritesAttempted','')='false'"
+          operator_attest SUPPORT_RUNBOOK_ACTIVE PHASE17_SUPPORT_RUNBOOK_ACTIVE "AND COALESCE(\\"metadata\\"->>'runbookStatus','')='ACTIVE'"
+          operator_attest OBSERVATION_WINDOW_COMPLETE PHASE17_OBSERVATION_WINDOW_COMPLETE "AND COALESCE(\\"metadata\\"->>'complete','')='true' AND COALESCE(\\"metadata\\"->>'windowStartedAt','')<>'' AND COALESCE(\\"metadata\\"->>'windowEndedAt','')<>''"
+          machine_attest PRODUCTION_EVIDENCE_RECORDED PHASE17_PRODUCTION_EVIDENCE_RECORDED "AND COALESCE(\\"metadata\\"->>'source','')='github-actions-production-batch1-plus-postdeploy-proof' AND COALESCE(\\"metadata\\"->>'productionRunId','')<>'' AND COALESCE(\\"metadata\\"->>'productionRunNumber','')<>'' AND COALESCE(\\"metadata\\"->>'productionWorkflowConclusion','')='success' AND COALESCE(\\"metadata\\"->>'exactLiveShaVerified','')='true' AND COALESCE(\\"metadata\\"->>'trackedWorktreeClean','')='true' AND COALESCE(\\"metadata\\"->>'processHealthVerified','')='true' AND COALESCE(\\"metadata\\"->>'loginSmokeVerified','')='true'"
+'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected exactly one old governance block, found {text.count(old)}')
+          updated = text.replace(old, new)
+          path.write_text(updated)
+      - name: Validate exact diff
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git diff --check
+          changed="$(git diff --name-only)"
+          test "$changed" = ".github/workflows/whatsapp-agent-phase17-stage2-governance-v15.yml"
+          grep -F 'OPERATOR_VERIFIED_EXACT_SHA' .github/workflows/whatsapp-agent-phase17-stage2-governance-v15.yml >/dev/null
+          grep -F 'MACHINE_VERIFIED_EXACT_SHA' .github/workflows/whatsapp-agent-phase17-stage2-governance-v15.yml >/dev/null
+          grep -F 'stage2-machine-evidence-policy' .github/workflows/whatsapp-agent-phase17-stage2-governance-v15.yml >/dev/null
+      - name: Commit hardened audit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/workflows/whatsapp-agent-phase17-stage2-governance-v15.yml
+          git commit -m 'fix(phase17): align governance audit with evidence provenance'
+          git push origin HEAD:phase17-stage2-governance-v15-20260913
