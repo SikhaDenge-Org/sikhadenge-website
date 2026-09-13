@@ -1,5 +1,6 @@
-/* Page 01 v6 — approved image is a real IMG element on the LEFT only.
- * The RIGHT authentication panel is intentionally not overridden here.
+/*
+ * Page 01 V9 — permanent HQ LEFT artwork.
+ * RIGHT authentication panel intentionally untouched.
  */
 
 .page01-login-asset-root {
@@ -12,8 +13,15 @@
   min-width: 0 !important;
   padding: 0 !important;
   overflow: hidden !important;
-  background: #041334 !important;
   isolation: isolate !important;
+
+  background:
+    radial-gradient(
+      circle at 50% 45%,
+      #06205a 0%,
+      #031437 58%,
+      #020d27 100%
+    ) !important;
 }
 
 .page01-login-asset-root .split01__hero--approved-image::before,
@@ -22,80 +30,67 @@
   content: none !important;
 }
 
+/*
+ * Approved artwork intentionally runs at 94%.
+ * This prevents the square source from being zoomed/cropped.
+ */
 .page01-login-asset-root .split01__hero-approved-image {
   position: absolute !important;
   z-index: 1 !important;
-  inset: 0 !important;
+
+  width: 94% !important;
+  height: 94% !important;
+
+  top: 3% !important;
+  left: 3% !important;
+  right: auto !important;
+  bottom: auto !important;
+
   display: block !important;
-  width: 100% !important;
-  height: 100% !important;
   max-width: none !important;
   max-height: none !important;
-  object-fit: fill !important;
+
+  object-fit: contain !important;
   object-position: center center !important;
+
+  border-radius: 14px !important;
+
+  image-rendering: auto !important;
+  transform: none !important;
+
   pointer-events: none !important;
   user-select: none !important;
 }
 
-/* Exact Sikhadenge asset, overlaid above the generated artwork so the brand mark
- * is never AI-redrawn. */
+/* Safety: LEFT DOM logo must never duplicate the logo baked into artwork. */
 .page01-login-asset-root .split01__brand--approved-image {
-  position: absolute !important;
-  z-index: 3 !important;
-  top: 3.7% !important;
-  left: 6.2% !important;
-  right: auto !important;
-  bottom: auto !important;
-  width: 29.2% !important;
-  height: 10.3% !important;
-  min-width: 0 !important;
-  max-width: none !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: flex-start !important;
-  padding: 5px 10px !important;
-  overflow: hidden !important;
-  border: 1px solid rgba(255,255,255,.86) !important;
-  border-radius: 12px !important;
-  background: rgba(255,255,255,.97) !important;
-  box-shadow: 0 8px 24px rgba(0,13,51,.22) !important;
-  text-decoration: none !important;
-}
-
-.page01-login-asset-root .split01__brand--approved-image img {
-  display: block !important;
-  opacity: 1 !important;
-  width: 100% !important;
-  height: 100% !important;
-  max-width: 100% !important;
-  max-height: none !important;
-  object-fit: contain !important;
-  object-position: left center !important;
+  display: none !important;
 }
 
 @media (max-width: 900px) {
   .page01-login-asset-root .split01__hero--approved-image {
     width: 100% !important;
-    min-height: 0 !important;
     height: auto !important;
-    aspect-ratio: 962 / 749 !important;
+    min-height: 0 !important;
+    aspect-ratio: 1 / 1 !important;
     padding: 0 !important;
   }
 
-  .page01-login-asset-root .split01__brand--approved-image {
-    position: absolute !important;
-    top: 3.7% !important;
-    left: 6.2% !important;
-    width: 29.2% !important;
-    height: 10.3% !important;
-    padding: 4px 8px !important;
-    border-radius: 10px !important;
+  .page01-login-asset-root .split01__hero-approved-image {
+    width: 94% !important;
+    height: 94% !important;
+    top: 3% !important;
+    left: 3% !important;
+    object-fit: contain !important;
   }
 }
 
 @media (max-width: 620px) {
-  .page01-login-asset-root .split01__brand--approved-image {
-    padding: 3px 6px !important;
-    border-radius: 8px !important;
+  .page01-login-asset-root .split01__hero-approved-image {
+    width: 96% !important;
+    height: 96% !important;
+    top: 2% !important;
+    left: 2% !important;
+    border-radius: 10px !important;
   }
 }

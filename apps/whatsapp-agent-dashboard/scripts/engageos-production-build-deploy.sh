@@ -60,30 +60,79 @@ test -f "$STAGE_APP/.env"
 test -s "$STAGE_APP/public/sikhadenge-header-safe-320.png"
 test "$(git -C "$STAGE_APP" hash-object "$STAGE_APP/public/sikhadenge-header-safe-320.png")" = "473006e2913e828fe70f7eab869af8a29327295d"
 
-# Page 01 uses a validated inline WebP reconstructed from the five committed
-# TypeScript chunks. This avoids serving previously corrupted binary uploads.
+# Page 01 V9 uses the committed original HQ PNG.
+# Validate exact bytes, PNG structure, dimensions and SHA-256 before building.
 node - "$STAGE_APP" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
+
 const app = process.argv[2];
-const chunks = [];
-for (let index = 0; index < 5; index += 1) {
-  const file = path.join(app, 'app', 'login', `page01HeroChunk${index}.ts`);
-  const source = fs.readFileSync(file, 'utf8');
-  const match = source.match(/=\s*"([A-Za-z0-9+/=]+)";/);
-  if (!match) throw new Error(`invalid Page 01 hero chunk: ${file}`);
-  chunks.push(match[1]);
+
+const heroPath = path.join(
+  app,
+  'public',
+  'page01-left-hq-v9.png'
+);
+
+const hero = fs.readFileSync(heroPath);
+
+if (hero.length !== 1809804) {
+  throw new Error(
+    `unexpected Page 01 HQ PNG byte length: ${hero.length}`
+  );
 }
-const base64 = chunks.join('');
-if (base64.length !== 33504) throw new Error(`unexpected Page 01 hero base64 length: ${base64.length}`);
-const bytes = Buffer.from(base64, 'base64');
-if (bytes.length !== 25128) throw new Error(`unexpected Page 01 hero byte length: ${bytes.length}`);
-if (bytes.subarray(0, 4).toString('ascii') !== 'RIFF') throw new Error('Page 01 hero is not RIFF');
-if (bytes.subarray(8, 12).toString('ascii') !== 'WEBP') throw new Error('Page 01 hero is not WEBP');
-if (bytes.readUInt32LE(4) + 8 !== bytes.length) throw new Error('Page 01 hero RIFF size mismatch');
-const logo = fs.readFileSync(path.join(app, 'public', 'sikhadenge-header-safe-320.png'));
-if (logo.length < 1000 || logo.subarray(1, 4).toString('ascii') !== 'PNG') throw new Error('canonical SikhaDenge logo is not a valid PNG');
-console.log(`PASS: PAGE01_VALIDATED_INLINE_ASSET_GATE hero_bytes=${bytes.length} base64=${base64.length} logo_bytes=${logo.length}`);
+
+if (
+  hero.subarray(0, 8).toString('hex') !==
+  '89504e470d0a1a0a'
+) {
+  throw new Error('Page 01 HQ asset is not PNG');
+}
+
+const width = hero.readUInt32BE(16);
+const height = hero.readUInt32BE(20);
+
+if (width !== 1254 || height !== 1254) {
+  throw new Error(
+    `unexpected Page 01 HQ dimensions: ${width}x${height}`
+  );
+}
+
+const digest = crypto
+  .createHash('sha256')
+  .update(hero)
+  .digest('hex');
+
+if (
+  digest !==
+  'e630d1c3d41fea7199efcc0c6300505690f0cecde4d8fe25763a36eda8a2155e'
+) {
+  throw new Error(
+    `unexpected Page 01 HQ SHA-256: ${digest}`
+  );
+}
+
+const logo = fs.readFileSync(
+  path.join(
+    app,
+    'public',
+    'sikhadenge-header-safe-320.png'
+  )
+);
+
+if (
+  logo.length < 1000 ||
+  logo.subarray(1, 4).toString('ascii') !== 'PNG'
+) {
+  throw new Error(
+    'canonical SikhaDenge logo is not a valid PNG'
+  );
+}
+
+console.log(
+  `PASS: PAGE01_HQ_V9_ASSET_GATE bytes=${hero.length} dimensions=${width}x${height} sha256=${digest}`
+);
 NODE
 
 cd "$STAGE_APP"
@@ -145,11 +194,12 @@ test "$(git -C "$LIVE_APP" rev-parse HEAD)" = "$RELEASE_SHA"
 if [[ "$RUNTIME_APP" != "$LIVE_APP" ]]; then
   install -d -m 755 "$RUNTIME_APP/public"
   install -m 644 "$LIVE_APP/public/sikhadenge-header-safe-320.png" "$RUNTIME_APP/public/sikhadenge-header-safe-320.png"
+  install -m 644 "$LIVE_APP/public/page01-left-hq-v9.png" "$RUNTIME_APP/public/page01-left-hq-v9.png"
   if [[ -f "$LIVE_APP/public/sikhadenge-official-logo.png" ]]; then
     install -m 644 "$LIVE_APP/public/sikhadenge-official-logo.png" "$RUNTIME_APP/public/sikhadenge-official-logo.png"
   fi
 fi
-printf 'PASS: PAGE01_CANONICAL_PUBLIC_LOGO_SYNCED\n'
+printf 'PASS: PAGE01_HQ_V9_PUBLIC_ASSETS_SYNCED\n'
 
 cd "$LIVE_APP"
 npx prisma generate

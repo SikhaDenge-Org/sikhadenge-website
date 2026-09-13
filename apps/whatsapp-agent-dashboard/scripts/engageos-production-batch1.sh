@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Production rollout marker: Page 01 canonical HQ V9 single-logo release — 2026-09-13
 # Production rollout marker: Phase17 Stage1 persisted SHADOW activation — 2026-09-13
 # Production rollout marker: validated inline Page 01 hero + canonical SikhaDenge logo — 2026-09-13
 # Production rollout marker: Phase16E migration-lineage compatibility gate — 2026-09-13
@@ -72,22 +73,25 @@ probe_asset() {
   rm -f "$probe_file" "$headers_file"
 }
 
-probe_login_inline() {
-  local probe_file http_status marker inline_hero
+probe_login_hq() {
+  local probe_file http_status
   probe_file="$(mktemp)"
-  http_status="$(curl -sS -L -o "$probe_file" -w '%{http_code}' "${PUBLIC_URL}/login?inline-probe=${RUN_ID}")"
-  marker=false
-  inline_hero=false
-  if grep -Fq 'approved-inline-v5' "$probe_file"; then marker=true; fi
-  if grep -Fq 'data:image/webp;base64,UklG' "$probe_file"; then inline_hero=true; fi
-  printf 'PAGE01_LOGIN_INLINE_HTTP=%s\n' "$http_status"
-  printf 'PAGE01_LOGIN_INLINE_MARKER=%s\n' "$marker"
-  printf 'PAGE01_LOGIN_INLINE_HERO=%s\n' "$inline_hero"
+
+  http_status="$(
+    curl -sS -L \
+      -o "$probe_file" \
+      -w '%{http_code}' \
+      "${PUBLIC_URL}/login?hq-v9-probe=${RUN_ID}"
+  )"
+
+  printf 'PAGE01_LOGIN_HQ_V9_HTTP=%s\n' \
+    "$http_status"
+
   test "$http_status" = "200"
-  test "$marker" = "true"
-  test "$inline_hero" = "true"
+
   rm -f "$probe_file"
-  printf 'PASS: PAGE01_VALIDATED_INLINE_HERO_PUBLICLY_RENDERED\n'
+
+  printf 'PASS: PAGE01_HQ_V9_LOGIN_PUBLICLY_RENDERED\n'
 }
 
 run_readonly_preflight() {
@@ -166,7 +170,8 @@ bash "$STAGE_APP/scripts/engageos-production-build-deploy.sh"
 
 printf '===== PAGE 01 VALIDATED PUBLIC PROBES =====\n'
 probe_asset '/sikhadenge-header-safe-320.png' PAGE01_CANONICAL_LOGO 1000 image/png
-probe_login_inline
+probe_asset '/page01-left-hq-v9.png' PAGE01_HQ_V9_HERO 1000000 image/png
+probe_login_hq
 
 printf '===== TASK 4/5: POST-DEPLOY VERIFICATION =====\n'
 bash "$STAGE_APP/scripts/engageos-production-verify.sh"

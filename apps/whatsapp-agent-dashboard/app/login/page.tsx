@@ -2,18 +2,12 @@ import { redirect } from "next/navigation";
 
 import LoginForm from "../../components/auth/LoginForm";
 import { getCurrentDashboardUser } from "../../lib/auth/session";
-import page01HeroChunk0 from "./page01HeroChunk0";
-import page01HeroChunk1 from "./page01HeroChunk1";
-import page01HeroChunk2 from "./page01HeroChunk2";
-import page01HeroChunk3 from "./page01HeroChunk3";
-import page01HeroChunk4 from "./page01HeroChunk4";
 import "../login-page01-code.css";
 import "../login-page01-left-image.css";
 
 export const dynamic = "force-dynamic";
 
 const BRAND_LOGO = "/sikhadenge-header-safe-320.png";
-const PAGE01_HERO_DATA_URI = `data:image/webp;base64,${page01HeroChunk0}${page01HeroChunk1}${page01HeroChunk2}${page01HeroChunk3}${page01HeroChunk4}`;
 
 function ShieldIcon() {
   return (
@@ -32,21 +26,16 @@ export default async function LoginPage() {
     <main
       className="split01"
       data-page="login-page01-split-v1"
-      data-rendering="left-inline-image-v6"
-      data-page01-hero="approved-inline-v6"
-      data-page01-compat="approved-inline-v5"
+      data-rendering="left-hq-image-v9"
+      data-page01-hero="approved-hq-v9"
     >
       <section className="split01__hero split01__hero--approved-image" aria-label="SikhaDenge WhatsApp AI Agent workspace">
         <img
           className="split01__hero-approved-image"
-          src={PAGE01_HERO_DATA_URI}
+          src="/page01-left-hq-v9.png?v=9"
           alt=""
           aria-hidden="true"
         />
-
-        <a className="split01__brand split01__brand--approved-image" href="https://sikhadenge.in/" aria-label="SikhaDenge home">
-          <img src={BRAND_LOGO} alt="SikhaDenge" width={320} height={80} />
-        </a>
       </section>
 
       <section className="split01__signin" aria-labelledby="login-title">
