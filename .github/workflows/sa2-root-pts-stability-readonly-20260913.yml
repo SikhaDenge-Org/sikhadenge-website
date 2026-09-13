@@ -1,0 +1,57 @@
+name: SA2 Root PTS Stability Readonly 20260913
+
+on:
+  push:
+    branches:
+      - ops/wa-restart-forensics-20260913
+    paths:
+      - '.github/workflows/sa2-root-pts-stability-readonly-20260913.yml'
+
+permissions:
+  contents: read
+
+env:
+  SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+  SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+  SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+  SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+  SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    environment: whatsapp-agent-production
+    timeout-minutes: 8
+    steps:
+      - name: Configure pinned SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SSH_PORT="${SSH_PORT:-22}"; echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
+          install -d -m 700 "$HOME/.ssh"; KEY="$HOME/.ssh/prod"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"; fi
+          chmod 600 "$KEY"; read -r _ kt km _ <<< "$SSH_HOST_KEY"; test "$kt" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"; chmod 600 "$HOME/.ssh/known_hosts"
+      - name: Read-only classify root pts stability
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          SRC=/var/www/sikhadenge-whatsapp-agent/source
+          echo '=== ROOT PTS STABILITY CLASSIFICATION ==='; echo 'MODE=READ_ONLY'; echo 'MUTATION=NONE'
+          ptslist(){ ps -eo pid=,ppid=,user=,tty=,stat=,etimes=,args= | awk '/sshd: root@pts\/[0-9]+/ {print}' | sed -E 's/[0-9]{1,3}(\.[0-9]{1,3}){3}/IP_REDACTED/g'; }
+          echo '--- WHO ---'; who -u | sed -E 's/[0-9]{1,3}(\.[0-9]{1,3}){3}/IP_REDACTED/g' || true
+          echo '--- ROOT PTS SSHD ---'; ptslist
+          echo '--- ROOT PTS PROCESS TREES ---'
+          for p in $(ps -eo pid=,args= | awk '/sshd: root@pts\/[0-9]+/ {print $1}'); do echo "PTS_SSHD_PID=$p"; pstree -aps "$p" 2>/dev/null | sed -E 's/[0-9]{1,3}(\.[0-9]{1,3}){3}/IP_REDACTED/g' || true; done
+          echo '--- ROOT TTY PROCESSES ---'; ps -eo pid=,ppid=,tty=,stat=,etimes=,time=,args= | awk '$3 ~ /^pts\// {print}' | sed -E 's/[0-9]{1,3}(\.[0-9]{1,3}){3}/IP_REDACTED/g'
+          base_pts="$(ps -eo pid=,args= | awk '/sshd: root@pts\/[0-9]+/ {print $1}' | sort -n | paste -sd, -)"
+          base_wa="$(pm2 jlist|node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{let p=JSON.parse(b).find(x=>x.name==="sikhadenge-whatsapp-agent");console.log([p.pid,p.pm2_env?.restart_time,p.pm2_env?.pm_uptime].join("|"))})')"
+          base_src="$( { git -C "$SRC" rev-parse HEAD 2>/dev/null||true;git -C "$SRC" status --porcelain=v1 --untracked-files=no -- apps/whatsapp-agent-dashboard 2>/dev/null||true;git -C "$SRC" diff --binary -- apps/whatsapp-agent-dashboard 2>/dev/null||true;}|sha256sum|awk '{print $1}')"
+          base_ak="$(sha256sum /root/.ssh/authorized_keys|awk '{print $1}')"
+          echo "BASE_PTS_PIDS=${base_pts:-NONE}"; echo "BASE_WA=$base_wa"; echo "BASE_SRC=$base_src"; echo "BASE_AK=$base_ak"
+          bad=0
+          for i in $(seq 1 30); do sleep 2; p="$(ps -eo pid=,args= | awk '/sshd: root@pts\/[0-9]+/ {print $1}' | sort -n | paste -sd, -)"; w="$(pm2 jlist|node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{let p=JSON.parse(b).find(x=>x.name==="sikhadenge-whatsapp-agent");console.log([p.pid,p.pm2_env?.restart_time,p.pm2_env?.pm_uptime].join("|"))})')"; s="$( { git -C "$SRC" rev-parse HEAD 2>/dev/null||true;git -C "$SRC" status --porcelain=v1 --untracked-files=no -- apps/whatsapp-agent-dashboard 2>/dev/null||true;git -C "$SRC" diff --binary -- apps/whatsapp-agent-dashboard 2>/dev/null||true;}|sha256sum|awk '{print $1}')"; a="$(sha256sum /root/.ssh/authorized_keys|awk '{print $1}')"; d="$(ps -eo args= | grep -E '[p]npm (exec prisma generate|run build)|[n]ext build|[p]m2 (restart|reload|stop|start).*sikhadenge-whatsapp-agent' || true)"; if [ "$p" != "$base_pts" ]; then echo "PTS_SET_CHANGED_AT=${i}x2s|${base_pts:-NONE}|${p:-NONE}";bad=1;break;fi; if [ "$w" != "$base_wa" ];then echo "WA_CHANGED_AT=${i}x2s|$base_wa|$w";bad=1;break;fi;if [ "$s" != "$base_src" ];then echo "SOURCE_CHANGED_AT=${i}x2s";bad=1;break;fi;if [ "$a" != "$base_ak" ];then echo "AUTH_KEYS_CHANGED_AT=${i}x2s";bad=1;break;fi;if [ -n "$d" ];then echo "DEPLOY_PROCESS_AT=${i}x2s|$d";bad=1;break;fi;done
+          echo "STABILITY_ANOMALY=$bad"; echo "FINAL_PTS_PIDS=$(ps -eo pid=,args= | awk '/sshd: root@pts\/[0-9]+/ {print $1}' | sort -n | paste -sd, -)"; echo 'ROOT_PTS_STABILITY_CLASSIFICATION=DONE'
+          REMOTE
