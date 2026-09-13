@@ -1,0 +1,117 @@
+name: WhatsApp Agent Phase17 Stage2 Known-Dirty Readonly Inventory
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-phase17-stage2-known-dirty-readonly-inventory.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  inventory-stage2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_LIVE_SHA: 2b3efe35b8920082cc94dce989d1847842fb8825
+
+    steps:
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "${SSH_PORT:-}" ]]; then printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "${SSH_PORT:-22}" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Read-only Stage2 inventory under exact known drift
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          LIVE_APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ENV_FILE="$LIVE_APP/.env"
+          WORKSPACE_ID=engagews_default
+          test "$(id -u)" = "0"
+          test "$(git -C "$LIVE_APP" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
+          repo_root="$(git -C "$LIVE_APP" rev-parse --show-toplevel)"
+          expected_paths="$(printf '%s\n' \
+            apps/whatsapp-agent-dashboard/app/login-page01-left-image.css \
+            apps/whatsapp-agent-dashboard/app/login/page.tsx \
+            apps/whatsapp-agent-dashboard/next-env.d.ts | LC_ALL=C sort)"
+          actual_paths="$(git -C "$repo_root" diff HEAD --name-only --no-renames | LC_ALL=C sort)"
+          test "$actual_paths" = "$expected_paths"
+          printf 'PASS: EXACT_KNOWN_TRACKED_DRIFT_CONFIRMED count=3\n'
+          test -f "$ENV_FILE"
+          test -d "$LIVE_APP/node_modules"
+
+          DATABASE_URL="$(node - "$ENV_FILE" <<'NODE'
+          const fs = require('node:fs');
+          const file = process.argv[2];
+          const text = fs.readFileSync(file, 'utf8');
+          for (const raw of text.split(/\r?\n/)) {
+            let line = raw.trim();
+            if (!line || line.startsWith('#')) continue;
+            if (line.startsWith('export ')) line = line.slice(7).trim();
+            const eq = line.indexOf('=');
+            if (eq < 1 || line.slice(0, eq).trim() !== 'DATABASE_URL') continue;
+            let value = line.slice(eq + 1).trim();
+            if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) value = value.slice(1, -1);
+            process.stdout.write(value); process.exit(0);
+          }
+          process.exit(1);
+          NODE
+          )"
+          export DATABASE_URL NODE_ENV=production WORKSPACE_ID EXPECTED_LIVE_SHA
+          cd "$LIVE_APP"
+
+          node <<'NODE'
+          const { PrismaClient } = require('@prisma/client');
+          const prisma = new PrismaClient();
+          const workspaceId = process.env.WORKSPACE_ID;
+          async function main() {
+            const workspace = await prisma.engageWorkspace.findUnique({ where: { id: workspaceId }, select: { id: true, slug: true, name: true, isActive: true } });
+            if (!workspace?.isActive) throw new Error('Active default workspace missing');
+            const state = await prisma.engageControlledLaunchState.findUnique({ where: { workspaceId } });
+            if (!state) throw new Error('Controlled launch state missing');
+            const history = await prisma.engageControlledLaunchTransition.findMany({ where: { workspaceId }, select: { id:true, fromStage:true, toStage:true, fromMode:true, toMode:true, resultingVersion:true, createdAt:true, reason:true }, orderBy: { createdAt: 'asc' } });
+            const connections = await prisma.engageChannelConnection.findMany({ where: { workspaceId }, select: { id:true, channel:true, externalAccountId:true, displayName:true, status:true, capabilities:true, lastSyncAt:true, createdAt:true, updatedAt:true, _count:{ select:{ credentials:true } } }, orderBy:[{channel:'asc'},{createdAt:'asc'}] });
+            const flags = await prisma.engageFeatureFlag.findMany({ where: { workspaceId }, select:{ key:true, enabled:true }, orderBy:{key:'asc'} });
+            const killSwitches = await prisma.engageKillSwitch.findMany({ where: { workspaceId }, select:{ key:true, active:true, reason:true, updatedAt:true }, orderBy:{key:'asc'} });
+            const stage1At = history[0]?.createdAt ?? null;
+            console.log(`AUDIT_WORKSPACE=${workspace.id}`);
+            console.log(`AUDIT_STAGE=${state.stage}`);
+            console.log(`AUDIT_MODE=${state.mode}`);
+            console.log(`AUDIT_WRITE_POLICY=${state.writePolicy}`);
+            console.log(`AUDIT_EXTERNAL_WRITES_ALLOWED=${state.externalWritesAllowed}`);
+            console.log(`AUDIT_VERSION=${state.version}`);
+            console.log(`AUDIT_TRANSITION_COUNT=${history.length}`);
+            console.log(`AUDIT_STAGE1_ACTIVATED_AT=${stage1At ? stage1At.toISOString() : ''}`);
+            console.log(`AUDIT_STAGE1_AGE_SECONDS=${stage1At ? Math.max(0, Math.floor((Date.now()-stage1At.getTime())/1000)) : -1}`);
+            console.log(`AUDIT_CONNECTION_COUNT=${connections.length}`);
+            for (const c of connections) console.log(`CONNECTION id=${c.id} channel=${c.channel} status=${c.status} externalAccountId=${c.externalAccountId} displayName=${JSON.stringify(c.displayName)} credentialCount=${c._count.credentials} lastSyncAt=${c.lastSyncAt?.toISOString() ?? ''} createdAt=${c.createdAt.toISOString()} updatedAt=${c.updatedAt.toISOString()}`);
+            console.log(`AUDIT_ENABLED_FEATURE_FLAGS=${flags.filter(f=>f.enabled).length}`);
+            for (const f of flags) console.log(`FEATURE_FLAG key=${f.key} enabled=${f.enabled}`);
+            console.log(`AUDIT_KILL_SWITCH_COUNT=${killSwitches.length}`);
+            for (const k of killSwitches) console.log(`KILL_SWITCH key=${k.key} active=${k.active} updatedAt=${k.updatedAt.toISOString()}`);
+            console.log('PASS: PHASE17_STAGE2_KNOWN_DIRTY_READONLY_INVENTORY_COMPLETE');
+          }
+          main().catch(e=>{ console.error(e instanceof Error ? e.message : String(e)); process.exitCode=1; }).finally(()=>prisma.$disconnect());
+          NODE
+          REMOTE
