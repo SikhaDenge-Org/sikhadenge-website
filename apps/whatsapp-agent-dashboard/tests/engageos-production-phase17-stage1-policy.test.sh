@@ -90,8 +90,15 @@ test "$rollback_evidence_line" -lt "$bootstrap_line"
 test "$bootstrap_line" -lt "$state_verify_line"
 
 # Existing read-only readiness must run after bootstrap to reconfirm SHA/migrations/flags/PM2/login.
+# It must execute from LIVE_APP because STAGE_APP is intentionally mutated by isolated build tooling.
 readiness_line="$(grep -nF 'engageos-phase17-production-readiness.sh' "$batch" | tail -n1 | cut -d: -f1)"
-test "$bootstrap_line" -lt "$readiness_line"
+readiness_worktree_line="$(grep -nF 'PHASE17_STAGE1_READINESS_WORKTREE=%s' "$batch" | tail -n1 | cut -d: -f1)"
+live_cd_line="$(grep -nF 'cd "$LIVE_APP"' "$batch" | tail -n1 | cut -d: -f1)"
+test -n "$readiness_worktree_line"
+test -n "$live_cd_line"
+test "$bootstrap_line" -lt "$readiness_worktree_line"
+test "$readiness_worktree_line" -lt "$live_cd_line"
+test "$live_cd_line" -lt "$readiness_line"
 test "$readiness_line" -lt "$state_verify_line"
 
 printf 'EngageOS Phase17 Stage1 production activation policy: PASS\n'

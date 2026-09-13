@@ -188,11 +188,18 @@ ENV_FILE="$ENV_FILE" \
   bash "$STAGE_APP/scripts/engageos-production-phase17-stage1-bootstrap.sh"
 
 printf '===== PHASE17 STAGE1: READ-ONLY READINESS RECHECK =====\n'
-EXPECTED_RELEASE_SHA="$RELEASE_SHA" \
-  ENV_FILE="$ENV_FILE" \
-  PM2_PROCESS_NAME="$PM2_PROCESS_NAME" \
-  CHECK_HTTP_URL="$PUBLIC_URL" \
-  bash "$STAGE_APP/scripts/engageos-phase17-production-readiness.sh"
+# The workflow intentionally runs the orchestrator from STAGE_APP. That staging
+# worktree can be modified by framework tooling during the isolated build, so the
+# final production cleanliness/SHA gate must execute from the activated LIVE_APP.
+printf 'PHASE17_STAGE1_READINESS_WORKTREE=%s\n' "$LIVE_APP"
+(
+  cd "$LIVE_APP"
+  EXPECTED_RELEASE_SHA="$RELEASE_SHA" \
+    ENV_FILE="$ENV_FILE" \
+    PM2_PROCESS_NAME="$PM2_PROCESS_NAME" \
+    CHECK_HTTP_URL="$PUBLIC_URL" \
+    bash "$STAGE_APP/scripts/engageos-phase17-production-readiness.sh"
+)
 
 printf '===== PHASE17 STAGE1: PERSISTED STATE VERIFICATION =====\n'
 ENV_FILE="$ENV_FILE" \
