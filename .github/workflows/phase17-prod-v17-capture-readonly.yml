@@ -1,4 +1,4 @@
-name: Phase17 Production V17 Capture Readonly
+name: Phase17 Production V17 Stable Capture Readonly
 
 on:
   push:
@@ -36,55 +36,82 @@ jobs:
           test "$key_type" = ssh-ed25519
           printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
-      - name: Capture exact V17 source bundle read-only
+
+      - name: Capture stable exact V17 source snapshot read-only
         shell: bash
         run: |
           set -Eeuo pipefail
-          mkdir -p capture/apps/whatsapp-agent-dashboard/app/login capture/apps/whatsapp-agent-dashboard/public
-          ssh -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' bash -s" <<'REMOTE' > capture/manifest.txt
+          mkdir -p capture
+          remote_manifest() {
+            ssh -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' bash -s" <<'REMOTE'
           set -Eeuo pipefail
-          A=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          cd /var/www/sikhadenge-whatsapp-agent/source
+          A=apps/whatsapp-agent-dashboard
           root="$(git -C "$A" rev-parse --show-toplevel)"
           test "$(git -C "$root" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
-          tracked=(
+          expected="$(printf '%s\n' \
+            apps/whatsapp-agent-dashboard/app/layout.tsx \
+            apps/whatsapp-agent-dashboard/app/login-page01-left-image.css \
+            apps/whatsapp-agent-dashboard/app/login/page.tsx \
+            apps/whatsapp-agent-dashboard/next-env.d.ts | LC_ALL=C sort)"
+          actual="$(git -C "$root" diff HEAD --name-only --no-renames | LC_ALL=C sort)"
+          test "$actual" = "$expected"
+          files=(
             apps/whatsapp-agent-dashboard/app/layout.tsx
             apps/whatsapp-agent-dashboard/app/login-page01-left-image.css
             apps/whatsapp-agent-dashboard/app/login/page.tsx
             apps/whatsapp-agent-dashboard/next-env.d.ts
-          )
-          untracked=(
             apps/whatsapp-agent-dashboard/app/login-right-panel-v16.css
             apps/whatsapp-agent-dashboard/public/page01-hero-desktop-v17.png
             apps/whatsapp-agent-dashboard/public/page01-hero-tablet-v17.png
             apps/whatsapp-agent-dashboard/public/page01-hero-ultrawide-v17.png
           )
-          actual="$(git -C "$root" diff HEAD --name-only --no-renames | LC_ALL=C sort)"
-          expected="$(printf '%s\n' "${tracked[@]}" | LC_ALL=C sort)"
-          test "$actual" = "$expected"
-          for path in "${untracked[@]}"; do test -f "$root/$path"; ! git -C "$root" cat-file -e "HEAD:$path" 2>/dev/null; done
-          printf 'FORMAT_VERSION=1\nLIVE_SHA=%s\n' "$EXPECTED_LIVE_SHA"
+          for path in "${files[@]}"; do test -f "$path"; done
+          for path in "${files[@]:4}"; do ! git -C "$root" cat-file -e "HEAD:$path" 2>/dev/null; done
+          printf 'LIVE_SHA=%s\n' "$EXPECTED_LIVE_SHA"
           printf 'NEXT_BUILD_ID='; cat "$A/.next/BUILD_ID"; printf '\n'
-          for path in "${tracked[@]}" "${untracked[@]}"; do
-            printf 'FILE path=%s size=%s sha256=%s mtime=%s tracked=%s\n' \
-              "$path" "$(stat -c '%s' "$root/$path")" "$(sha256sum "$root/$path" | awk '{print $1}')" "$(stat -c '%y' "$root/$path")" \
-              "$(git -C "$root" cat-file -e "HEAD:$path" 2>/dev/null && echo yes || echo no)"
-          done
-          printf 'TRACKED_DIFF_SHA256=%s\n' "$(git -C "$root" diff HEAD --binary -- "${tracked[@]}" | sha256sum | awk '{print $1}')"
+          stat -c 'NEXT_BUILD_ID_MTIME=%y' "$A/.next/BUILD_ID"
+          for path in "${files[@]}"; do printf '%s  %s\n' "$(sha256sum "$path" | awk '{print $1}')" "$path"; done
           REMOTE
-          base="${SSH_USER}@${SSH_HOST}:/var/www/sikhadenge-whatsapp-agent/source"
-          scp -q -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$base/apps/whatsapp-agent-dashboard/app/layout.tsx" capture/apps/whatsapp-agent-dashboard/app/layout.tsx
-          scp -q -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$base/apps/whatsapp-agent-dashboard/app/login-page01-left-image.css" capture/apps/whatsapp-agent-dashboard/app/login-page01-left-image.css
-          scp -q -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$base/apps/whatsapp-agent-dashboard/app/login/page.tsx" capture/apps/whatsapp-agent-dashboard/app/login/page.tsx
-          scp -q -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$base/apps/whatsapp-agent-dashboard/next-env.d.ts" capture/apps/whatsapp-agent-dashboard/next-env.d.ts
-          scp -q -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$base/apps/whatsapp-agent-dashboard/app/login-right-panel-v16.css" capture/apps/whatsapp-agent-dashboard/app/login-right-panel-v16.css
-          for f in page01-hero-desktop-v17.png page01-hero-tablet-v17.png page01-hero-ultrawide-v17.png; do
-            scp -q -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$base/apps/whatsapp-agent-dashboard/public/$f" "capture/apps/whatsapp-agent-dashboard/public/$f"
-          done
-          (cd capture && sha256sum apps/whatsapp-agent-dashboard/app/layout.tsx apps/whatsapp-agent-dashboard/app/login-page01-left-image.css apps/whatsapp-agent-dashboard/app/login/page.tsx apps/whatsapp-agent-dashboard/next-env.d.ts apps/whatsapp-agent-dashboard/app/login-right-panel-v16.css apps/whatsapp-agent-dashboard/public/page01-hero-desktop-v17.png apps/whatsapp-agent-dashboard/public/page01-hero-tablet-v17.png apps/whatsapp-agent-dashboard/public/page01-hero-ultrawide-v17.png) > capture/local-sha256.txt
-      - name: Upload exact V17 capture
+          }
+
+          remote_manifest > capture/pre-manifest.txt
+          ssh -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "cd /var/www/sikhadenge-whatsapp-agent/source && tar -cf - \
+            apps/whatsapp-agent-dashboard/app/layout.tsx \
+            apps/whatsapp-agent-dashboard/app/login-page01-left-image.css \
+            apps/whatsapp-agent-dashboard/app/login/page.tsx \
+            apps/whatsapp-agent-dashboard/next-env.d.ts \
+            apps/whatsapp-agent-dashboard/app/login-right-panel-v16.css \
+            apps/whatsapp-agent-dashboard/public/page01-hero-desktop-v17.png \
+            apps/whatsapp-agent-dashboard/public/page01-hero-tablet-v17.png \
+            apps/whatsapp-agent-dashboard/public/page01-hero-ultrawide-v17.png" | tar -xf - -C capture
+          remote_manifest > capture/post-manifest.txt
+          cmp -s capture/pre-manifest.txt capture/post-manifest.txt || { echo 'FAIL: LIVE_V17_CHANGED_DURING_CAPTURE'; diff -u capture/pre-manifest.txt capture/post-manifest.txt || true; exit 41; }
+
+          (cd capture && sha256sum \
+            apps/whatsapp-agent-dashboard/app/layout.tsx \
+            apps/whatsapp-agent-dashboard/app/login-page01-left-image.css \
+            apps/whatsapp-agent-dashboard/app/login/page.tsx \
+            apps/whatsapp-agent-dashboard/next-env.d.ts \
+            apps/whatsapp-agent-dashboard/app/login-right-panel-v16.css \
+            apps/whatsapp-agent-dashboard/public/page01-hero-desktop-v17.png \
+            apps/whatsapp-agent-dashboard/public/page01-hero-tablet-v17.png \
+            apps/whatsapp-agent-dashboard/public/page01-hero-ultrawide-v17.png) > capture/local-sha256.txt
+          tail -n 8 capture/post-manifest.txt > capture/remote-sha256.txt
+          cmp -s capture/local-sha256.txt capture/remote-sha256.txt || { echo 'FAIL: CAPTURE_HASH_MISMATCH'; diff -u capture/remote-sha256.txt capture/local-sha256.txt || true; exit 42; }
+
+          tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
+          http="$(curl -sS -L -o "$tmp" -w '%{http_code}' https://whatsapp.sikhadenge.in/login)"
+          test "$http" = 200
+          grep -q '20260913-211322' "$tmp"
+          grep -q 'page01-hero-v17-shell' "$tmp"
+          printf 'PUBLIC_LOGIN_HTTP=%s\nPUBLIC_V17_MARKERS=true\n' "$http" | tee capture/runtime-proof.txt
+          printf 'PASS: STABLE_EXACT_V17_CAPTURE\n'
+
+      - name: Upload stable exact V17 capture
         uses: actions/upload-artifact@v4
         with:
-          name: phase17-production-v17-exact-capture
+          name: phase17-production-v17-stable-capture-${{ github.run_id }}
           path: capture
           if-no-files-found: error
           retention-days: 14
