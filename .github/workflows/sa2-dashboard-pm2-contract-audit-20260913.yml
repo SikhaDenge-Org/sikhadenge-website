@@ -1,0 +1,56 @@
+name: SA2 Dashboard PM2 Contract Audit 20260913
+
+on:
+  push:
+    branches:
+      - ops/sa2-dashboard-runtime-preflight-20260913
+    paths:
+      - '.github/workflows/sa2-dashboard-pm2-contract-audit-20260913.yml'
+
+permissions:
+  contents: read
+
+env:
+  SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+  SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+  SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+  SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+  SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    environment: whatsapp-agent-production
+    timeout-minutes: 8
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SSH_PORT="${SSH_PORT:-22}"; echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
+          install -d -m 700 "$HOME/.ssh"; KEY="$HOME/.ssh/prod"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"; fi
+          chmod 600 "$KEY"; read -r _ kt km _ <<< "$SSH_HOST_KEY"; test "$kt" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"; chmod 600 "$HOME/.ssh/known_hosts"
+      - name: Inspect saved and current PM2 launch contracts read only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -u
+          APP='sikhadenge-dashboard-revenue'
+          echo 'MUTATION=NONE'
+          echo '--- CURRENT PM2 CONTRACT ---'
+          pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const p=JSON.parse(b).find(x=>x.name===process.argv[1]);if(!p)return;const e=p.pm2_env||{};console.log(JSON.stringify({pid:p.pid,status:e.status,cwd:e.pm_cwd,pm_exec_path:e.pm_exec_path,exec_interpreter:e.exec_interpreter,args:e.args,script:e.script,exec_mode:e.exec_mode,restart:e.restart_time,unstable:e.unstable_restarts},null,2))})' "$APP"
+          echo '--- SAVED PM2 DUMP CONTRACT ---'
+          DUMP="$HOME/.pm2/dump.pm2"
+          if [ -f "$DUMP" ]; then
+            node - "$DUMP" "$APP" <<'NODE'
+          const fs=require('fs');const [f,n]=process.argv.slice(2);const a=JSON.parse(fs.readFileSync(f,'utf8'));const p=a.find(x=>x.name===n);if(!p){console.log('DUMP_ENTRY=NOT_FOUND');process.exit(0)}
+          console.log(JSON.stringify({name:p.name,cwd:p.pm_cwd,pm_exec_path:p.pm_exec_path,exec_interpreter:p.exec_interpreter,args:p.args,script:p.script,exec_mode:p.exec_mode,node_args:p.node_args,namespace:p.namespace},null,2));
+          NODE
+          else echo 'DUMP_FILE=MISSING'; fi
+          echo '--- PACKAGE START SCRIPT ---'
+          node -e 'const p=require(process.argv[1]);console.log("START_SCRIPT="+(p.scripts&&p.scripts.start||""))' /opt/sikhadenge-dashboard-releases/sa1-20260911-221949-d60ab5a4/package.json
+          echo "HTTP_3400=$(curl --max-time 3 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3400/ 2>/dev/null || true)"
+          REMOTE
