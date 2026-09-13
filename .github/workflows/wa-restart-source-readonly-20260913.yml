@@ -21,7 +21,7 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     environment: whatsapp-agent-production
-    timeout-minutes: 11
+    timeout-minutes: 5
     steps:
       - name: Configure pinned SSH
         shell: bash
@@ -42,7 +42,7 @@ jobs:
           printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
 
-      - name: Focused read-only provider-session attribution
+      - name: Snapshot suspected provider root session safely
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -57,40 +57,9 @@ jobs:
               -e 's#((TOKEN|SECRET|PASSWORD|PASS|API_KEY|ACCESS_KEY|DATABASE_URL)[A-Za-z0-9_]*[=:][[:space:]]*)[^[:space:]]+#\1REDACTED#gI'
           }
 
-          wa_state() {
-            pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const p=JSON.parse(b).find(x=>x.name==="sikhadenge-whatsapp-agent");if(!p)process.exit(2);const e=p.pm2_env||{};console.log([p.pid,e.status,e.restart_time,e.unstable_restarts,e.pm_uptime,e.pm_cwd].join("|"));});'
-          }
-
-          ak_count() {
-            grep -Ev '^[[:space:]]*(#|$)' /root/.ssh/authorized_keys 2>/dev/null | wc -l
-          }
-
-          is_descendant_of() {
-            local p="$1" ancestor="$2" i=0
-            while [[ "$p" =~ ^[0-9]+$ ]] && (( p > 1 )) && (( i < 16 )); do
-              [[ "$p" == "$ancestor" ]] && return 0
-              p="$(awk '{print $4}' "/proc/$p/stat" 2>/dev/null || echo 0)"
-              i=$((i+1))
-            done
-            return 1
-          }
-
-          print_chain() {
-            local p="$1" i=0
-            while [[ "$p" =~ ^[0-9]+$ ]] && (( p > 1 )) && (( i < 12 )); do
-              ps -o pid=,ppid=,user=,lstart=,etimes=,args= -p "$p" 2>/dev/null | redact || true
-              p="$(awk '{print $4}' "/proc/$p/stat" 2>/dev/null || echo 0)"
-              i=$((i+1))
-            done
-          }
-
-          newest_root_pts_sshd() {
-            ps -eo pid=,etimes=,args= 2>/dev/null | awk '/sshd: root@pts\/[0-9]+/ {if(min=="" || $2<min){min=$2;pid=$1}} END{if(pid)print pid}'
-          }
-
-          echo '=================================================='
-          echo '=== FOCUSED PROVIDER SESSION ATTRIBUTION CAPTURE ==='
-          echo '=================================================='
+          echo '========================================='
+          echo '=== PROVIDER ROOT SESSION SAFE SNAPSHOT ==='
+          echo '========================================='
           echo 'MODE=READ_ONLY'
           echo 'DB_MUTATION=NONE'
           echo 'PM2_MUTATION=NONE'
@@ -98,120 +67,66 @@ jobs:
           echo 'SSH_CONFIG_MUTATION=NONE'
           echo 'AUTHORIZED_KEYS_MUTATION=NONE'
           echo 'ENV_MUTATION=NONE'
-          echo 'CAPTURE_WINDOW_SECONDS=480'
 
-          START_ISO="$(date --iso-8601=seconds)"
-          END_EPOCH=$(( $(date +%s) + 480 ))
-          BASE_WA="$(wa_state)"
-          BASE_RESTARTS="$(cut -d'|' -f3 <<<"$BASE_WA")"
-          LAST_RESTARTS="$BASE_RESTARTS"
-          LAST_AK_SHA="$(sha256sum /root/.ssh/authorized_keys | awk '{print $1}')"
-          LAST_AK_COUNT="$(ak_count)"
-          PM2LOG_LINE="$(wc -l < /root/.pm2/pm2.log)"
-          SUSPECT_SSHD=''
-          PROVIDER_KEY_FP=''
-          PROVIDER_SESSION_SEEN=0
-          DESCENDANT_MATCHES=0
-          AK_EVENTS=0
-          WA_EVENTS=0
-          declare -A SEEN_PIDS=()
+          echo '=== ACTIVE ROOT PTS SSH SESSIONS ==='
+          ps -eo pid=,ppid=,user=,lstart=,etimes=,tty=,args= | grep -E '[s]shd: root@pts/[0-9]+' | redact || true
 
-          echo "START_ISO=$START_ISO"
-          echo "BASE_WA_STATE=$BASE_WA"
-          echo "BASE_AK_SHA256=$LAST_AK_SHA"
-          echo "BASE_AK_RECORDS=$LAST_AK_COUNT"
+          SUSPECT="$(ps -eo pid=,etimes=,args= | awk '/sshd: root@pts\/[0-9]+/ {if(min=="" || $2<min){min=$2;pid=$1}} END{if(pid)print pid}')"
+          echo "SUSPECT_SSHD_PID=${SUSPECT:-NONE}"
 
-          while (( $(date +%s) < END_EPOCH )); do
-            CUR_AK_SHA="$(sha256sum /root/.ssh/authorized_keys 2>/dev/null | awk '{print $1}' || true)"
-            if [[ -n "$CUR_AK_SHA" && "$CUR_AK_SHA" != "$LAST_AK_SHA" ]]; then
-              AK_EVENTS=$((AK_EVENTS+1))
-              CUR_AK_COUNT="$(ak_count)"
-              echo "=== AUTHORIZED_KEYS_CHANGE #$AK_EVENTS @ $(date --iso-8601=seconds) ==="
-              echo "AK_SHA_BEFORE=$LAST_AK_SHA"
-              echo "AK_SHA_AFTER=$CUR_AK_SHA"
-              echo "AK_RECORDS_BEFORE=$LAST_AK_COUNT"
-              echo "AK_RECORDS_AFTER=$CUR_AK_COUNT"
-              stat -c 'AK_META=mode:%a|size:%s|mtime:%y|ctime:%z' /root/.ssh/authorized_keys
+          if [[ -n "$SUSPECT" && -d "/proc/$SUSPECT" ]]; then
+            echo '=== SUSPECT SESSION PROCESS TREE ==='
+            pstree -aps "$SUSPECT" 2>/dev/null | head -100 | redact || true
 
-              if (( CUR_AK_COUNT > LAST_AK_COUNT )); then
-                PROVIDER_KEY_FP="$(tail -n 1 /root/.ssh/authorized_keys | ssh-keygen -lf - 2>/dev/null | awk '{print $2}' || true)"
-                echo "INJECTED_KEY_FINGERPRINT=${PROVIDER_KEY_FP:-UNKNOWN}"
-                echo '--- QEMU GA +/- RECENT ---'
-                journalctl -u qemu-guest-agent.service --since '-20 seconds' --no-pager -o short-iso 2>/dev/null | tail -120 | redact || true
-                echo '--- SSH ACCEPT RECENT ---'
-                journalctl --since '-20 seconds' --no-pager -o short-iso 2>/dev/null | grep -Ei 'Accepted publickey for root|Accepted password for root|sshd.*session' | tail -80 | redact || true
-              fi
-
-              LAST_AK_SHA="$CUR_AK_SHA"
-              LAST_AK_COUNT="$CUR_AK_COUNT"
+            SHELL_PID="$(pgrep -P "$SUSPECT" -n bash 2>/dev/null || true)"
+            if [[ -z "$SHELL_PID" ]]; then
+              SHELL_PID="$(pgrep -P "$SUSPECT" -n 2>/dev/null || true)"
             fi
+            echo "SUSPECT_SHELL_PID=${SHELL_PID:-NONE}"
 
-            if [[ -z "$SUSPECT_SSHD" && -n "$PROVIDER_KEY_FP" ]]; then
-              CAND="$(newest_root_pts_sshd || true)"
-              if [[ -n "$CAND" ]]; then
-                if journalctl --since "$START_ISO" --no-pager 2>/dev/null | grep -Fq "$PROVIDER_KEY_FP"; then
-                  SUSPECT_SSHD="$CAND"
-                  PROVIDER_SESSION_SEEN=1
-                  echo "=== PROVIDER_ROOT_SESSION_BOUND @ $(date --iso-8601=seconds) ==="
-                  echo "PROVIDER_KEY_FINGERPRINT=$PROVIDER_KEY_FP"
-                  echo "SUSPECT_SSHD_PID=$SUSPECT_SSHD"
-                  print_chain "$SUSPECT_SSHD"
-                fi
-              fi
+            if [[ -n "$SHELL_PID" && -d "/proc/$SHELL_PID" ]]; then
+              echo '=== SUSPECT SHELL SAFE PROC METADATA ==='
+              printf 'CWD='; readlink -f "/proc/$SHELL_PID/cwd" 2>/dev/null || true
+              printf 'EXE='; readlink -f "/proc/$SHELL_PID/exe" 2>/dev/null || true
+              printf 'TTY='; ps -o tty= -p "$SHELL_PID" | xargs || true
+              printf 'SID='; ps -o sid= -p "$SHELL_PID" | xargs || true
+              printf 'PGID='; ps -o pgid= -p "$SHELL_PID" | xargs || true
+              printf 'CGROUP='; tr '\n' ';' < "/proc/$SHELL_PID/cgroup" 2>/dev/null | redact || true; echo
+              printf 'LOGINUID='; cat "/proc/$SHELL_PID/loginuid" 2>/dev/null || true
+
+              echo '=== SUSPECT SHELL ENV NAMES ONLY ==='
+              tr '\0' '\n' < "/proc/$SHELL_PID/environ" 2>/dev/null | sed 's/=.*//' | sort -u | grep -E '^(SSH_|TERM|TERM_PROGRAM|COLORTERM|LANG|LC_|XDG_|HOSTINGER|HST_|AGENT|CI|GITHUB|CODEX|OPENAI|CLAUDE|USER|LOGNAME|HOME|SHELL|PWD|OLDPWD|SHLVL)' || true
+
+              echo '=== SUSPECT SHELL SAFE ENV VALUES ==='
+              tr '\0' '\n' < "/proc/$SHELL_PID/environ" 2>/dev/null | grep -E '^(TERM|TERM_PROGRAM|COLORTERM|LANG|LC_[A-Z_]+|XDG_SESSION_TYPE|XDG_SESSION_CLASS|USER|LOGNAME|SHELL|PWD|OLDPWD|SHLVL|HOSTINGER[^=]*|HST_[^=]*|AGENT[^=]*|CI|GITHUB_ACTIONS)=' | redact || true
             fi
+          fi
 
-            if [[ -n "$SUSPECT_SSHD" && -d "/proc/$SUSPECT_SSHD" ]]; then
-              while read -r pid ppid user etimes args; do
-                [[ "$pid" =~ ^[0-9]+$ ]] || continue
-                [[ -z "${SEEN_PIDS[$pid]:-}" ]] || continue
-                case "$args" in
-                  *pm2*|*PM2*|*sikhadenge-whatsapp-agent*) ;;
-                  *) continue ;;
-                esac
-                if is_descendant_of "$pid" "$SUSPECT_SSHD"; then
-                  SEEN_PIDS[$pid]=1
-                  DESCENDANT_MATCHES=$((DESCENDANT_MATCHES+1))
-                  echo "=== SUSPECT_SESSION_PROCESS #$DESCENDANT_MATCHES @ $(date --iso-8601=seconds) ==="
-                  print_chain "$pid"
-                fi
-              done < <(ps -eo pid=,ppid=,user=,etimes=,args= 2>/dev/null)
-            fi
+          echo '=== SOURCE REPO SAFE STATE ==='
+          SRC='/var/www/sikhadenge-whatsapp-agent/source'
+          if [[ -d "$SRC/.git" ]]; then
+            git -C "$SRC" rev-parse --verify HEAD 2>/dev/null | sed 's/^/SOURCE_HEAD=/' || true
+            git -C "$SRC" branch --show-current 2>/dev/null | sed 's/^/SOURCE_BRANCH=/' || true
+            git -C "$SRC" status --short --untracked-files=no 2>/dev/null | head -120 | sed 's/^/SOURCE_TRACKED_CHANGE=/' || true
+            git -C "$SRC" log -1 --format='SOURCE_LAST_COMMIT=%H|%cI|%s' 2>/dev/null || true
+          else
+            echo 'SOURCE_GIT=NOT_FOUND'
+          fi
 
-            CUR_WA="$(wa_state 2>/dev/null || true)"
-            if [[ -n "$CUR_WA" ]]; then
-              CUR_RESTARTS="$(cut -d'|' -f3 <<<"$CUR_WA")"
-              if [[ "$CUR_RESTARTS" =~ ^[0-9]+$ ]] && (( CUR_RESTARTS > LAST_RESTARTS )); then
-                WA_EVENTS=$((WA_EVENTS+1))
-                echo "=== WA_RESTART_EVENT #$WA_EVENTS @ $(date --iso-8601=seconds) ==="
-                echo "WA_BEFORE_RESTARTS=$LAST_RESTARTS"
-                echo "WA_AFTER_STATE=$CUR_WA"
-                echo '--- SUSPECT SESSION TREE ---'
-                [[ -n "$SUSPECT_SSHD" ]] && ps -eo pid=,ppid=,user=,lstart=,etimes=,args= --forest | grep -E "(^|[[:space:]])($SUSPECT_SSHD|sshd: root@pts|pm2|sikhadenge-whatsapp-agent)" | tail -120 | redact || true
-                echo '--- RECENT SSH/QEMU ---'
-                journalctl --since '-90 seconds' --no-pager -o short-iso 2>/dev/null | grep -Ei 'Accepted publickey for root|Accepted password for root|sshd.*session|qemu-ga.*(sshd -T|ssh|authorized)' | tail -120 | redact || true
-                LAST_RESTARTS="$CUR_RESTARTS"
-              fi
-            fi
+          APP="$SRC/apps/whatsapp-agent-dashboard"
+          echo '=== APP RECENT FILE ACTIVITY SAFE PATHS ==='
+          find "$APP" -maxdepth 3 -type f -newermt '2026-09-13 18:10:00' ! -path '*/node_modules/*' ! -path '*/.next/*' -printf '%TY-%Tm-%TdT%TH:%TM:%TS %p\n' 2>/dev/null | sort | tail -120 | sed "s#${SRC}#SOURCE#g" || true
 
-            sleep 0.05
-          done
+          echo '=== ROOT HISTORY DEPLOY/RESTART MATCHES ONLY ==='
+          if [[ -r /root/.bash_history ]]; then
+            grep -Ein 'sikhadenge-whatsapp-agent|pnpm (run )?build|prisma generate|pm2 (restart|reload|start|show).*whatsapp' /root/.bash_history | tail -120 | redact || true
+          fi
 
-          END_ISO="$(date --iso-8601=seconds)"
-          FINAL_WA="$(wa_state)"
-          FINAL_RESTARTS="$(cut -d'|' -f3 <<<"$FINAL_WA")"
-          FINAL_AK_SHA="$(sha256sum /root/.ssh/authorized_keys | awk '{print $1}')"
-          echo '=== POST WINDOW ==='
-          echo "END_ISO=$END_ISO"
-          echo '--- PM2 WA EVENTS ---'
-          sed -n "$((PM2LOG_LINE+1)),\$p" /root/.pm2/pm2.log 2>/dev/null | grep -E 'sikhadenge-whatsapp-agent|Stopping app:' | tail -100 || true
-          echo '--- SSH/QEMU EVENTS ---'
-          journalctl --since "$START_ISO" --until "$END_ISO" --no-pager -o short-iso 2>/dev/null | grep -Ei 'Accepted publickey for root|Accepted password for root|pam_unix\(sshd:session\)|qemu-ga.*(sshd -T|ssh|authorized)' | tail -200 | redact || true
-          echo "FINAL_WA_STATE=$FINAL_WA"
-          echo "FINAL_AK_SHA256=$FINAL_AK_SHA"
-          echo "AUTHORIZED_KEYS_CHANGE_EVENTS=$AK_EVENTS"
-          echo "PROVIDER_SESSION_SEEN=$PROVIDER_SESSION_SEEN"
-          echo "SUSPECT_SESSION_PROCESS_MATCHES=$DESCENDANT_MATCHES"
-          echo "WA_RESTART_EVENTS=$WA_EVENTS"
-          echo "WA_RESTART_COUNTER_DELTA=$((FINAL_RESTARTS-BASE_RESTARTS))"
-          echo 'READ_ONLY_FOCUSED_ATTRIBUTION=PASS'
+          echo '=== RECENT PROVIDER KEY / SSH EVENTS ==='
+          journalctl --since '2026-09-13 18:10:00' --no-pager -o short-iso 2>/dev/null | grep -Ei 'qemu-ga.*(sshd -T|ssh|authorized)|Accepted publickey for root|Accepted password for root|pam_unix\(sshd:session\)' | tail -180 | redact || true
+
+          echo '=== CURRENT WA PM2 SAFE STATE ==='
+          pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const p=JSON.parse(b).find(x=>x.name==="sikhadenge-whatsapp-agent");const e=p?.pm2_env||{};console.log(["status="+e.status,"pid="+p?.pid,"restarts="+e.restart_time,"unstable_restarts="+e.unstable_restarts,"cwd="+e.pm_cwd].join("|"));});'
+
+          echo 'READ_ONLY_PROVIDER_SESSION_SNAPSHOT=PASS'
           REMOTE
