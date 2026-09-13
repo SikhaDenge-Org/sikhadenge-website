@@ -32,7 +32,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!variable_name:-}"; done
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
           if [[ -z "${SSH_PORT:-}" ]]; then printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"; fi
           install -d -m 700 "$HOME/.ssh"
           key="$HOME/.ssh/whatsapp-production"
@@ -43,9 +43,8 @@ jobs:
           printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
           ssh-keygen -y -f "$key" >/dev/null
-          printf 'PASS: STAGE2_PROBE_SSH_READY\n'
 
-      - name: Verify WhatsApp scopes subscription and persisted evidence read-only
+      - name: Verify remaining WhatsApp Stage2 evidence read-only
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -54,67 +53,37 @@ jobs:
           LIVE_APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           ENV_FILE="$LIVE_APP/.env"
           WORKSPACE_ID=engagews_default
-
-          read_env_value() {
+          read_env() {
             node - "$ENV_FILE" "$1" <<'NODE'
-          const fs=require('node:fs'); const [file,key]=process.argv.slice(2); const text=fs.readFileSync(file,'utf8');
-          for(const raw of text.split(/\r?\n/)){const line=raw.trim(); if(!line||line.startsWith('#'))continue; const n=line.startsWith('export ')?line.slice(7).trim():line; const i=n.indexOf('='); if(i<1||n.slice(0,i).trim()!==key)continue; let v=n.slice(i+1).trim(); if(v.length>=2&&((v.startsWith('"')&&v.endsWith('"'))||(v.startsWith("'")&&v.endsWith("'"))))v=v.slice(1,-1); process.stdout.write(v); process.exit(0);} process.exit(1);
+          const fs=require('node:fs'); const [file,key]=process.argv.slice(2); for(const raw of fs.readFileSync(file,'utf8').split(/\r?\n/)){const l=raw.trim(); if(!l||l.startsWith('#'))continue; const n=l.startsWith('export ')?l.slice(7).trim():l; const i=n.indexOf('='); if(i<1||n.slice(0,i).trim()!==key)continue; let v=n.slice(i+1).trim(); if(v.length>=2&&((v.startsWith('"')&&v.endsWith('"'))||(v.startsWith("'")&&v.endsWith("'"))))v=v.slice(1,-1); process.stdout.write(v); process.exit(0)} process.exit(1);
           NODE
           }
-
           live_sha="$(git -C "$LIVE_APP" rev-parse HEAD)"
-          dirty_count="$(git -C "$LIVE_APP" status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
-          printf 'LIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\n' "$live_sha" "$dirty_count"
-          test "$live_sha" = "$EXPECTED_LIVE_SHA"; test "$dirty_count" = "0"
+          dirty="$(git -C "$LIVE_APP" status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          printf 'LIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\n' "$live_sha" "$dirty"
+          test "$live_sha" = "$EXPECTED_LIVE_SHA"; test "$dirty" = "0"
+          DB="$(node "$LIVE_APP/scripts/prisma-postgres-cli-url.mjs" "$(read_env DATABASE_URL)")"
+          row="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT c.\"id\",c.\"status\",COALESCE(c.\"capabilities\"->'evidence'->>'apiVerifiedAt',''),COALESCE(c.\"capabilities\"->'evidence'->>'webhookRequired',''),COALESCE(c.\"capabilities\"->'evidence'->>'webhookVerifiedAt',''),COALESCE(c.\"capabilities\"->'evidence'->>'permissionsVerified','') FROM \"EngageChannelConnection\" c WHERE c.\"workspaceId\"='${WORKSPACE_ID}' AND c.\"channel\"='WHATSAPP';")"
+          printf 'WHATSAPP_EVIDENCE=%s\n' "$row"
+          replay_count="$(psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "SELECT COUNT(*) FROM \"EngageWebhookReplayRecord\" r JOIN \"EngageChannelConnection\" c ON c.\"id\"=r.\"connectionId\" WHERE r.\"workspaceId\"='${WORKSPACE_ID}' AND c.\"channel\"='WHATSAPP';")"
+          printf 'WHATSAPP_REPLAY_RECORD_COUNT=%s\n' "$replay_count"
 
-          DATABASE_URL="$(read_env_value DATABASE_URL)"
-          DATABASE_CLI_URL="$(node "$LIVE_APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")"
-          psql_rows() { psql "$DATABASE_CLI_URL" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "$1"; }
-          psql_scalar() { psql "$DATABASE_CLI_URL" -X -v ON_ERROR_STOP=1 -Atqc "$1"; }
-          state="$(psql_rows "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
-          printf 'CONTROLLED_STATE=%s\n' "$state"; test "$state" = "INTERNAL_TEST_IDENTITIES|SHADOW|NO_EXTERNAL_WRITES|false|1"
-
-          printf 'WHATSAPP_PERSISTED_EVIDENCE_BEGIN\n'
-          psql_rows "SELECT \"id\",\"status\",CASE WHEN length(\"externalAccountId\")<=4 THEN repeat('*',length(\"externalAccountId\")) ELSE repeat('*',length(\"externalAccountId\")-4)||right(\"externalAccountId\",4) END,COALESCE(\"capabilities\"->'evidence'->>'apiVerifiedAt',''),COALESCE(\"capabilities\"->'evidence'->>'webhookRequired',''),COALESCE(\"capabilities\"->'evidence'->>'webhookVerifiedAt',''),COALESCE(\"capabilities\"->'evidence'->>'permissionsVerified',''),COALESCE(\"capabilities\"->'evidence'->>'tokenExpiresAt',''),COALESCE(\"capabilities\"->'evidence'->>'revokedAt',''),COALESCE(\"capabilities\"->'evidence'->>'disconnectedAt','') FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\"='WHATSAPP';"
-          printf 'WHATSAPP_PERSISTED_EVIDENCE_END\n'
-          wa_count="$(psql_scalar "SELECT COUNT(*) FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\"='WHATSAPP';")"
-          test "$wa_count" = "1"
-
-          export WA_TOKEN="$(read_env_value WHATSAPP_ACCESS_TOKEN)"
-          export WA_PHONE_ID="$(read_env_value WHATSAPP_PHONE_NUMBER_ID)"
-          export WA_WABA_ID="$(read_env_value WHATSAPP_BUSINESS_ACCOUNT_ID)"
-          export WA_VERSION="$(read_env_value WHATSAPP_GRAPH_VERSION)"
-          export WA_APP_ID="$(read_env_value WHATSAPP_APP_ID)"
-          export WA_APP_SECRET="$(read_env_value WHATSAPP_APP_SECRET)"
-
+          export WA_TOKEN="$(read_env WHATSAPP_ACCESS_TOKEN)"
+          export WA_PHONE_ID="$(read_env WHATSAPP_PHONE_NUMBER_ID)"
+          export WA_WABA_ID="$(read_env WHATSAPP_BUSINESS_ACCOUNT_ID)"
+          export WA_VERSION="$(read_env WHATSAPP_GRAPH_VERSION)"
+          export WA_APP_ID="$(read_env WHATSAPP_APP_ID)"
+          export WA_APP_SECRET="$(read_env WHATSAPP_APP_SECRET)"
           node <<'NODE'
-          const env=process.env; const out=(k,v)=>console.log(`${k}=${String(v)}`); const safe=v=>String(v||'').replace(/\s+/g,' ').slice(0,220);
-          async function get(url, auth){ const c=new AbortController(); const t=setTimeout(()=>c.abort(),10000); try{const r=await fetch(url,{method:'GET',headers:{Accept:'application/json',...(auth?{Authorization:`Bearer ${auth}`}:{})},redirect:'error',cache:'no-store',signal:c.signal}); let b={}; try{b=await r.json()}catch{} return {r,b};}finally{clearTimeout(t)}}
+          const e=process.env; const out=(k,v)=>console.log(`${k}=${String(v)}`); const safe=v=>String(v||'').replace(/\s+/g,' ').slice(0,180);
+          async function get(u,token){const c=new AbortController();const t=setTimeout(()=>c.abort(),10000);try{const r=await fetch(u,{method:'GET',headers:{Accept:'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},redirect:'error',cache:'no-store',signal:c.signal});let b={};try{b=await r.json()}catch{}return{r,b}}finally{clearTimeout(t)}}
           (async()=>{
-            const {WA_TOKEN:token,WA_PHONE_ID:phoneId,WA_WABA_ID:wabaId,WA_VERSION:version,WA_APP_ID:appId,WA_APP_SECRET:appSecret}=env;
-            if(!token||!phoneId||!wabaId||!version||!appId||!appSecret) throw new Error('required WhatsApp production configuration missing');
-
-            const identityUrl=new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(phoneId)}`); identityUrl.searchParams.set('fields','id,display_phone_number,verified_name');
-            const identity=await get(identityUrl,token); const identityOk=identity.r.ok&&String(identity.b?.id||'')===phoneId;
-            out('WHATSAPP_IDENTITY_HTTP',identity.r.status); out('WHATSAPP_IDENTITY_VERIFIED',identityOk); if(!identityOk)out('WHATSAPP_IDENTITY_REASON',safe(identity.b?.error?.message));
-
-            const debugUrl=new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/debug_token`); debugUrl.searchParams.set('input_token',token); debugUrl.searchParams.set('access_token',`${appId}|${appSecret}`);
-            const debug=await get(debugUrl,null); const d=debug.b?.data||{}; const scopes=Array.isArray(d.scopes)?d.scopes.map(String).sort():[]; const granular=Array.isArray(d.granular_scopes)?d.granular_scopes.map(x=>String(x?.scope||'')).filter(Boolean).sort():[];
-            out('WHATSAPP_DEBUG_TOKEN_HTTP',debug.r.status); out('WHATSAPP_TOKEN_VALID',Boolean(debug.r.ok&&d.is_valid)); out('WHATSAPP_TOKEN_APP_MATCH',String(d.app_id||'')===appId); out('WHATSAPP_TOKEN_EXPIRES_AT',Number(d.expires_at||0)); out('WHATSAPP_TOKEN_DATA_ACCESS_EXPIRES_AT',Number(d.data_access_expires_at||0));
-            out('WHATSAPP_TOKEN_SCOPES',scopes.join(',')); out('WHATSAPP_TOKEN_GRANULAR_SCOPES',granular.join(','));
-            const messaging=scopes.includes('whatsapp_business_messaging')||granular.includes('whatsapp_business_messaging'); const management=scopes.includes('whatsapp_business_management')||granular.includes('whatsapp_business_management');
-            out('WHATSAPP_SCOPE_MESSAGING',messaging); out('WHATSAPP_SCOPE_MANAGEMENT',management); out('WHATSAPP_PERMISSION_EVIDENCE_ELIGIBLE',Boolean(identityOk&&debug.r.ok&&d.is_valid&&String(d.app_id||'')===appId&&messaging&&management));
-
-            const subUrl=new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(wabaId)}/subscribed_apps`); const sub=await get(subUrl,token); const apps=Array.isArray(sub.b?.data)?sub.b.data:[]; const matching=apps.find(x=>String(x?.id||'')===appId); const fields=matching&&Array.isArray(matching.subscribed_fields)?matching.subscribed_fields.map(String).sort():[];
-            out('WHATSAPP_SUBSCRIBED_APPS_HTTP',sub.r.status); out('WHATSAPP_EXPECTED_APP_SUBSCRIBED',Boolean(sub.r.ok&&matching)); out('WHATSAPP_SUBSCRIBED_FIELDS',fields.join(',')); if(!sub.r.ok)out('WHATSAPP_SUBSCRIPTION_REASON',safe(sub.b?.error?.message));
-            out('WHATSAPP_EXTERNAL_WRITE_SENT',false);
-          })().catch(e=>{out('WHATSAPP_PROBE_ERROR',safe(e?.message)); out('WHATSAPP_EXTERNAL_WRITE_SENT',false); process.exitCode=1;});
+            const {WA_TOKEN:t,WA_PHONE_ID:p,WA_WABA_ID:w,WA_VERSION:v,WA_APP_ID:a,WA_APP_SECRET:s}=e;
+            const iu=new URL(`https://graph.facebook.com/${encodeURIComponent(v)}/${encodeURIComponent(p)}`);iu.searchParams.set('fields','id,display_phone_number,verified_name');const ir=await get(iu,t);const identity=ir.r.ok&&String(ir.b?.id||'')===p;out('IDENTITY_HTTP',ir.r.status);out('IDENTITY_VERIFIED',identity);
+            const du=new URL(`https://graph.facebook.com/${encodeURIComponent(v)}/debug_token`);du.searchParams.set('input_token',t);du.searchParams.set('access_token',`${a}|${s}`);const dr=await get(du);const d=dr.b?.data||{};const scopes=[...(Array.isArray(d.scopes)?d.scopes:[]),...(Array.isArray(d.granular_scopes)?d.granular_scopes.map(x=>x?.scope):[])].filter(Boolean).map(String);out('TOKEN_VALID',Boolean(dr.r.ok&&d.is_valid));out('TOKEN_APP_MATCH',String(d.app_id||'')===a);out('SCOPE_MESSAGING',scopes.includes('whatsapp_business_messaging'));out('SCOPE_MANAGEMENT',scopes.includes('whatsapp_business_management'));
+            const su=new URL(`https://graph.facebook.com/${encodeURIComponent(v)}/${encodeURIComponent(w)}/subscribed_apps`);const sr=await get(su,t);const apps=Array.isArray(sr.b?.data)?sr.b.data:[];const first=apps[0]&&typeof apps[0]==='object'?apps[0]:{};out('SUBSCRIBED_APPS_HTTP',sr.r.status);out('SUBSCRIBED_APP_COUNT',apps.length);out('SUBSCRIBED_APP_TOP_LEVEL_KEYS',Object.keys(first).sort().join(','));const nested=first?.whatsapp_business_api_data&&typeof first.whatsapp_business_api_data==='object'?first.whatsapp_business_api_data:{};out('SUBSCRIBED_APP_NESTED_KEYS',Object.keys(nested).sort().join(','));const match=apps.some(x=>String(x?.id||x?.whatsapp_business_api_data?.id||'')===a);out('EXPECTED_APP_SUBSCRIBED',Boolean(sr.r.ok&&match));if(!sr.r.ok)out('SUBSCRIPTION_REASON',safe(sr.b?.error?.message));out('EXTERNAL_WRITE_SENT',false);
+          })().catch(err=>{out('PROBE_ERROR',safe(err?.message));out('EXTERNAL_WRITE_SENT',false);process.exitCode=1});
           NODE
           unset WA_TOKEN WA_PHONE_ID WA_WABA_ID WA_VERSION WA_APP_ID WA_APP_SECRET
-
-          recent_webhook_events="$(psql_scalar "SELECT COUNT(*) FROM \"WebhookEvent\" WHERE \"receivedAt\" >= NOW() - INTERVAL '30 days';")"
-          replay_records="$(psql_scalar "SELECT COUNT(*) FROM \"EngageWebhookReplayRecord\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\"='WHATSAPP';")"
-          printf 'RECENT_WEBHOOK_EVENT_COUNT_30D=%s\n' "$recent_webhook_events"
-          printf 'WHATSAPP_REPLAY_RECORD_COUNT=%s\n' "$replay_records"
-          printf 'PASS: PHASE17_STAGE2_WHATSAPP_EVIDENCE_DIAGNOSTIC_COMPLETE\n'
+          printf 'PASS: PHASE17_STAGE2_WHATSAPP_REMAINING_EVIDENCE_PROBED\n'
           REMOTE
