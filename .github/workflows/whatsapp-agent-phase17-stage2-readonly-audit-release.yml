@@ -25,92 +25,48 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
-      EXPECTED_LIVE_SHA: 2b3efe35b8920082cc94dce989d1847842fb8825
+      EXPECTED_LIVE_SHA: 37ef3b22e10c5684722d699fd3d92aa7e1d0128e
 
     steps:
-      - name: Validate production access inputs
+      - name: Configure pinned production SSH
         shell: bash
         run: |
           set -Eeuo pipefail
-          missing=0
-          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
-            if [[ -z "${!variable_name:-}" ]]; then
-              printf 'Missing required production secret: %s\n' "$variable_name" >&2
-              missing=1
-            fi
-          done
-          test "$missing" = "0"
-          [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!variable_name:-}"; done
           if [[ -z "${SSH_PORT:-}" ]]; then printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"; fi
-          printf 'PASS: STAGE2_AUDIT_ACCESS_INPUTS_PRESENT\n'
-
-      - name: Configure pinned SSH identity
-        shell: bash
-        run: |
-          set -Eeuo pipefail
           install -d -m 700 "$HOME/.ssh"
-          private_key_file="$HOME/.ssh/whatsapp-production"
-          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
-            printf '%s\n' "$SSH_PRIVATE_KEY" > "$private_key_file"
-          else
-            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$private_key_file"
-          fi
-          chmod 600 "$private_key_file"
-          [[ "$SSH_HOST" =~ ^[^[:space:]/]+$ ]]
-          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
-          read -r _ supplied_key_type supplied_key_material _ <<< "$SSH_HOST_KEY"
-          test "$supplied_key_type" = "ssh-ed25519"
-          test -n "$supplied_key_material"
-          canonical_host="[$SSH_HOST]:$SSH_PORT"
-          printf '%s %s %s\n' "$canonical_host" "$supplied_key_type" "$supplied_key_material" > "$HOME/.ssh/known_hosts"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
-          ssh-keygen -y -f "$private_key_file" >/dev/null
-          ssh-keygen -F "$canonical_host" -f "$HOME/.ssh/known_hosts" >/dev/null
-          printf 'PASS: STAGE2_AUDIT_PINNED_SSH_READY\n'
+          ssh-keygen -y -f "$key" >/dev/null
+          printf 'PASS: STAGE2_PROBE_SSH_READY\n'
 
-      - name: Read-only Stage2 production inventory via psql
+      - name: Probe Stage2 Instagram candidate read-only
         shell: bash
         run: |
           set -Eeuo pipefail
-          ssh \
-            -p "$SSH_PORT" \
-            -i "$HOME/.ssh/whatsapp-production" \
-            -o BatchMode=yes \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' bash -s" <<'REMOTE'
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           LIVE_APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
-          WORKSPACE_ID=engagews_default
           ENV_FILE="$LIVE_APP/.env"
-
-          test "$(id -u)" = "0" && printf 'PASS: STAGE2_AUDIT_ROOT_CONTEXT\n'
-          test -d "$LIVE_APP" && printf 'PASS: STAGE2_AUDIT_LIVE_APP_PRESENT\n'
-          test -f "$ENV_FILE" && printf 'PASS: STAGE2_AUDIT_ENV_FILE_PRESENT\n'
-          live_sha="$(git -C "$LIVE_APP" rev-parse HEAD)"
-          printf 'PHASE17_STAGE2_AUDIT_LIVE_SHA=%s\n' "$live_sha"
-          test "$live_sha" = "$EXPECTED_LIVE_SHA" && printf 'PASS: STAGE2_AUDIT_LIVE_SHA_MATCH\n'
-          tracked_dirty_count="$(git -C "$LIVE_APP" status --porcelain --untracked-files=no | wc -l | tr -d ' ')"
-          printf 'PHASE17_STAGE2_AUDIT_TRACKED_DIRTY_COUNT=%s\n' "$tracked_dirty_count"
-          test "$tracked_dirty_count" = "0" && printf 'PASS: STAGE2_AUDIT_TRACKED_WORKTREE_CLEAN\n'
-          test -d "$LIVE_APP/node_modules" && printf 'PASS: STAGE2_AUDIT_NODE_MODULES_PRESENT\n'
-          command -v psql >/dev/null && printf 'PASS: STAGE2_AUDIT_PSQL_PRESENT\n'
+          WORKSPACE_ID=engagews_default
 
           read_env_value() {
-            local key="$1" file="$2"
-            node - "$file" "$key" <<'NODE'
+            node - "$ENV_FILE" "$1" <<'NODE'
           const fs = require('node:fs');
           const [file, key] = process.argv.slice(2);
-          if (!file || !key || !fs.existsSync(file)) process.exit(1);
           const text = fs.readFileSync(file, 'utf8');
-          for (const rawLine of text.split(/\r?\n/)) {
-            const line = rawLine.trim();
+          for (const raw of text.split(/\r?\n/)) {
+            const line = raw.trim();
             if (!line || line.startsWith('#')) continue;
             const normalized = line.startsWith('export ') ? line.slice(7).trim() : line;
-            const separator = normalized.indexOf('=');
-            if (separator < 1 || normalized.slice(0, separator).trim() !== key) continue;
-            let value = normalized.slice(separator + 1).trim();
+            const i = normalized.indexOf('=');
+            if (i < 1 || normalized.slice(0, i).trim() !== key) continue;
+            let value = normalized.slice(i + 1).trim();
             if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) value = value.slice(1, -1);
             process.stdout.write(value);
             process.exit(0);
@@ -118,65 +74,95 @@ jobs:
           process.exit(1);
           NODE
           }
+          env_present() { if value="$(read_env_value "$1" 2>/dev/null)" && [[ -n "$value" ]]; then printf 'true'; else printf 'false'; fi; }
 
-          DATABASE_URL="$(read_env_value DATABASE_URL "$ENV_FILE")"
-          test -n "$DATABASE_URL" && printf 'PASS: STAGE2_AUDIT_DATABASE_URL_RESOLVED\n'
+          test "$(id -u)" = "0"
+          test -f "$ENV_FILE"
+          live_sha="$(git -C "$LIVE_APP" rev-parse HEAD)"
+          dirty_count="$(git -C "$LIVE_APP" status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          printf 'LIVE_SHA=%s\n' "$live_sha"
+          printf 'TRACKED_DIRTY_COUNT=%s\n' "$dirty_count"
+          test "$live_sha" = "$EXPECTED_LIVE_SHA"
+          test "$dirty_count" = "0"
+
+          DATABASE_URL="$(read_env_value DATABASE_URL)"
           DATABASE_CLI_URL="$(node "$LIVE_APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")"
-          test -n "$DATABASE_CLI_URL" && printf 'PASS: STAGE2_AUDIT_DATABASE_CLI_URL_DERIVED\n'
-
           psql_scalar() { psql "$DATABASE_CLI_URL" -X -v ON_ERROR_STOP=1 -Atqc "$1"; }
           psql_rows() { psql "$DATABASE_CLI_URL" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "$1"; }
 
-          workspace_count="$(psql_scalar "SELECT COUNT(*) FROM \"EngageWorkspace\" WHERE \"id\" = '${WORKSPACE_ID}' AND \"isActive\" = true;")"
-          printf 'PHASE17_STAGE2_AUDIT_ACTIVE_WORKSPACE_COUNT=%s\n' "$workspace_count"
-          test "$workspace_count" = "1"
-
-          state="$(psql_rows "SELECT \"stage\",\"mode\",\"writePolicy\",\"externalWritesAllowed\",\"version\",to_char(\"activatedAt\" AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\" = '${WORKSPACE_ID}';")"
-          printf 'PHASE17_STAGE2_AUDIT_STATE=%s\n' "$state"
-          IFS='|' read -r stage mode write_policy external_writes version activated_at <<< "$state"
-          test "$stage" = "INTERNAL_TEST_IDENTITIES"
-          test "$mode" = "SHADOW"
-          test "$write_policy" = "NO_EXTERNAL_WRITES"
-          test "$external_writes" = "f"
-          test "$version" = "1"
-          printf 'PASS: STAGE2_AUDIT_EXACT_STAGE1_SHADOW_STATE\n'
-
-          transition_count="$(psql_scalar "SELECT COUNT(*) FROM \"EngageControlledLaunchTransition\" WHERE \"workspaceId\" = '${WORKSPACE_ID}';")"
-          printf 'PHASE17_STAGE2_AUDIT_TRANSITION_COUNT=%s\n' "$transition_count"
+          state="$(psql_rows "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
+          printf 'CONTROLLED_STATE=%s\n' "$state"
+          test "$state" = "INTERNAL_TEST_IDENTITIES|SHADOW|NO_EXTERNAL_WRITES|false|1"
+          transition_count="$(psql_scalar "SELECT COUNT(*) FROM \"EngageControlledLaunchTransition\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
+          enabled_flags="$(psql_scalar "SELECT COUNT(*) FROM \"EngageFeatureFlag\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"enabled\"=true;")"
+          printf 'TRANSITION_COUNT=%s\nFEATURE_FLAGS_ENABLED=%s\n' "$transition_count" "$enabled_flags"
           test "$transition_count" = "1"
-
-          stage1_transition="$(psql_rows "SELECT \"toStage\",\"toMode\",\"toWritePolicy\",\"toExternalWritesAllowed\",\"resultingVersion\",to_char(\"createdAt\" AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') FROM \"EngageControlledLaunchTransition\" WHERE \"workspaceId\" = '${WORKSPACE_ID}' ORDER BY \"createdAt\" ASC LIMIT 1;")"
-          printf 'PHASE17_STAGE2_AUDIT_STAGE1_TRANSITION=%s\n' "$stage1_transition"
-
-          enabled_flags="$(psql_scalar "SELECT COUNT(*) FROM \"EngageFeatureFlag\" WHERE \"workspaceId\" = '${WORKSPACE_ID}' AND \"enabled\" = true;")"
-          kill_switch_records="$(psql_scalar "SELECT COUNT(*) FROM \"EngageKillSwitch\" WHERE \"workspaceId\" = '${WORKSPACE_ID}';")"
-          printf 'PHASE17_STAGE2_AUDIT_ENABLED_FEATURE_FLAGS=%s\n' "$enabled_flags"
-          printf 'PHASE17_STAGE2_AUDIT_KILL_SWITCH_RECORDS=%s\n' "$kill_switch_records"
           test "$enabled_flags" = "0"
 
-          connection_count="$(psql_scalar "SELECT COUNT(*) FROM \"EngageChannelConnection\" WHERE \"workspaceId\" = '${WORKSPACE_ID}';")"
-          printf 'PHASE17_STAGE2_AUDIT_CONNECTION_COUNT=%s\n' "$connection_count"
+          printf 'INSTAGRAM_ACCESS_TOKEN_PRESENT=%s\n' "$(env_present INSTAGRAM_ACCESS_TOKEN)"
+          printf 'INSTAGRAM_ACCOUNT_ID_PRESENT=%s\n' "$(env_present INSTAGRAM_ACCOUNT_ID)"
+          printf 'INSTAGRAM_GRAPH_VERSION_PRESENT=%s\n' "$(env_present INSTAGRAM_GRAPH_VERSION)"
+          printf 'INSTAGRAM_APP_SECRET_PRESENT=%s\n' "$(env_present INSTAGRAM_APP_SECRET)"
+          printf 'INSTAGRAM_VERIFY_TOKEN_PRESENT=%s\n' "$(env_present INSTAGRAM_VERIFY_TOKEN)"
 
-          psql_rows "
-            SELECT
-              c.\"id\",
-              c.\"channel\",
-              c.\"status\",
-              CASE WHEN length(c.\"externalAccountId\") <= 4 THEN repeat('*', length(c.\"externalAccountId\")) ELSE repeat('*', length(c.\"externalAccountId\") - 4) || right(c.\"externalAccountId\", 4) END AS masked_external_account,
-              COALESCE(c.\"displayName\", ''),
-              COUNT(cr.\"id\") AS credential_count,
-              COUNT(cr.\"id\") FILTER (WHERE cr.\"expiresAt\" IS NOT NULL AND cr.\"expiresAt\" <= NOW()) AS expired_credential_count,
-              COALESCE(string_agg(DISTINCT cr.\"kind\", ',' ORDER BY cr.\"kind\"), '') AS credential_kinds,
-              to_char(c.\"updatedAt\" AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')
-            FROM \"EngageChannelConnection\" c
-            LEFT JOIN \"EngageConnectionCredential\" cr ON cr.\"connectionId\" = c.\"id\"
-            WHERE c.\"workspaceId\" = '${WORKSPACE_ID}'
-            GROUP BY c.\"id\", c.\"channel\", c.\"status\", c.\"externalAccountId\", c.\"displayName\", c.\"updatedAt\"
-            ORDER BY c.\"channel\" ASC, c.\"createdAt\" ASC;
-          " | while IFS='|' read -r id channel status masked_external display_name credential_count expired_count credential_kinds updated_at; do
-            printf 'CONNECTION id=%s channel=%s status=%s externalAccount=%s displayName=%q credentialCount=%s expiredCredentialCount=%s credentialKinds=%s updatedAt=%s\n' \
-              "$id" "$channel" "$status" "$masked_external" "$display_name" "$credential_count" "$expired_count" "$credential_kinds" "$updated_at"
-          done
+          instagram_rows="$(psql_rows "SELECT \"id\",\"status\",CASE WHEN length(\"externalAccountId\")<=4 THEN repeat('*',length(\"externalAccountId\")) ELSE repeat('*',length(\"externalAccountId\")-4)||right(\"externalAccountId\",4) END,COALESCE(\"capabilities\"->>'apiVerifiedAt',''),COALESCE(\"capabilities\"->>'webhookVerifiedAt',''),COALESCE(\"capabilities\"->>'permissionsVerified',''),COALESCE(\"capabilities\"->>'tokenExpiresAt',''),COALESCE(\"capabilities\"->>'revokedAt','') FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\"='INSTAGRAM' ORDER BY \"createdAt\";")"
+          printf 'INSTAGRAM_CONNECTION_ROWS_BEGIN\n%s\nINSTAGRAM_CONNECTION_ROWS_END\n' "$instagram_rows"
+          instagram_count="$(psql_scalar "SELECT COUNT(*) FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\"='INSTAGRAM';")"
+          printf 'INSTAGRAM_CONNECTION_COUNT=%s\n' "$instagram_count"
+          test "$instagram_count" = "1"
 
-          printf 'PASS: PHASE17_STAGE2_READONLY_INVENTORY_COMPLETE\n'
+          export PROBE_TOKEN="$(read_env_value INSTAGRAM_ACCESS_TOKEN)"
+          export PROBE_ACCOUNT_ID="$(read_env_value INSTAGRAM_ACCOUNT_ID)"
+          export PROBE_GRAPH_VERSION="$(read_env_value INSTAGRAM_GRAPH_VERSION)"
+          node <<'NODE'
+          const token = process.env.PROBE_TOKEN?.trim();
+          const accountId = process.env.PROBE_ACCOUNT_ID?.trim();
+          const version = process.env.PROBE_GRAPH_VERSION?.trim();
+          const out = (key, value) => process.stdout.write(`${key}=${String(value)}\n`);
+          const safeReason = (v) => String(v || 'verification failed').replace(/\s+/g, ' ').slice(0, 240);
+          async function getJson(url) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 10000);
+            try {
+              const r = await fetch(url, {method:'GET', headers:{Authorization:`Bearer ${token}`, Accept:'application/json'}, redirect:'error', cache:'no-store', signal:controller.signal});
+              let body = {}; try { body = await r.json(); } catch {}
+              return {r, body};
+            } finally { clearTimeout(timer); }
+          }
+          (async () => {
+            if (!token || !accountId || !version) { out('INSTAGRAM_IDENTITY_VERIFIED', false); out('INSTAGRAM_PERMISSION_PROBE_VERIFIED', false); out('INSTAGRAM_PROBE_REASON', 'required Instagram environment configuration missing'); return; }
+            try {
+              const identityUrl = new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(accountId)}`);
+              identityUrl.searchParams.set('fields','id');
+              const identity = await getJson(identityUrl);
+              const identityOk = identity.r.ok && String(identity.body?.id || '') === accountId;
+              out('INSTAGRAM_IDENTITY_HTTP', identity.r.status);
+              out('INSTAGRAM_IDENTITY_VERIFIED', identityOk);
+              if (!identityOk) { out('INSTAGRAM_PROBE_REASON', safeReason(identity.body?.error?.message || 'identity mismatch')); out('INSTAGRAM_PERMISSION_PROBE_VERIFIED', false); return; }
+
+              const mediaUrl = new URL(`https://graph.instagram.com/${encodeURIComponent(version)}/${encodeURIComponent(accountId)}/media`);
+              mediaUrl.searchParams.set('fields','id'); mediaUrl.searchParams.set('limit','1');
+              const media = await getJson(mediaUrl);
+              out('INSTAGRAM_MEDIA_HTTP', media.r.status);
+              const mediaId = Array.isArray(media.body?.data) ? String(media.body.data[0]?.id || '') : '';
+              if (!media.r.ok || !mediaId) { out('INSTAGRAM_PERMISSION_PROBE_VERIFIED', false); out('INSTAGRAM_PROBE_REASON', safeReason(media.body?.error?.message || 'no media available')); return; }
+
+              const commentsUrl = new URL(`https://graph.instagram.com/${encodeURIComponent(version)}/${encodeURIComponent(mediaId)}/comments`);
+              commentsUrl.searchParams.set('fields','id'); commentsUrl.searchParams.set('limit','1');
+              const comments = await getJson(commentsUrl);
+              out('INSTAGRAM_COMMENTS_HTTP', comments.r.status);
+              out('INSTAGRAM_PERMISSION_PROBE_VERIFIED', comments.r.ok);
+              out('INSTAGRAM_PROBE_EXTERNAL_WRITE_SENT', false);
+              out('INSTAGRAM_PROBE_REASON', comments.r.ok ? 'read-only identity/media/comment probes passed' : safeReason(comments.body?.error?.message));
+            } catch (e) {
+              out('INSTAGRAM_IDENTITY_VERIFIED', false);
+              out('INSTAGRAM_PERMISSION_PROBE_VERIFIED', false);
+              out('INSTAGRAM_PROBE_EXTERNAL_WRITE_SENT', false);
+              out('INSTAGRAM_PROBE_REASON', safeReason(e?.name === 'AbortError' ? 'probe timed out' : e?.message));
+            }
+          })();
+          NODE
+          unset PROBE_TOKEN PROBE_ACCOUNT_ID PROBE_GRAPH_VERSION
+
+          printf 'PASS: PHASE17_STAGE2_INSTAGRAM_READONLY_PROBE_COMPLETE\n'
           REMOTE
