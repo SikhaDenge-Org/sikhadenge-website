@@ -1,0 +1,66 @@
+name: SA2 Runtime Quiescence Diagnostic 20260913
+
+on:
+  push:
+    branches:
+      - ops/wa-restart-forensics-20260913
+    paths:
+      - '.github/workflows/sa2-runtime-quiescence-diagnostic-20260913.yml'
+
+permissions:
+  contents: read
+
+env:
+  SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+  SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+  SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+  SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+  SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    environment: whatsapp-agent-production
+    timeout-minutes: 10
+    steps:
+      - name: Configure pinned SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SSH_PORT="${SSH_PORT:-22}"; echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
+          install -d -m 700 "$HOME/.ssh"; KEY="$HOME/.ssh/prod"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"; fi
+          chmod 600 "$KEY"; read -r _ kt km _ <<< "$SSH_HOST_KEY"; test "$kt" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"; chmod 600 "$HOME/.ssh/known_hosts"
+      - name: Read-only quiescence diagnosis
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          WA=sikhadenge-whatsapp-agent
+          SRC=/var/www/sikhadenge-whatsapp-agent/source
+          echo '=== SA2 PRE-SWITCH QUIESCENCE DIAGNOSTIC ==='
+          echo 'MODE=READ_ONLY'; echo 'PM2_MUTATION=NONE'; echo 'DB_MUTATION=NONE'; echo 'CODE_MUTATION=NONE'; echo 'SSH_MUTATION=NONE'
+          state(){ pm2 jlist|node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{let p=JSON.parse(b).find(x=>x.name==="sikhadenge-whatsapp-agent");if(!p)process.exit(2);let e=p.pm2_env||{};console.log([p.pid,e.status,e.restart_time,e.unstable_restarts,e.pm_uptime,e.pm_cwd].join("|"))})'; }
+          shash(){ { git -C "$SRC" rev-parse HEAD 2>/dev/null||true;git -C "$SRC" status --porcelain=v1 --untracked-files=no -- apps/whatsapp-agent-dashboard 2>/dev/null||true;git -C "$SRC" diff --binary -- apps/whatsapp-agent-dashboard 2>/dev/null||true;}|sha256sum|awk '{print $1}'; }
+          pts(){ ps -eo pid=,args=|awk '/sshd: root@pts\/[0-9]+/{print $1}'|paste -sd, -; }
+          deploys(){ ps -eo pid=,ppid=,args=|grep -E '[p]npm (exec prisma generate|run build)|[n]ext build|[p]m2 (restart|reload|stop|start).*sikhadenge-whatsapp-agent' || true; }
+          BSTATE="$(state)"; BSRC="$(shash)"; BAK="$(sha256sum /root/.ssh/authorized_keys|awk '{print $1}')"; BPTS="$(pts)"; BDEP="$(deploys)"
+          echo "BASE_WA_STATE=$BSTATE"; echo "BASE_SOURCE_SHA=$BSRC"; echo "BASE_AUTH_KEYS_SHA=$BAK"; echo "BASE_ROOT_PTS=${BPTS:-NONE}"; echo "BASE_DEPLOY_COUNT=$(printf '%s\n' "$BDEP"|sed '/^$/d'|wc -l)"
+          echo '--- LAST WA PM2 STOP EVENTS ---'; grep 'Stopping app:sikhadenge-whatsapp-agent' /root/.pm2/pm2.log 2>/dev/null|tail -12||true
+          changed=0
+          for i in $(seq 1 15); do
+            sleep 2
+            CSTATE="$(state)"; CSRC="$(shash)"; CAK="$(sha256sum /root/.ssh/authorized_keys|awk '{print $1}')"; CPTS="$(pts)"; CDEP="$(deploys)"
+            if [ "$CSTATE" != "$BSTATE" ]; then echo "CHANGE_WA_STATE_AT=${i}x2s|$BSTATE|$CSTATE"; changed=1; break; fi
+            if [ "$CSRC" != "$BSRC" ]; then echo "CHANGE_SOURCE_AT=${i}x2s|$BSRC|$CSRC"; changed=1; break; fi
+            if [ "$CAK" != "$BAK" ]; then echo "CHANGE_AUTH_KEYS_AT=${i}x2s|$BAK|$CAK"; changed=1; break; fi
+            if [ -n "$CPTS" ]; then echo "ROOT_PTS_PRESENT_AT=${i}x2s|$CPTS"; changed=1; break; fi
+            if [ -n "$CDEP" ]; then echo "DEPLOY_PROCESS_PRESENT_AT=${i}x2s"; printf '%s\n' "$CDEP"; changed=1; break; fi
+          done
+          FSTATE="$(state)"; FSRC="$(shash)"; FAK="$(sha256sum /root/.ssh/authorized_keys|awk '{print $1}')"; FPTS="$(pts)"; FDEP="$(deploys)"
+          echo "FINAL_WA_STATE=$FSTATE"; echo "FINAL_SOURCE_SHA=$FSRC"; echo "FINAL_AUTH_KEYS_SHA=$FAK"; echo "FINAL_ROOT_PTS=${FPTS:-NONE}"; echo "FINAL_DEPLOY_COUNT=$(printf '%s\n' "$FDEP"|sed '/^$/d'|wc -l)"; echo "CHANGE_SEEN=$changed"
+          echo '--- RECENT SSH SESSION EVENTS ---'; journalctl --since '10 minutes ago' --no-pager -o short-iso 2>/dev/null|grep -Ei 'sshd.*(Accepted|session opened|session closed)|qemu-guest-agent.*guest-exec'|tail -60|sed -E 's/[0-9]{1,3}(\.[0-9]{1,3}){3}/IP_REDACTED/g' || true
+          echo '=== DIAGNOSTIC COMPLETE ==='
+          REMOTE
