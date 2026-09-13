@@ -36,7 +36,7 @@ jobs:
           test "$key_type" = ssh-ed25519
           printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
-      - name: Print tracked paths only
+      - name: Print safe tracked source diff
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -45,10 +45,19 @@ jobs:
           A=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           root="$(git -C "$A" rev-parse --show-toplevel)"
           test "$(git -C "$root" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
-          printf 'TRACKED_DIRTY_STATUS_BEGIN\n'
-          git -C "$root" status --short --untracked-files=no
-          printf 'TRACKED_DIRTY_STATUS_END\n'
-          printf 'TRACKED_DIRTY_PATHS_BEGIN\n'
-          git -C "$root" diff HEAD --name-only --no-renames | LC_ALL=C sort
-          printf 'TRACKED_DIRTY_PATHS_END\n'
+          paths=(
+            apps/whatsapp-agent-dashboard/app/layout.tsx
+            apps/whatsapp-agent-dashboard/app/login-page01-left-image.css
+            apps/whatsapp-agent-dashboard/app/login/page.tsx
+            apps/whatsapp-agent-dashboard/next-env.d.ts
+          )
+          actual="$(git -C "$root" diff HEAD --name-only --no-renames | LC_ALL=C sort)"
+          expected="$(printf '%s\n' "${paths[@]}" | LC_ALL=C sort)"
+          test "$actual" = "$expected"
+          printf 'NUMSTAT_BEGIN\n'
+          git -C "$root" diff HEAD --numstat --no-renames -- "${paths[@]}"
+          printf 'NUMSTAT_END\n'
+          printf 'SAFE_SOURCE_DIFF_BEGIN\n'
+          git -C "$root" diff --no-ext-diff --no-color --unified=2 HEAD -- "${paths[@]}"
+          printf 'SAFE_SOURCE_DIFF_END\n'
           REMOTE
