@@ -8,6 +8,8 @@ import "../login-page01-left-image.css";
 export const dynamic = "force-dynamic";
 
 const BRAND_LOGO = "/sikhadenge-header-safe-320.png";
+const PAGE01_HERO_V11 =
+  "https://sikhadenge.in/reviews/Testimonial/Whatsapp%20Dashboard/neon_ai_agent_workspace_dashboard.png?v=11";
 
 function ShieldIcon() {
   return (
@@ -26,13 +28,13 @@ export default async function LoginPage() {
     <main
       className="split01"
       data-page="login-page01-split-v1"
-      data-rendering="left-hq-image-v10"
-      data-page01-hero="approved-hq-v10"
+      data-rendering="left-hq-image-v11"
+      data-page01-hero="approved-hq-v11"
     >
       <section className="split01__hero split01__hero--approved-image" aria-label="SikhaDenge WhatsApp AI Agent workspace">
         <img
           className="split01__hero-approved-image"
-          src="/page01-left-hq-v9.png?v=10"
+          src={PAGE01_HERO_V11}
           alt=""
           aria-hidden="true"
         />
