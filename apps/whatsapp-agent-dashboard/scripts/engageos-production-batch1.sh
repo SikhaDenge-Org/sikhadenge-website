@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Production rollout marker: Page 01 V10 stable-head retry — 2026-09-13
 # Production rollout marker: Page 01 canonical HQ V9 single-logo release — 2026-09-13
 # Production rollout marker: Phase17 Stage1 persisted SHADOW activation — 2026-09-13
 # Production rollout marker: validated inline Page 01 hero + canonical SikhaDenge logo — 2026-09-13
