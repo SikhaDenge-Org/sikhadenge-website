@@ -26,13 +26,13 @@ export default async function LoginPage() {
     <main
       className="split01"
       data-page="login-page01-split-v1"
-      data-rendering="left-hq-image-v9"
-      data-page01-hero="approved-hq-v9"
+      data-rendering="left-hq-image-v10"
+      data-page01-hero="approved-hq-v10"
     >
       <section className="split01__hero split01__hero--approved-image" aria-label="SikhaDenge WhatsApp AI Agent workspace">
         <img
           className="split01__hero-approved-image"
-          src="/page01-left-hq-v9.png?v=9"
+          src="/page01-left-hq-v9.png?v=10"
           alt=""
           aria-hidden="true"
         />

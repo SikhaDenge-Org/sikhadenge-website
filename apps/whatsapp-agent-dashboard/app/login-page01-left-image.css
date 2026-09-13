@@ -1,6 +1,12 @@
 /*
- * Page 01 V9 — permanent HQ LEFT artwork.
+ * Page 01 V10 — responsive HQ LEFT artwork treatment.
  * RIGHT authentication panel intentionally untouched.
+ *
+ * Desktop geometry note:
+ * The approved source is square (1254×1254), while the LEFT column is landscape.
+ * A plain `contain` therefore creates large dead side gutters. V10 keeps the full
+ * foreground artwork uncropped, but fills those gutters with a blurred/darkened
+ * cover layer made from the same approved asset.
  */
 
 .page01-login-asset-root {
@@ -14,55 +20,77 @@
   padding: 0 !important;
   overflow: hidden !important;
   isolation: isolate !important;
+  background: #020b26 !important;
+}
+
+/* Landscape-safe ambient extension of the square approved artwork. */
+.page01-login-asset-root .split01__hero--approved-image::before {
+  content: "" !important;
+  position: absolute !important;
+  z-index: 0 !important;
+  inset: -7% !important;
+  pointer-events: none !important;
+
+  background-image:
+    linear-gradient(rgba(2, 11, 38, .28), rgba(2, 11, 38, .45)),
+    url("/page01-left-hq-v9.png?v=10") !important;
+  background-repeat: no-repeat !important;
+  background-position: center center !important;
+  background-size: cover !important;
+
+  filter: blur(22px) brightness(.62) saturate(1.18) !important;
+  transform: scale(1.08) !important;
+  opacity: .88 !important;
+}
+
+/* Edge vignette keeps the LEFT/RIGHT split crisp and premium. */
+.page01-login-asset-root .split01__hero--approved-image::after {
+  content: "" !important;
+  position: absolute !important;
+  z-index: 1 !important;
+  inset: 0 !important;
+  pointer-events: none !important;
 
   background:
-    radial-gradient(
-      circle at 50% 45%,
-      #06205a 0%,
-      #031437 58%,
-      #020d27 100%
+    linear-gradient(
+      90deg,
+      rgba(2, 11, 38, .48) 0%,
+      rgba(2, 11, 38, .12) 11%,
+      rgba(2, 11, 38, 0) 24%,
+      rgba(2, 11, 38, 0) 76%,
+      rgba(2, 11, 38, .12) 89%,
+      rgba(2, 11, 38, .48) 100%
     ) !important;
 }
 
-.page01-login-asset-root .split01__hero--approved-image::before,
-.page01-login-asset-root .split01__hero--approved-image::after {
-  display: none !important;
-  content: none !important;
-}
-
 /*
- * Approved artwork intentionally runs at 94%.
- * This prevents the square source from being zoomed/cropped.
+ * Foreground stays full-quality and fully visible.
+ * No stretching, no square-to-landscape distortion, no destructive crop.
  */
 .page01-login-asset-root .split01__hero-approved-image {
   position: absolute !important;
-  z-index: 1 !important;
-
-  width: 94% !important;
-  height: 94% !important;
-
-  top: 3% !important;
-  left: 3% !important;
-  right: auto !important;
-  bottom: auto !important;
+  z-index: 2 !important;
+  inset: 0 !important;
 
   display: block !important;
+  width: 100% !important;
+  height: 100% !important;
   max-width: none !important;
   max-height: none !important;
 
   object-fit: contain !important;
   object-position: center center !important;
 
-  border-radius: 14px !important;
-
+  border-radius: 0 !important;
   image-rendering: auto !important;
   transform: none !important;
+  filter: drop-shadow(0 0 26px rgba(17, 92, 255, .14)) !important;
 
   pointer-events: none !important;
   user-select: none !important;
 }
 
-/* Safety: LEFT DOM logo must never duplicate the logo baked into artwork. */
+/* Safety: artwork already contains the approved SikhaDenge mark. */
 .page01-login-asset-root .split01__brand--approved-image {
   display: none !important;
 }
@@ -76,21 +104,36 @@
     padding: 0 !important;
   }
 
+  .page01-login-asset-root .split01__hero--approved-image::before {
+    inset: -4% !important;
+    filter: blur(16px) brightness(.62) saturate(1.15) !important;
+    transform: scale(1.05) !important;
+    opacity: .62 !important;
+  }
+
+  .page01-login-asset-root .split01__hero--approved-image::after {
+    background: linear-gradient(
+      180deg,
+      rgba(2, 11, 38, .14) 0%,
+      rgba(2, 11, 38, 0) 18%,
+      rgba(2, 11, 38, 0) 82%,
+      rgba(2, 11, 38, .18) 100%
+    ) !important;
+  }
+
   .page01-login-asset-root .split01__hero-approved-image {
-    width: 94% !important;
-    height: 94% !important;
-    top: 3% !important;
-    left: 3% !important;
+    width: 100% !important;
+    height: 100% !important;
     object-fit: contain !important;
   }
 }
 
 @media (max-width: 620px) {
+  .page01-login-asset-root .split01__hero--approved-image::before {
+    filter: blur(12px) brightness(.66) saturate(1.10) !important;
+  }
+
   .page01-login-asset-root .split01__hero-approved-image {
-    width: 96% !important;
-    height: 96% !important;
-    top: 2% !important;
-    left: 2% !important;
-    border-radius: 10px !important;
+    border-radius: 0 !important;
   }
 }
