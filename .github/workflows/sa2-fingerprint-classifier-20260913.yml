@@ -1,0 +1,234 @@
+name: SA2 Fingerprint Classifier 20260913
+
+on:
+  push:
+    branches:
+      - ops/wa-restart-forensics-20260913
+    paths:
+      - '.github/workflows/sa2-fingerprint-classifier-20260913.yml'
+
+permissions:
+  contents: read
+
+env:
+  SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+  SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+  SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+  SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+  SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    environment: whatsapp-agent-production
+    timeout-minutes: 15
+    steps:
+      - name: Configure pinned SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SSH_PORT="${SSH_PORT:-22}"
+          echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
+          install -d -m 700 "$HOME/.ssh"
+          KEY="$HOME/.ssh/prod"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"
+          fi
+          chmod 600 "$KEY"
+          read -r _ kt km _ <<< "$SSH_HOST_KEY"
+          test "$kt" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Classify clean-vs-production-snapshot schema delta
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+
+          EXPECTED_MAIN='c02e6e060b76b9f5ab6d16258a354a161e53275c'
+          BASELINE='20260913000000_canonical_baseline'
+          SA2='20260913093357_sa2_whatsapp_conversation_identity_consent'
+          EXPECTED_BASELINE_SHA='3526a0e2a9844d63ee6d2e46f71e72a7ca0a470da36698a6cebc8dd30caa0d96'
+          EXPECTED_SA2_SHA='68c5f5cfab1c0209e958dbb0de0539289481b1fb4176c3929e35117d3b569223'
+          EXPECTED_CLEAN_SHA='30dff7abcf1be59a61437a38a4327af799acad82598835da77f9fe690bca0dd5'
+          EXPECTED_CLEAN_ENTRIES='2296'
+          EXPECTED_SNAPSHOT_SHA='e081f0daee1d411645c450f27d51fde7130f77c658373e691745a004a4298126'
+          EXPECTED_SNAPSHOT_ENTRIES='2303'
+          SNAPSHOT_DB='sikhadenge_sa2_migration_rehearsal_20260913_163226'
+          PROD_DB='sikhadenge_dashboard'
+          REPO='/opt/sikhadenge-dashboard'
+          STAMP="$(date +%Y%m%d-%H%M%S)"
+          CLEAN_DB="sikhadenge_sa2_clean_reference_rehearsal_${STAMP//-/_}"
+          WT="/tmp/sa2-fingerprint-classify-$STAMP"
+          EVID="/root/migration-evidence/sa2-fingerprint-classification-$STAMP"
+          mkdir -p "$EVID"
+
+          CLEAN_CREATED=0
+          WT_CREATED=0
+          cleanup() {
+            code=$?
+            set +e
+            if [[ "$WT_CREATED" == 1 ]]; then
+              git -C "$REPO" worktree remove --force "$WT" >/dev/null 2>&1 || true
+            fi
+            if [[ "$CLEAN_CREATED" == 1 ]]; then
+              runuser -u postgres -- dropdb --if-exists "$CLEAN_DB" >/dev/null 2>&1 || true
+            fi
+            echo "CLEANUP_DISPOSABLE_CLEAN_DB=$([[ "$CLEAN_CREATED" == 1 ]] && echo ATTEMPTED || echo NOT_CREATED)"
+            echo "PRESERVED_MIGRATED_SNAPSHOT_DB=$SNAPSHOT_DB"
+            echo "EVIDENCE_DIR=$EVID"
+            exit "$code"
+          }
+          trap cleanup EXIT
+
+          echo '======================================================'
+          echo '=== SA2 SNAPSHOT FINGERPRINT DELTA CLASSIFICATION ==='
+          echo '======================================================'
+          echo 'PRODUCTION_DB_MUTATION=NONE'
+          echo 'PRODUCTION_PM2_MUTATION=NONE'
+          echo 'FEATURE_FLAG_CHANGE=NONE'
+          echo 'PRISMA_DB_PUSH=NOT_RUN'
+          echo 'PRISMA_MIGRATE_RESOLVE=NOT_RUN'
+          echo 'DISPOSABLE_DB_WRITES=ALLOWED'
+
+          [[ -d "$REPO/.git" ]]
+          git -C "$REPO" fetch --quiet origin main
+          REMOTE_MAIN="$(git -C "$REPO" rev-parse origin/main)"
+          echo "REMOTE_MAIN=$REMOTE_MAIN"
+          [[ "$REMOTE_MAIN" == "$EXPECTED_MAIN" ]]
+
+          git -C "$REPO" worktree add --detach "$WT" "$EXPECTED_MAIN" >/dev/null
+          WT_CREATED=1
+          WT_HEAD="$(git -C "$WT" rev-parse HEAD)"
+          echo "WORKTREE_HEAD=$WT_HEAD"
+          [[ "$WT_HEAD" == "$EXPECTED_MAIN" ]]
+
+          mapfile -t MIGS < <(find "$WT/prisma/migrations" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+          printf 'ACTIVE_MIGRATION=%s\n' "${MIGS[@]}"
+          [[ "${#MIGS[@]}" -eq 2 ]]
+          [[ "${MIGS[0]}" == "$BASELINE" ]]
+          [[ "${MIGS[1]}" == "$SA2" ]]
+
+          BASELINE_SHA="$(sha256sum "$WT/prisma/migrations/$BASELINE/migration.sql" | awk '{print $1}')"
+          SA2_SHA="$(sha256sum "$WT/prisma/migrations/$SA2/migration.sql" | awk '{print $1}')"
+          echo "BASELINE_SHA256=$BASELINE_SHA"
+          echo "SA2_SHA256=$SA2_SHA"
+          [[ "$BASELINE_SHA" == "$EXPECTED_BASELINE_SHA" ]]
+          [[ "$SA2_SHA" == "$EXPECTED_SA2_SHA" ]]
+
+          DASH_PID="$(pm2 pid sikhadenge-dashboard-revenue | tail -1 | tr -d '[:space:]')"
+          [[ "$DASH_PID" =~ ^[0-9]+$ ]]
+          PROD_URL="$(tr '\0' '\n' < "/proc/$DASH_PID/environ" | sed -n 's/^DATABASE_URL=//p' | head -1)"
+          [[ -n "$PROD_URL" ]]
+
+          URL_META="$(PROD_URL="$PROD_URL" node - <<'NODE'
+          const u = new URL(process.env.PROD_URL);
+          const db = decodeURIComponent(u.pathname.replace(/^\//,''));
+          const local = ['127.0.0.1','localhost','::1'].includes(u.hostname);
+          console.log(`${local ? 'LOCAL' : 'NONLOCAL'}|${db}|${u.port || '5432'}`);
+          NODE
+          )"
+          echo "PROD_URL_META=$URL_META"
+          [[ "$URL_META" == LOCAL\|$PROD_DB\|* ]]
+
+          make_url() {
+            TARGET_DB="$1" PROD_URL="$PROD_URL" node - <<'NODE'
+          const u = new URL(process.env.PROD_URL);
+          u.pathname = '/' + encodeURIComponent(process.env.TARGET_DB);
+          process.stdout.write(u.toString());
+          NODE
+          }
+          strip_query() {
+            INPUT_URL="$1" node - <<'NODE'
+          const u = new URL(process.env.INPUT_URL);
+          u.search = '';
+          process.stdout.write(u.toString());
+          NODE
+          }
+
+          PROD_PSQL_URL="$(strip_query "$PROD_URL")"
+          SNAPSHOT_URL="$(make_url "$SNAPSHOT_DB")"
+          CLEAN_URL="$(make_url "$CLEAN_DB")"
+
+          PROD_TABLES_BEFORE="$(psql "$PROD_PSQL_URL" -X -A -t -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p');")"
+          PROD_SA2_ROWS_BEFORE="$(psql "$PROD_PSQL_URL" -X -A -t -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public._prisma_migrations WHERE migration_name='$SA2';")"
+          echo "PRODUCTION_PUBLIC_TABLES_BEFORE=$PROD_TABLES_BEFORE"
+          echo "PRODUCTION_SA2_MIGRATION_ROWS_BEFORE=$PROD_SA2_ROWS_BEFORE"
+          [[ "$PROD_TABLES_BEFORE" == 132 ]]
+          [[ "$PROD_SA2_ROWS_BEFORE" == 0 ]]
+
+          SNAPSHOT_EXISTS="$(runuser -u postgres -- psql -X -A -t -d postgres -v ON_ERROR_STOP=1 -c "SELECT 1 FROM pg_database WHERE datname='$SNAPSHOT_DB';")"
+          [[ "$SNAPSHOT_EXISTS" == 1 ]]
+          SNAPSHOT_TABLES="$(psql "$(strip_query "$SNAPSHOT_URL")" -X -A -t -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p');")"
+          echo "SNAPSHOT_PUBLIC_TABLES=$SNAPSHOT_TABLES"
+          [[ "$SNAPSHOT_TABLES" == 139 ]]
+
+          runuser -u postgres -- createdb -O sdadmin "$CLEAN_DB"
+          CLEAN_CREATED=1
+          echo "DISPOSABLE_CLEAN_DB_CREATED=YES"
+
+          PRISMA_BIN="$REPO/node_modules/.bin/prisma"
+          [[ -x "$PRISMA_BIN" ]]
+          echo "PRISMA_VERSION=$($PRISMA_BIN -v | awk '/prisma[[:space:]]*:/ {print $3; exit}')"
+
+          DATABASE_URL="$CLEAN_URL" "$PRISMA_BIN" migrate deploy --schema "$WT/prisma/schema.prisma"
+          DATABASE_URL="$CLEAN_URL" "$PRISMA_BIN" migrate status --schema "$WT/prisma/schema.prisma"
+
+          MIGRATION_REHEARSAL_ALLOW=true node "$WT/scripts/migration-schema-fingerprint.mjs" --url "$CLEAN_URL" --output "$EVID/clean.json" | tee "$EVID/clean-summary.json"
+          MIGRATION_REHEARSAL_ALLOW=true node "$WT/scripts/migration-schema-fingerprint.mjs" --url "$SNAPSHOT_URL" --output "$EVID/snapshot.json" | tee "$EVID/snapshot-summary.json"
+
+          read -r CLEAN_SHA CLEAN_ENTRIES < <(node -e 'const j=require(process.argv[1]); process.stdout.write(j.sha256+" "+j.entryCount)' "$EVID/clean.json")
+          read -r SNAPSHOT_SHA SNAPSHOT_ENTRIES < <(node -e 'const j=require(process.argv[1]); process.stdout.write(j.sha256+" "+j.entryCount)' "$EVID/snapshot.json")
+          echo "CLEAN_REFERENCE_SHA256=$CLEAN_SHA"
+          echo "CLEAN_REFERENCE_ENTRIES=$CLEAN_ENTRIES"
+          echo "SNAPSHOT_SHA256=$SNAPSHOT_SHA"
+          echo "SNAPSHOT_ENTRIES=$SNAPSHOT_ENTRIES"
+
+          [[ "$CLEAN_SHA" == "$EXPECTED_CLEAN_SHA" ]]
+          [[ "$CLEAN_ENTRIES" == "$EXPECTED_CLEAN_ENTRIES" ]]
+          echo 'CLEAN_REFERENCE_ACCEPTED_FINGERPRINT=PASS'
+
+          [[ "$SNAPSHOT_SHA" == "$EXPECTED_SNAPSHOT_SHA" ]]
+          [[ "$SNAPSHOT_ENTRIES" == "$EXPECTED_SNAPSHOT_ENTRIES" ]]
+          echo 'SNAPSHOT_FINGERPRINT_REPRODUCIBLE=PASS'
+
+          node - "$EVID/clean.json" "$EVID/snapshot.json" "$EVID/only-in-production-snapshot.txt" "$EVID/only-in-clean-reference.txt" "$EVID/diff-summary.json" <<'NODE'
+          const fs = require('fs');
+          const [cleanPath, snapPath, onlySnapPath, onlyCleanPath, summaryPath] = process.argv.slice(2);
+          const clean = JSON.parse(fs.readFileSync(cleanPath, 'utf8'));
+          const snap = JSON.parse(fs.readFileSync(snapPath, 'utf8'));
+          if (!Array.isArray(clean.entries) || !Array.isArray(snap.entries)) throw new Error('fingerprint output missing entries array');
+          const c = new Set(clean.entries);
+          const s = new Set(snap.entries);
+          const onlySnap = snap.entries.filter(x => !c.has(x));
+          const onlyClean = clean.entries.filter(x => !s.has(x));
+          fs.writeFileSync(onlySnapPath, onlySnap.join('\n') + (onlySnap.length ? '\n' : ''));
+          fs.writeFileSync(onlyCleanPath, onlyClean.join('\n') + (onlyClean.length ? '\n' : ''));
+          fs.writeFileSync(summaryPath, JSON.stringify({onlyInProductionSnapshot: onlySnap.length, onlyInCleanReference: onlyClean.length}, null, 2)+'\n');
+          console.log(`ONLY_IN_PRODUCTION_SNAPSHOT=${onlySnap.length}`);
+          console.log(`ONLY_IN_CLEAN_REFERENCE=${onlyClean.length}`);
+          console.log('--- ONLY IN PRODUCTION SNAPSHOT ---');
+          for (const x of onlySnap) console.log(x);
+          console.log('--- ONLY IN CLEAN REFERENCE ---');
+          for (const x of onlyClean) console.log(x);
+          NODE
+
+          ONLY_SNAPSHOT="$(node -e 'const j=require(process.argv[1]);process.stdout.write(String(j.onlyInProductionSnapshot))' "$EVID/diff-summary.json")"
+          ONLY_CLEAN="$(node -e 'const j=require(process.argv[1]);process.stdout.write(String(j.onlyInCleanReference))' "$EVID/diff-summary.json")"
+          [[ "$ONLY_SNAPSHOT" == 7 ]]
+          [[ "$ONLY_CLEAN" == 0 ]]
+          echo 'EXACT_SEVEN_EXTRA_ENTRY_HYPOTHESIS=YES'
+
+          PROD_TABLES_AFTER="$(psql "$PROD_PSQL_URL" -X -A -t -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p');")"
+          PROD_SA2_ROWS_AFTER="$(psql "$PROD_PSQL_URL" -X -A -t -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public._prisma_migrations WHERE migration_name='$SA2';")"
+          echo "PRODUCTION_PUBLIC_TABLES_AFTER=$PROD_TABLES_AFTER"
+          echo "PRODUCTION_SA2_MIGRATION_ROWS_AFTER=$PROD_SA2_ROWS_AFTER"
+          [[ "$PROD_TABLES_AFTER" == "$PROD_TABLES_BEFORE" ]]
+          [[ "$PROD_SA2_ROWS_AFTER" == "$PROD_SA2_ROWS_BEFORE" ]]
+          echo 'PRODUCTION_UNCHANGED_GATE=PASS'
+          echo 'SA2_FINGERPRINT_DELTA_CLASSIFICATION=PASS'
+          REMOTE
