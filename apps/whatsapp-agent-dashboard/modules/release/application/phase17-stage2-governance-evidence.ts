@@ -52,6 +52,15 @@ function validTimestamp(value: unknown): value is string {
   return nonEmptyString(value) && Number.isFinite(Date.parse(value));
 }
 
+function zeroMetadataCount(metadata: Metadata, key: string): boolean {
+  const value = metadata[key];
+  return value === 0 || value === "0";
+}
+
+function zeroEventCount(event: AuditEvent | undefined, key: string): boolean {
+  return zeroMetadataCount(metadataOf(event), key);
+}
+
 function boundVerifiedForSha(event: AuditEvent, action: string, liveSha: string): boolean {
   const metadata = metadataOf(event);
   return (
@@ -133,11 +142,6 @@ function operatorPassEvidence(
   return operatorVerifiedForSha(events, action, liveSha, (metadata) => metadata.result === "PASS");
 }
 
-function zeroCount(event: AuditEvent | undefined, key: string): boolean {
-  const value = metadataOf(event)[key];
-  return value === 0 || value === "0";
-}
-
 export function deriveStage2GovernanceEvidence(input: {
   liveSha: string;
   candidateId: string;
@@ -159,13 +163,13 @@ export function deriveStage2GovernanceEvidence(input: {
     input.events,
     STAGE2_GOVERNANCE_ACTIONS.criticalIncidentReview,
     input.liveSha,
-    (metadata) => zeroCount({ action: "", outcome: "", metadata }, "unresolvedCriticalIncidents"),
+    (metadata) => zeroMetadataCount(metadata, "unresolvedCriticalIncidents"),
   );
   const duplicates = operatorVerifiedForSha(
     input.events,
     STAGE2_GOVERNANCE_ACTIONS.duplicateSendReview,
     input.liveSha,
-    (metadata) => zeroCount({ action: "", outcome: "", metadata }, "unexplainedDuplicateSends"),
+    (metadata) => zeroMetadataCount(metadata, "unexplainedDuplicateSends"),
   );
   const scope = operatorVerifiedForSha(
     input.events,
@@ -194,14 +198,12 @@ export function deriveStage2GovernanceEvidence(input: {
     STAGE2_GOVERNANCE_ACTIONS.observationWindowComplete,
     input.liveSha,
     (metadata) => {
-      if (
-        metadata.complete !== true ||
-        !validTimestamp(metadata.windowStartedAt) ||
-        !validTimestamp(metadata.windowEndedAt)
-      ) {
+      const windowStartedAt = metadata.windowStartedAt;
+      const windowEndedAt = metadata.windowEndedAt;
+      if (metadata.complete !== true || !validTimestamp(windowStartedAt) || !validTimestamp(windowEndedAt)) {
         return false;
       }
-      return Date.parse(metadata.windowEndedAt) >= Date.parse(metadata.windowStartedAt);
+      return Date.parse(windowEndedAt) >= Date.parse(windowStartedAt);
     },
   );
 
@@ -212,8 +214,8 @@ export function deriveStage2GovernanceEvidence(input: {
     monitoringActive: Boolean(monitoring),
     permissionsVerified: input.permissionsVerified,
     policyVerified: Boolean(policy),
-    unresolvedCriticalIncidents: zeroCount(incidents, "unresolvedCriticalIncidents") ? 0 : 1,
-    unexplainedDuplicateSends: zeroCount(duplicates, "unexplainedDuplicateSends") ? 0 : 1,
+    unresolvedCriticalIncidents: zeroEventCount(incidents, "unresolvedCriticalIncidents") ? 0 : 1,
+    unexplainedDuplicateSends: zeroEventCount(duplicates, "unexplainedDuplicateSends") ? 0 : 1,
     emergencyStopActive: input.emergencyStopActive,
     scopeApproved: Boolean(scope),
     smokeTestVerified: Boolean(smoke),
