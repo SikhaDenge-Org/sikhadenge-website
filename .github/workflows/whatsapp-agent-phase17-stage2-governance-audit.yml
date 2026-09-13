@@ -1,0 +1,140 @@
+name: WhatsApp Agent Phase17 Stage2 Governance Audit
+
+on:
+  push:
+    branches:
+      - phase17-stage2-governance-evidence-20260913
+    paths:
+      - ".github/workflows/whatsapp-agent-phase17-stage2-governance-audit.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  audit-stage2-governance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_LIVE_SHA: 5d4dc4b37ea943cf0dc68db00bbff7ef216af16f
+      WORKSPACE_ID: engagews_default
+      STAGE2_CANDIDATE_ID: cmtv8n9v50001kw3hzm6b2y0b
+
+    steps:
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Audit production governance gates read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' WORKSPACE_ID='$WORKSPACE_ID' STAGE2_CANDIDATE_ID='$STAGE2_CANDIDATE_ID' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          LIVE_APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ENV_FILE="$LIVE_APP/.env"
+
+          read_env() {
+            node - "$ENV_FILE" "$1" <<'NODE'
+          const fs=require('node:fs');
+          const [file,key]=process.argv.slice(2);
+          for(const raw of fs.readFileSync(file,'utf8').split(/\r?\n/)){
+            const l=raw.trim(); if(!l||l.startsWith('#')) continue;
+            const n=l.startsWith('export ')?l.slice(7).trim():l;
+            const i=n.indexOf('='); if(i<1||n.slice(0,i).trim()!==key) continue;
+            let v=n.slice(i+1).trim();
+            if(v.length>=2&&((v.startsWith('"')&&v.endsWith('"'))||(v.startsWith("'")&&v.endsWith("'")))) v=v.slice(1,-1);
+            process.stdout.write(v); process.exit(0);
+          }
+          process.exit(1);
+          NODE
+          }
+
+          gate() { printf 'GATE_%s=%s\n' "$1" "$2"; }
+
+          live_sha="$(git -C "$LIVE_APP" rev-parse HEAD)"
+          dirty="$(git -C "$LIVE_APP" status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          [[ "$live_sha" == "$EXPECTED_LIVE_SHA" ]] && gate EXACT_SHA PROVEN || gate EXACT_SHA FAIL
+          [[ "$dirty" == "0" ]] && gate CLEAN_WORKTREE PROVEN || gate CLEAN_WORKTREE FAIL
+
+          DB="$(node "$LIVE_APP/scripts/prisma-postgres-cli-url.mjs" "$(read_env DATABASE_URL)")"
+
+          state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",\"externalWritesAllowed\",\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
+          transitions="$(psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "SELECT COUNT(*) FROM \"EngageControlledLaunchTransition\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
+          printf 'CONTROLLED_LAUNCH_STATE=%s\n' "$state"
+          printf 'CONTROLLED_LAUNCH_TRANSITION_COUNT=%s\n' "$transitions"
+          [[ "$state" == "INTERNAL_TEST_IDENTITIES|SHADOW|NO_EXTERNAL_WRITES|f|1" && "$transitions" == "1" ]] && gate STAGE1_BASELINE PROVEN || gate STAGE1_BASELINE FAIL
+
+          candidate="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"channel\",\"status\",COALESCE(\"capabilities\"->'evidence'->>'apiVerifiedAt',''),COALESCE(\"capabilities\"->'evidence'->>'webhookVerifiedAt',''),COALESCE(\"capabilities\"->'evidence'->>'permissionsVerified','') FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"id\"='${STAGE2_CANDIDATE_ID}';")"
+          IFS='|' read -r candidate_channel candidate_status api_verified webhook_verified permissions_verified <<< "$candidate"
+          [[ "$candidate_channel" == "WHATSAPP" && "$candidate_status" == "CONNECTED" ]] && gate CANDIDATE_CONNECTED PROVEN || gate CANDIDATE_CONNECTED FAIL
+          [[ -n "$api_verified" && -n "$webhook_verified" && "$permissions_verified" == "true" ]] && gate PERMISSIONS_WEBHOOK PROVEN || gate PERMISSIONS_WEBHOOK FAIL
+
+          active_kill_switches="$(psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "SELECT COUNT(*) FROM \"EngageKillSwitch\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"active\"=true;")"
+          printf 'ACTIVE_KILL_SWITCH_COUNT=%s\n' "$active_kill_switches"
+          [[ "$active_kill_switches" == "0" ]] && gate EMERGENCY_STOP PROVEN || gate EMERGENCY_STOP FAIL
+
+          enabled_flags="$(psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "SELECT COUNT(*) FROM \"EngageFeatureFlag\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"enabled\"=true;")"
+          printf 'ENABLED_FEATURE_FLAG_COUNT=%s\n' "$enabled_flags"
+          [[ "$enabled_flags" == "0" ]] && gate HIGH_RISK_FLAGS PROVEN || gate HIGH_RISK_FLAGS FAIL
+
+          critical_attestation="$(psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "SELECT COUNT(*) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"action\"='PHASE17_CRITICAL_INCIDENT_REVIEW' AND \"outcome\"='VERIFIED' AND COALESCE(\"metadata\"->>'unresolvedCriticalIncidents','')='0';")"
+          duplicate_attestation="$(psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "SELECT COUNT(*) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"action\"='PHASE17_DUPLICATE_SEND_REVIEW' AND \"outcome\"='VERIFIED' AND COALESCE(\"metadata\"->>'unexplainedDuplicateSends','')='0';")"
+          [[ "$critical_attestation" -gt 0 ]] && gate CRITICAL_INCIDENTS PROVEN || gate CRITICAL_INCIDENTS UNPROVEN
+          [[ "$duplicate_attestation" -gt 0 ]] && gate DUPLICATE_SENDS PROVEN || gate DUPLICATE_SENDS UNPROVEN
+
+          for spec in \
+            "ROLLBACK_TESTED:PHASE17_ROLLBACK_REHEARSAL" \
+            "MONITORING_ACTIVE:PHASE17_MONITORING_ACTIVE" \
+            "SCOPE_APPROVED:PHASE17_STAGE2_SCOPE_APPROVED" \
+            "SUPPORT_RUNBOOK_ACTIVE:PHASE17_SUPPORT_RUNBOOK_ACTIVE" \
+            "OBSERVATION_WINDOW_COMPLETE:PHASE17_OBSERVATION_WINDOW_COMPLETE" \
+            "PRODUCTION_EVIDENCE_RECORDED:PHASE17_PRODUCTION_EVIDENCE_RECORDED"; do
+            gate_name="${spec%%:*}"; action="${spec#*:}"
+            count="$(psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "SELECT COUNT(*) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"action\"='${action}' AND \"outcome\"='VERIFIED' AND COALESCE(\"metadata\"->>'liveSha','')='${EXPECTED_LIVE_SHA}';")"
+            [[ "$count" -gt 0 ]] && gate "$gate_name" PROVEN || gate "$gate_name" UNPROVEN
+          done
+
+          pm2_state="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s||"[]");const p=a.find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(String(p?.pm2_env?.status||"missing"))})')"
+          printf 'PM2_STATE=%s\n' "$pm2_state"
+          [[ "$pm2_state" == "online" ]] && gate PROCESS_HEALTH PROVEN || gate PROCESS_HEALTH FAIL
+          # PM2 alone is not formal monitoring proof; MONITORING_ACTIVE is attestation-backed above.
+
+          login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login || true)"
+          printf 'LOGIN_HTTP=%s\n' "$login_http"
+          [[ "$login_http" == "200" ]] && gate BASIC_SMOKE PROVEN || gate BASIC_SMOKE FAIL
+          # A public login 200 is not equivalent to authenticated Inbox/readiness smoke.
+          auth_smoke="$(psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "SELECT COUNT(*) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"action\"='PHASE17_AUTHENTICATED_SMOKE' AND \"outcome\"='VERIFIED' AND COALESCE(\"metadata\"->>'liveSha','')='${EXPECTED_LIVE_SHA}';")"
+          [[ "$auth_smoke" -gt 0 ]] && gate AUTHENTICATED_SMOKE PROVEN || gate AUTHENTICATED_SMOKE UNPROVEN
+
+          printf 'GOVERNANCE_READY=false\n'
+          printf 'RESULT=READ_ONLY_AUDIT_COMPLETE_NO_MUTATION\n'
+          REMOTE
