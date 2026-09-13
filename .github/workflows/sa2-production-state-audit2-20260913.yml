@@ -1,0 +1,118 @@
+name: SA2 Production State Audit2 20260913
+
+on:
+  push:
+    branches: [ops/wa-restart-forensics-20260913]
+    paths: ['.github/workflows/sa2-production-state-audit2-20260913.yml']
+
+permissions:
+  contents: read
+
+env:
+  SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+  SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+  SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+  SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+  SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    environment: whatsapp-agent-production
+    timeout-minutes: 12
+    steps:
+      - name: Configure pinned SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SSH_PORT="${SSH_PORT:-22}"; echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
+          install -d -m 700 "$HOME/.ssh"; KEY="$HOME/.ssh/prod"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"; fi
+          chmod 600 "$KEY"
+          read -r _ kt km _ <<< "$SSH_HOST_KEY"; test "$kt" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"; chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Complete read-only SA2 verification and provenance
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          EXPECTED_MAIN='c02e6e060b76b9f5ab6d16258a354a161e53275c'
+          BASELINE='20260913000000_canonical_baseline'
+          SA2='20260913093357_sa2_whatsapp_conversation_identity_consent'
+          BASELINE_SHA='3526a0e2a9844d63ee6d2e46f71e72a7ca0a470da36698a6cebc8dd30caa0d96'
+          SA2_SHA='68c5f5cfab1c0209e958dbb0de0539289481b1fb4176c3929e35117d3b569223'
+          REPO='/opt/sikhadenge-dashboard'
+          STAMP="$(date +%Y%m%d-%H%M%S)"; WT="/tmp/sa2-audit2-$STAMP"; EVID="/root/migration-evidence/sa2-production-state-audit2-$STAMP"; mkdir -p "$EVID"
+          CREATED=0
+          trap 'c=$?; set +e; [[ "$CREATED" == 1 ]] && git -C "$REPO" worktree remove --force "$WT" >/dev/null 2>&1 || true; echo "EVIDENCE_DIR=$EVID"; exit $c' EXIT
+
+          echo '=== SA2 PRODUCTION COMPLETE READ-ONLY AUDIT ==='
+          echo 'PRODUCTION_DB_MUTATION=NONE'
+          echo 'PM2_MUTATION=NONE'
+          echo 'FEATURE_FLAG_CHANGE=NONE'
+          echo 'MIGRATE_DEPLOY_RUN_BY_THIS_AUDIT=NO'
+          echo 'DB_PUSH_RUN=NO'
+          echo 'MIGRATE_RESOLVE_RUN=NO'
+
+          git -C "$REPO" fetch --quiet origin main
+          [[ "$(git -C "$REPO" rev-parse origin/main)" == "$EXPECTED_MAIN" ]]
+          git -C "$REPO" worktree add --detach "$WT" "$EXPECTED_MAIN" >/dev/null; CREATED=1
+          MIG="$WT/prisma/migrations/$SA2/migration.sql"
+          [[ "$(sha256sum "$MIG" | awk '{print $1}')" == "$SA2_SHA" ]]
+
+          DASH_PID="$(pm2 pid sikhadenge-dashboard-revenue | tail -1 | tr -d '[:space:]')"
+          URL="$(tr '\0' '\n' < "/proc/$DASH_PID/environ" | sed -n 's/^DATABASE_URL=//p' | head -1)"; [[ -n "$URL" ]]
+          PSQL_URL="$(U="$URL" node -e 'const u=new URL(process.env.U);u.search="";process.stdout.write(u.toString())')"
+          META="$(U="$URL" node -e 'const u=new URL(process.env.U);const d=decodeURIComponent(u.pathname.slice(1));process.stdout.write(`${["127.0.0.1","localhost","::1"].includes(u.hostname)?"LOCAL":"NONLOCAL"}|${d}|${u.port||"5432"}`)')"
+          echo "PRODUCTION_DB_META=$META"; [[ "$META" == 'LOCAL|sikhadenge_dashboard|5432' ]]
+
+          echo '=== MIGRATION METADATA ==='
+          psql "$PSQL_URL" -X -A -F '|' -P footer=off -v ON_ERROR_STOP=1 -c "SELECT migration_name,checksum,started_at,finished_at,applied_steps_count,COALESCE(rolled_back_at::text,''),CASE WHEN logs IS NULL OR logs='' THEN 'NO_LOGS' ELSE 'HAS_LOGS' END FROM public._prisma_migrations ORDER BY started_at;" | tee "$EVID/migrations.txt"
+          [[ "$(psql "$PSQL_URL" -X -A -t -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public._prisma_migrations;")" == 2 ]]
+          [[ "$(psql "$PSQL_URL" -X -A -t -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public._prisma_migrations WHERE finished_at IS NULL OR rolled_back_at IS NOT NULL;")" == 0 ]]
+          [[ "$(psql "$PSQL_URL" -X -A -t -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public._prisma_migrations WHERE migration_name='$BASELINE' AND checksum='$BASELINE_SHA' AND finished_at IS NOT NULL AND rolled_back_at IS NULL;")" == 1 ]]
+          [[ "$(psql "$PSQL_URL" -X -A -t -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public._prisma_migrations WHERE migration_name='$SA2' AND checksum='$SA2_SHA' AND finished_at IS NOT NULL AND rolled_back_at IS NULL AND applied_steps_count=1;")" == 1 ]]
+          echo 'MIGRATION_METADATA_GATE=PASS'
+
+          PUBLIC_TABLES="$(psql "$PSQL_URL" -X -A -t -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p');")"; echo "PUBLIC_TABLE_COUNT=$PUBLIC_TABLES"; [[ "$PUBLIC_TABLES" == 139 ]]
+
+          mapfile -t TABLES < <(grep -oE 'CREATE TABLE "[^"]+"' "$MIG" | sed -E 's/CREATE TABLE "([^"]+)"/\1/' | sort -u)
+          mapfile -t INDEXES < <(grep -oE 'CREATE (UNIQUE )?INDEX "[^"]+"' "$MIG" | sed -E 's/CREATE (UNIQUE )?INDEX "([^"]+)"/\2/' | sort -u)
+          mapfile -t CONS < <(grep -oE 'ADD CONSTRAINT "[^"]+"' "$MIG" | sed -E 's/ADD CONSTRAINT "([^"]+)"/\1/' | sort -u)
+          echo "EXPECTED_SA2_TABLES=${#TABLES[@]}|INDEXES=${#INDEXES[@]}|CONSTRAINTS=${#CONS[@]}"
+          [[ "${#TABLES[@]}" == 7 && "${#INDEXES[@]}" == 36 && "${#CONS[@]}" == 10 ]]
+
+          miss_t=0; for x in "${TABLES[@]}"; do [[ "$x" =~ ^[A-Za-z0-9_]+$ ]]; n="$(psql "$PSQL_URL" -X -A -t -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_class c JOIN pg_namespace ns ON ns.oid=c.relnamespace WHERE ns.nspname='public' AND c.relname='$x' AND c.relkind IN ('r','p');")"; [[ "$n" == 1 ]] || { echo "MISSING_TABLE=$x"; miss_t=$((miss_t+1)); }; done
+          miss_i=0; for x in "${INDEXES[@]}"; do [[ "$x" =~ ^[A-Za-z0-9_]+$ ]]; n="$(psql "$PSQL_URL" -X -A -t -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname='$x';")"; [[ "$n" == 1 ]] || { echo "MISSING_INDEX=$x"; miss_i=$((miss_i+1)); }; done
+          miss_c=0; for x in "${CONS[@]}"; do [[ "$x" =~ ^[A-Za-z0-9_]+$ ]]; n="$(psql "$PSQL_URL" -X -A -t -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_constraint con JOIN pg_namespace ns ON ns.oid=con.connamespace WHERE ns.nspname='public' AND con.conname='$x';")"; [[ "$n" == 1 ]] || { echo "MISSING_CONSTRAINT=$x"; miss_c=$((miss_c+1)); }; done
+          echo "MISSING_SA2_TABLES=$miss_t"; echo "MISSING_SA2_INDEXES=$miss_i"; echo "MISSING_SA2_CONSTRAINTS=$miss_c"; [[ "$miss_t" == 0 && "$miss_i" == 0 && "$miss_c" == 0 ]]
+          echo 'SA2_DDL_OBJECT_GATE=PASS'
+
+          echo '=== SA2 ROW COUNTS ==='
+          total=0; for x in "${TABLES[@]}"; do [[ "$x" =~ ^[A-Za-z0-9_]+$ ]]; n="$(psql "$PSQL_URL" -X -A -t -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.\"$x\";")"; echo "$x=$n"; total=$((total+n)); done; echo "TOTAL_SA2_ROWS=$total"
+
+          echo '=== BUSINESS COUNTS CURRENT ==='
+          for x in Lead Payment Admission WhatsAppWebhookEvent WhatsAppMessage WhatsAppDeliveryAttempt WhatsAppProviderError; do n="$(psql "$PSQL_URL" -X -A -t -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.\"$x\";")"; echo "$x=$n"; done
+
+          echo '=== PRISMA STATUS ==='
+          DATABASE_URL="$URL" "$REPO/node_modules/.bin/prisma" migrate status --schema "$WT/prisma/schema.prisma" | tee "$EVID/prisma-status.txt"
+
+          echo '=== MIGRATION PROVENANCE FROM ROOT HISTORY ==='
+          if [[ -r /root/.bash_history ]]; then
+            nl -ba /root/.bash_history | grep -Ei 'prisma[[:space:]]+migrate[[:space:]]+deploy|20260913093357|sa2|migration.*deploy' | tail -220 | sed -E -e 's#(postgres(ql)?://)[^[:space:]]+#\1REDACTED#g' -e 's#((TOKEN|SECRET|PASSWORD|PASS|API_KEY|ACCESS_KEY|DATABASE_URL)[A-Za-z0-9_]*[=:][[:space:]]*)[^[:space:]]+#\1REDACTED#gI' | tee "$EVID/history.txt" || true
+          fi
+
+          echo '=== CURRENT ROOT PTS / DEPLOY PROCESSES ==='
+          ps -eo pid=,ppid=,user=,lstart=,etimes=,args= --forest | grep -E '[s]shd: root@pts|[p]risma .*migrate|[p]npm .*build|[p]m2 .*sikhadenge-whatsapp-agent' | tail -120 || true
+
+          echo '=== PM2 SAFE STATE ==='
+          pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const a=JSON.parse(b);for(const name of ["sikhadenge-dashboard-revenue","sikhadenge-whatsapp-agent"]){const p=a.find(x=>x.name===name),e=p?.pm2_env||{};console.log(`${name}|status=${e.status}|pid=${p?.pid}|restarts=${e.restart_time}|unstable=${e.unstable_restarts}|cwd=${e.pm_cwd}`)}})'
+          echo "DASHBOARD_HTTP=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3400/ || true)"
+          echo "WHATSAPP_HTTP=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/ || true)"
+
+          echo '=== EXACT WA BOOLEAN FLAGS ONLY ==='
+          WPID="$(pm2 pid sikhadenge-whatsapp-agent | tail -1 | tr -d '[:space:]')"; if [[ "$WPID" =~ ^[0-9]+$ ]]; then tr '\0' '\n' < "/proc/$WPID/environ" | grep -E '^(SALES_AI_ENABLED|WHATSAPP_INGEST_ENABLED|WHATSAPP_SA2_DOMAIN_PROCESSING_ENABLED|WHATSAPP_SA2_PRIVACY_ACTIONS_ENABLED|WHATSAPP_OUTBOUND_ENABLED|WHATSAPP_AI_REPLY_ENABLED|WHATSAPP_FOLLOWUP_ENABLED|WHATSAPP_PAYMENT_LINK_ACTION_ENABLED)=' || true; fi
+          echo 'SA2_PRODUCTION_COMPLETE_AUDIT=PASS'
+          REMOTE
