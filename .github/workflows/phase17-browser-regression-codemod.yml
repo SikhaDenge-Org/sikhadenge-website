@@ -1,0 +1,92 @@
+name: Phase17 Browser Regression Codemod
+
+on:
+  push:
+    branches:
+      - phase17-stage2-governance-v15-20260913
+    paths:
+      - ".github/workflows/phase17-browser-regression-codemod.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: phase17-browser-regression-codemod
+  cancel-in-progress: false
+
+jobs:
+  patch-stale-browser-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact branch head
+        uses: actions/checkout@v4
+        with:
+          ref: phase17-stage2-governance-v15-20260913
+          fetch-depth: 0
+
+      - name: Apply exact V15 browser contract updates
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path("apps/whatsapp-agent-dashboard/tests/browser")
+          password_specs = [
+              "admin-enterprise-responsive.spec.mjs",
+              "automation-enterprise-responsive.spec.mjs",
+              "cutover-enterprise-responsive.spec.mjs",
+              "integrations-enterprise-responsive.spec.mjs",
+              "knowledge-enterprise-responsive.spec.mjs",
+              "training-enterprise-responsive.spec.mjs",
+              "inbox-enterprise-completion.spec.mjs",
+          ]
+
+          old_password = 'page.getByLabel("Password").fill(ADMIN_PASSWORD);'
+          new_password = 'page.getByLabel("Password", { exact: true }).fill(ADMIN_PASSWORD);'
+          for name in password_specs:
+              path = root / name
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old_password)
+              if count != 1:
+                  raise SystemExit(f"{name}: expected exactly one stale Password locator, found {count}")
+              path.write_text(text.replace(old_password, new_password, 1), encoding="utf-8")
+
+          shell_path = root / "final-shell-pwa-responsive.spec.mjs"
+          shell_text = shell_path.read_text(encoding="utf-8")
+          old_hero = 'toHaveAttribute("data-page01-hero", "approved-hq-v10")'
+          new_hero = 'toHaveAttribute("data-page01-hero", "approved-hq-v11")'
+          if shell_text.count(old_hero) != 1:
+              raise SystemExit("final-shell: expected exactly one approved-hq-v10 assertion")
+          shell_path.write_text(shell_text.replace(old_hero, new_hero, 1), encoding="utf-8")
+
+          all_views_path = root / "enterprise-ui-all-views.spec.mjs"
+          all_views = all_views_path.read_text(encoding="utf-8")
+          if all_views.count("expectInterFont") != 4:
+              raise SystemExit(f"enterprise-ui-all-views: expected 4 expectInterFont references, found {all_views.count('expectInterFont')}")
+          if all_views.count('expect(family).toContain("inter");') != 1:
+              raise SystemExit("enterprise-ui-all-views: expected exactly one Inter font assertion")
+          all_views = all_views.replace("expectInterFont", "expectManropeFont")
+          all_views = all_views.replace('expect(family).toContain("inter");', 'expect(family).toContain("manrope");', 1)
+          all_views_path.write_text(all_views, encoding="utf-8")
+          PY
+
+      - name: Verify patch is exact and scoped
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git diff --check
+          test "$(git diff --name-only | wc -l | tr -d ' ')" = "9"
+          ! git diff --name-only | grep -Ev '^apps/whatsapp-agent-dashboard/tests/browser/(admin-enterprise-responsive|automation-enterprise-responsive|cutover-enterprise-responsive|integrations-enterprise-responsive|knowledge-enterprise-responsive|training-enterprise-responsive|inbox-enterprise-completion|final-shell-pwa-responsive|enterprise-ui-all-views)\.spec\.mjs$'
+          git diff -- apps/whatsapp-agent-dashboard/tests/browser
+
+      - name: Commit browser contract repair
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/whatsapp-agent-dashboard/tests/browser
+          git commit -m "test: align browser regression with V15 UI contract"
+          git push origin HEAD:phase17-stage2-governance-v15-20260913
