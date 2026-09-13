@@ -1,0 +1,54 @@
+name: Phase17 Production Dirty Paths Readonly
+
+on:
+  push:
+    branches: [phase17-stage2-governance-v15-20260913]
+    paths:
+      - ".github/workflows/phase17-prod-dirty-paths-readonly.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  paths:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_LIVE_SHA: f651d0182861c191c041b36e96902f20d5a6da2b
+    steps:
+      - name: Configure pinned SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then SSH_PORT=22; echo SSH_PORT=22 >> "$GITHUB_ENV"; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+      - name: Print tracked paths only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          A=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          root="$(git -C "$A" rev-parse --show-toplevel)"
+          test "$(git -C "$root" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
+          printf 'TRACKED_DIRTY_STATUS_BEGIN\n'
+          git -C "$root" status --short --untracked-files=no
+          printf 'TRACKED_DIRTY_STATUS_END\n'
+          printf 'TRACKED_DIRTY_PATHS_BEGIN\n'
+          git -C "$root" diff HEAD --name-only --no-renames | LC_ALL=C sort
+          printf 'TRACKED_DIRTY_PATHS_END\n'
+          REMOTE
