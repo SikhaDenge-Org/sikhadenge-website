@@ -5,6 +5,7 @@ import { getCurrentDashboardUser } from "../../lib/auth/session";
 import "../login-page01-code.css";
 import "../login-page01-left-image.css";
 import "../login-page01-auth-v12.css";
+import "../login-page01-brand-v13.css";
 
 export const dynamic = "force-dynamic";
 
@@ -46,9 +47,21 @@ export default async function LoginPage() {
         <div className="split01__right-dots" aria-hidden="true" />
 
         <div className="split01__signin-inner">
-          <div className="split01__signin-brand">
-            <img src={BRAND_LOGO} alt="SikhaDenge" width={320} height={80} />
-            <strong>EngageOS</strong>
+          <div className="split01__signin-brand split01__signin-brand--v13" data-brand-lockup="v13">
+            <div className="split01__brand-lockup">
+              <img
+                className="split01__brand-logo"
+                src={BRAND_LOGO}
+                alt="SikhaDenge"
+                width={320}
+                height={80}
+              />
+              <span className="split01__brand-divider" aria-hidden="true" />
+              <span className="split01__product-id">
+                <span className="split01__product-name">EngageOS</span>
+                <span className="split01__product-kicker">AI ENGAGEMENT</span>
+              </span>
+            </div>
           </div>
 
           <div className="split01__signin-heading">
