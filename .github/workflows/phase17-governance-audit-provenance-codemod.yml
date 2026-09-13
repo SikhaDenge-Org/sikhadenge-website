@@ -19,67 +19,26 @@ jobs:
           ref: phase17-stage2-governance-v15-20260913
           fetch-depth: 0
       - name: Harden governance audit provenance checks
-        shell: python
-        run: |
-          from pathlib import Path
-
-          path = Path('.github/workflows/whatsapp-agent-phase17-stage2-governance-v15.yml')
-          text = path.read_text()
-          old = '''          attest_sha(){
-            local gate="$1" action="$2" extra="${3:-}" count
-            count="$(q "SELECT COUNT(*) FROM \\"EngageSecurityAuditEvent\\" WHERE \\"workspaceId\\"='${WORKSPACE_ID}' AND \\"action\\"='${action}' AND \\"outcome\\"='VERIFIED' AND COALESCE(\\"metadata\\"->>'liveSha','')='${EXPECTED_LIVE_SHA}' ${extra}")"
-            [[ "$count" -gt 0 ]] && proven "$gate" || unknown "$gate"
-          }
-          attest_sha CRITICAL_INCIDENTS PHASE17_CRITICAL_INCIDENT_REVIEW "AND COALESCE(\\"metadata\\"->>'unresolvedCriticalIncidents','')='0'"
-          attest_sha DUPLICATE_SENDS PHASE17_DUPLICATE_SEND_REVIEW "AND COALESCE(\\"metadata\\"->>'unexplainedDuplicateSends','')='0'"
-          attest_sha ROLLBACK_TESTED PHASE17_ROLLBACK_REHEARSAL
-          attest_sha MONITORING_ACTIVE PHASE17_MONITORING_ACTIVE
-          attest_sha POLICY_VERIFIED PHASE17_POLICY_VERIFIED
-          attest_sha SCOPE_APPROVED PHASE17_STAGE2_SCOPE_APPROVED "AND COALESCE(\\"metadata\\"->>'candidateId','')='${CANDIDATE_ID}'"
-          attest_sha AUTHENTICATED_SMOKE PHASE17_AUTHENTICATED_SMOKE
-          attest_sha SUPPORT_RUNBOOK_ACTIVE PHASE17_SUPPORT_RUNBOOK_ACTIVE
-          attest_sha OBSERVATION_WINDOW_COMPLETE PHASE17_OBSERVATION_WINDOW_COMPLETE
-          attest_sha PRODUCTION_EVIDENCE_RECORDED PHASE17_PRODUCTION_EVIDENCE_RECORDED
-'''
-          new = '''          operator_attest(){
-            local gate="$1" action="$2" extra="${3:-}" count
-            count="$(q "SELECT COUNT(*) FROM \\"EngageSecurityAuditEvent\\" WHERE \\"workspaceId\\"='${WORKSPACE_ID}' AND \\"action\\"='${action}' AND \\"outcome\\"='VERIFIED' AND COALESCE(\\"entityType\\",'')='CONTROLLED_LAUNCH_GOVERNANCE' AND COALESCE(\\"entityId\\",'')='${EXPECTED_LIVE_SHA}' AND COALESCE(\\"reasonCode\\",'')='OPERATOR_VERIFIED_EXACT_SHA' AND COALESCE(\\"actorId\\",'')<>'' AND COALESCE(\\"requestId\\",'')<>'' AND COALESCE(\\"metadata\\"->>'liveSha','')='${EXPECTED_LIVE_SHA}' AND COALESCE(\\"metadata\\"->>'proofRef','')<>'' AND COALESCE(\\"metadata\\"->>'verifiedAt','')<>'' ${extra}")"
-            [[ "$count" -gt 0 ]] && proven "$gate" || unknown "$gate"
-          }
-          machine_attest(){
-            local gate="$1" action="$2" extra="${3:-}" count
-            count="$(q "SELECT COUNT(*) FROM \\"EngageSecurityAuditEvent\\" WHERE \\"workspaceId\\"='${WORKSPACE_ID}' AND \\"action\\"='${action}' AND \\"outcome\\"='VERIFIED' AND COALESCE(\\"entityType\\",'')='CONTROLLED_LAUNCH_GOVERNANCE' AND COALESCE(\\"entityId\\",'')='${EXPECTED_LIVE_SHA}' AND COALESCE(\\"reasonCode\\",'')='MACHINE_VERIFIED_EXACT_SHA' AND \\"actorId\\" IS NULL AND COALESCE(\\"requestId\\",'')<>'' AND COALESCE(\\"metadata\\"->>'liveSha','')='${EXPECTED_LIVE_SHA}' ${extra}")"
-            [[ "$count" -gt 0 ]] && proven "$gate" || unknown "$gate"
-          }
-          operator_attest CRITICAL_INCIDENTS PHASE17_CRITICAL_INCIDENT_REVIEW "AND COALESCE(\\"metadata\\"->>'unresolvedCriticalIncidents','')='0'"
-          operator_attest DUPLICATE_SENDS PHASE17_DUPLICATE_SEND_REVIEW "AND COALESCE(\\"metadata\\"->>'unexplainedDuplicateSends','')='0'"
-          operator_attest ROLLBACK_TESTED PHASE17_ROLLBACK_REHEARSAL "AND COALESCE(\\"metadata\\"->>'result','')='PASS'"
-          operator_attest MONITORING_ACTIVE PHASE17_MONITORING_ACTIVE "AND COALESCE(\\"metadata\\"->>'monitoringStatus','')='ACTIVE'"
-          machine_attest POLICY_VERIFIED PHASE17_POLICY_VERIFIED "AND COALESCE(\\"metadata\\"->>'source','')='github-actions-phase17-stage2-machine-evidence' AND COALESCE(\\"metadata\\"->>'policyRunId','')<>'' AND COALESCE(\\"metadata\\"->>'policyCommitSha','')='${EXPECTED_LIVE_SHA}' AND COALESCE(\\"metadata\\"->'checks','[]'::jsonb) @> '[\\"typecheck\\",\\"phase17-controlled-launch\\",\\"phase17-production-readiness\\",\\"stage2-governance-evidence\\",\\"stage2-machine-evidence-policy\\"]'::jsonb"
-          operator_attest SCOPE_APPROVED PHASE17_STAGE2_SCOPE_APPROVED "AND COALESCE(\\"metadata\\"->>'candidateId','')='${CANDIDATE_ID}' AND COALESCE(\\"metadata\\"->>'decision','')='APPROVED'"
-          operator_attest AUTHENTICATED_SMOKE PHASE17_AUTHENTICATED_SMOKE "AND COALESCE(\\"metadata\\"->>'result','')='PASS' AND COALESCE(\\"metadata\\"->>'authenticated','')='true' AND COALESCE(\\"metadata\\"->>'readOnly','')='true' AND COALESCE(\\"metadata\\"->>'externalWritesAttempted','')='false'"
-          operator_attest SUPPORT_RUNBOOK_ACTIVE PHASE17_SUPPORT_RUNBOOK_ACTIVE "AND COALESCE(\\"metadata\\"->>'runbookStatus','')='ACTIVE'"
-          operator_attest OBSERVATION_WINDOW_COMPLETE PHASE17_OBSERVATION_WINDOW_COMPLETE "AND COALESCE(\\"metadata\\"->>'complete','')='true' AND COALESCE(\\"metadata\\"->>'windowStartedAt','')<>'' AND COALESCE(\\"metadata\\"->>'windowEndedAt','')<>''"
-          machine_attest PRODUCTION_EVIDENCE_RECORDED PHASE17_PRODUCTION_EVIDENCE_RECORDED "AND COALESCE(\\"metadata\\"->>'source','')='github-actions-production-batch1-plus-postdeploy-proof' AND COALESCE(\\"metadata\\"->>'productionRunId','')<>'' AND COALESCE(\\"metadata\\"->>'productionRunNumber','')<>'' AND COALESCE(\\"metadata\\"->>'productionWorkflowConclusion','')='success' AND COALESCE(\\"metadata\\"->>'exactLiveShaVerified','')='true' AND COALESCE(\\"metadata\\"->>'trackedWorktreeClean','')='true' AND COALESCE(\\"metadata\\"->>'processHealthVerified','')='true' AND COALESCE(\\"metadata\\"->>'loginSmokeVerified','')='true'"
-'''
-          if text.count(old) != 1:
-              raise SystemExit(f'expected exactly one old governance block, found {text.count(old)}')
-          updated = text.replace(old, new)
-          path.write_text(updated)
-      - name: Validate exact diff
         shell: bash
+        env:
+          OLD_B64: "ICAgICAgICAgIGF0dGVzdF9zaGEoKXsKICAgICAgICAgICAgbG9jYWwgZ2F0ZT0iJDEiIGFjdGlvbj0iJDIiIGV4dHJhPSIkezM6LX0iIGNvdW50CiAgICAgICAgICAgIGNvdW50PSIkKHEgIlNFTEVDVCBDT1VOVCgqKSBGUk9NIFwiRW5nYWdlU2VjdXJpdHlBdWRpdEV2ZW50XCIgV0hFUkUgXCJ3b3Jrc3BhY2VJZFwiPScke1dPUktTUEFDRV9JRH0nIEFORCBcImFjdGlvblwiPScke2FjdGlvbn0nIEFORCBcIm91dGNvbWVcIj0nVkVSSUZJRUQnIEFORCBDT0FMRVNDRShcIm1ldGFkYXRhXCItPj4nbGl2ZVNoYScsJycpPScke0VYUEVDVEVEX0xJVkVfU0hBfScgJHtleHRyYX0iKSIKICAgICAgICAgICAgW1sgIiRjb3VudCIgLWd0IDAgXV0gJiYgcHJvdmVuICIkZ2F0ZSIgfHwgdW5rbm93biAiJGdhdGUiCiAgICAgICAgICB9CiAgICAgICAgICBhdHRlc3Rfc2hhIENSSVRJQ0FMX0lOQ0lERU5UUyBQSEFTRTE3X0NSSVRJQ0FMX0lOQ0lERU5UX1JFVklFVyAiQU5EIENPQUxFU0NFKFwibWV0YWRhdGFcIi0+Pid1bnJlc29sdmVkQ3JpdGljYWxJbmNpZGVudHMnLCcnKT0nMCciCiAgICAgICAgICBhdHRlc3Rfc2hhIERVUExJQ0FURV9TRU5EUyBQSEFTRTE3X0RVUExJQ0FURV9TRU5EX1JFVklFVyAiQU5EIENPQUxFU0NFKFwibWV0YWRhdGFcIi0+Pid1bmV4cGxhaW5lZER1cGxpY2F0ZVNlbmRzJywnJyk9JzAnIgogICAgICAgICAgYXR0ZXN0X3NoYSBST0xMQkFDS19URVNURUQgUEhBU0UxN19ST0xMQkFDS19SRUhFQVJTQUwKICAgICAgICAgIGF0dGVzdF9zaGEgTU9OSVRPUklOR19BQ1RJVkUgUEhBU0UxN19NT05JVE9SSU5HX0FDVElWRQogICAgICAgICAgYXR0ZXN0X3NoYSBQT0xJQ1lfVkVSSUZJRUQgUEhBU0UxN19QT0xJQ1lfVkVSSUZJRUQKICAgICAgICAgIGF0dGVzdF9zaGEgU0NPUEVfQVBQUk9WRUQgUEhBU0UxN19TVEFHRTJfU0NPUEVfQVBQUk9WRUQgIkFORCBDT0FMRVNDRShcIm1ldGFkYXRhXCItPj4nY2FuZGlkYXRlSWQnLCcnKT0nJHtDQU5ESURBVEVfSUR9JyIKICAgICAgICAgIGF0dGVzdF9zaGEgQVVUSEVOVElDQVRFRF9TTU9LRSBQSEFTRTE3X0FVVEhFTlRJQ0FURURfU01PS0UKICAgICAgICAgIGF0dGVzdF9zaGEgU1VQUE9SVF9SVU5CT09LX0FDVElWRSBQSEFTRTE3X1NVUFBPUlRfUlVOQk9PS19BQ1RJVkUKICAgICAgICAgIGF0dGVzdF9zaGEgT0JTRVJWQVRJT05fV0lORE9XX0NPTVBMRVRFIFBIQVNFMTdfT0JTRVJWQVRJT05fV0lORE9XX0NPTVBMRVRFCiAgICAgICAgICBhdHRlc3Rfc2hhIFBST0RVQ1RJT05fRVZJREVOQ0VfUkVDT1JERUQgUEhBU0UxN19QUk9EVUNUSU9OX0VWSURFTkNFX1JFQ09SREVECg=="
+          NEW_B64: "ICAgICAgICAgIG9wZXJhdG9yX2F0dGVzdCgpewogICAgICAgICAgICBsb2NhbCBnYXRlPSIkMSIgYWN0aW9uPSIkMiIgZXh0cmE9IiR7MzotfSIgY291bnQKICAgICAgICAgICAgY291bnQ9IiQocSAiU0VMRUNUIENPVU5UKCopIEZST00gXCJFbmdhZ2VTZWN1cml0eUF1ZGl0RXZlbnRcIiBXSEVSRSBcIndvcmtzcGFjZUlkXCI9JyR7V09SS1NQQUNFX0lEfScgQU5EIFwiYWN0aW9uXCI9JyR7YWN0aW9ufScgQU5EIFwib3V0Y29tZVwiPSdWRVJJRklFRCcgQU5EIENPQUxFU0NFKFwiZW50aXR5VHlwZVwiLCcnKT0nQ09OVFJPTExFRF9MQVVOQ0hfR09WRVJOQU5DRScgQU5EIENPQUxFU0NFKFwiZW50aXR5SWRcIiwnJyk9JyR7RVhQRUNURURfTElWRV9TSEF9JyBBTkQgQ09BTEVTQ0UoXCJyZWFzb25Db2RlXCIsJycpPSdPUEVSQVRPUl9WRVJJRklFRF9FWEFDVF9TSEEnIEFORCBDT0FMRVNDRShcImFjdG9ySWRcIiwnJyk8PicnIEFORCBDT0FMRVNDRShcInJlcXVlc3RJZFwiLCcnKTw+JycgQU5EIENPQUxFU0NFKFwibWV0YWRhdGFcIi0+PidsaXZlU2hhJywnJyk9JyR7RVhQRUNURURfTElWRV9TSEF9JyBBTkQgQ09BTEVTQ0UoXCJtZXRhZGF0YVwiLT4+J3Byb29mUmVmJywnJyk8PicnIEFORCBDT0FMRVNDRShcIm1ldGFkYXRhXCItPj4ndmVyaWZpZWRBdCcsJycpPD4nJyAke2V4dHJhfSIpIgogICAgICAgICAgICBbWyAiJGNvdW50IiAtZ3QgMCBdXSAmJiBwcm92ZW4gIiRnYXRlIiB8fCB1bmtub3duICIkZ2F0ZSIKICAgICAgICAgIH0KICAgICAgICAgIG1hY2hpbmVfYXR0ZXN0KCl7CiAgICAgICAgICAgIGxvY2FsIGdhdGU9IiQxIiBhY3Rpb249IiQyIiBleHRyYT0iJHszOi19IiBjb3VudAogICAgICAgICAgICBjb3VudD0iJChxICJTRUxFQ1QgQ09VTlQoKikgRlJPTSBcIkVuZ2FnZVNlY3VyaXR5QXVkaXRFdmVudFwiIFdIRVJFIFwid29ya3NwYWNlSWRcIj0nJHtXT1JLU1BBQ0VfSUR9JyBBTkQgXCJhY3Rpb25cIj0nJHthY3Rpb259JyBBTkQgXCJvdXRjb21lXCI9J1ZFUklGSUVEJyBBTkQgQ09BTEVTQ0UoXCJlbnRpdHlUeXBlXCIsJycpPSdDT05UUk9MTEVEX0xBVU5DSF9HT1ZFUk5BTkNFJyBBTkQgQ09BTEVTQ0UoXCJlbnRpdHlJZFwiLCcnKT0nJHtFWFBFQ1RFRF9MSVZFX1NIQX0nIEFORCBDT0FMRVNDRShcInJlYXNvbkNvZGVcIiwnJyk9J01BQ0hJTkVfVkVSSUZJRURfRVhBQ1RfU0hBJyBBTkQgXCJhY3RvcklkXCIgSVMgTlVMTCBBTkQgQ09BTEVTQ0UoXCJyZXF1ZXN0SWRcIiwnJyk8PicnIEFORCBDT0FMRVNDRShcIm1ldGFkYXRhXCItPj4nbGl2ZVNoYScsJycpPScke0VYUEVDVEVEX0xJVkVfU0hBfScgJHtleHRyYX0iKSIKICAgICAgICAgICAgW1sgIiRjb3VudCIgLWd0IDAgXV0gJiYgcHJvdmVuICIkZ2F0ZSIgfHwgdW5rbm93biAiJGdhdGUiCiAgICAgICAgICB9CiAgICAgICAgICBvcGVyYXRvcl9hdHRlc3QgQ1JJVElDQUxfSU5DSURFTlRTIFBIQVNFMTdfQ1JJVElDQUxfSU5DSURFTlRfUkVWSUVXICJBTkQgQ09BTEVTQ0UoXCJtZXRhZGF0YVwiLT4+J3VucmVzb2x2ZWRDcml0aWNhbEluY2lkZW50cycsJycpPScwJyIKICAgICAgICAgIG9wZXJhdG9yX2F0dGVzdCBEVVBMSUNBVEVfU0VORFMgUEhBU0UxN19EVVBMSUNBVEVfU0VORF9SRVZJRVcgIkFORCBDT0FMRVNDRShcIm1ldGFkYXRhXCItPj4ndW5leHBsYWluZWREdXBsaWNhdGVTZW5kcycsJycpPScwJyIKICAgICAgICAgIG9wZXJhdG9yX2F0dGVzdCBST0xMQkFDS19URVNURUQgUEhBU0UxN19ST0xMQkFDS19SRUhFQVJTQUwgIkFORCBDT0FMRVNDRShcIm1ldGFkYXRhXCItPj4ncmVzdWx0JywnJyk9J1BBU1MnIgogICAgICAgICAgb3BlcmF0b3JfYXR0ZXN0IE1PTklUT1JJTkdfQUNUSVZFIFBIQVNFMTdfTU9OSVRPUklOR19BQ1RJVkUgIkFORCBDT0FMRVNDRShcIm1ldGFkYXRhXCItPj4nbW9uaXRvcmluZ1N0YXR1cycsJycpPSdBQ1RJVkUnIgogICAgICAgICAgbWFjaGluZV9hdHRlc3QgUE9MSUNZX1ZFUklGSUVEIFBIQVNFMTdfUE9MSUNZX1ZFUklGSUVEICJBTkQgQ09BTEVTQ0UoXCJtZXRhZGF0YVwiLT4+J3NvdXJjZScsJycpPSdnaXRodWItYWN0aW9ucy1waGFzZTE3LXN0YWdlMi1tYWNoaW5lLWV2aWRlbmNlJyBBTkQgQ09BTEVTQ0UoXCJtZXRhZGF0YVwiLT4+J3BvbGljeVJ1bklkJywnJyk8PicnIEFORCBDT0FMRVNDRShcIm1ldGFkYXRhXCItPj4ncG9saWN5Q29tbWl0U2hhJywnJyk9JyR7RVhQRUNURURfTElWRV9TSEF9JyBBTkQgQ09BTEVTQ0UoXCJtZXRhZGF0YVwiLT4nY2hlY2tzJywnW10nOjpqc29uYikgQD4gJ1tcInR5cGVjaGVja1wiLFwicGhhc2UxNy1jb250cm9sbGVkLWxhdW5jaFwiLFwicGhhc2UxNy1wcm9kdWN0aW9uLXJlYWRpbmVzc1wiLFwic3RhZ2UyLWdvdmVybmFuY2UtZXZpZGVuY2VcIixcInN0YWdlMi1tYWNoaW5lLWV2aWRlbmNlLXBvbGljeVwiXSc6Ompzb25iIgogICAgICAgICAgb3BlcmF0b3JfYXR0ZXN0IFNDT1BFX0FQUFJPVkVEIFBIQVNFMTdfU1RBR0UyX1NDT1BFX0FQUFJPVkVEICJBTkQgQ09BTEVTQ0UoXCJtZXRhZGF0YVwiLT4+J2NhbmRpZGF0ZUlkJywnJyk9JyR7Q0FORElEQVRFX0lEfScgQU5EIENPQUxFU0NFKFwibWV0YWRhdGFcIi0+PidkZWNpc2lvbicsJycpPSdBUFBST1ZFRCciCiAgICAgICAgICBvcGVyYXRvcl9hdHRlc3QgQVVUSEVOVElDQVRFRF9TTU9LRSBQSEFTRTE3X0FVVEhFTlRJQ0FURURfU01PS0UgIkFORCBDT0FMRVNDRShcIm1ldGFkYXRhXCItPj4ncmVzdWx0JywnJyk9J1BBU1MnIEFORCBDT0FMRVNDRShcIm1ldGFkYXRhXCItPj4nYXV0aGVudGljYXRlZCcsJycpPSd0cnVlJyBBTkQgQ09BTEVTQ0UoXCJtZXRhZGF0YVwiLT4+J3JlYWRPbmx5JywnJyk9J3RydWUnIEFORCBDT0FMRVNDRShcIm1ldGFkYXRhXCItPj4nZXh0ZXJuYWxXcml0ZXNBdHRlbXB0ZWQnLCcnKT0nZmFsc2UnIgogICAgICAgICAgb3BlcmF0b3JfYXR0ZXN0IFNVUFBPUlRfUlVOQk9PS19BQ1RJVkUgUEhBU0UxN19TVVBQT1JUX1JVTkJPT0tfQUNUSVZFICJBTkQgQ09BTEVTQ0UoXCJtZXRhZGF0YVwiLT4+J3J1bmJvb2tTdGF0dXMnLCcnKT0nQUNUSVZFJyIKICAgICAgICAgIG9wZXJhdG9yX2F0dGVzdCBPQlNFUlZBVElPTl9XSU5ET1dfQ09NUExFVEUgUEhBU0UxN19PQlNFUlZBVElPTl9XSU5ET1dfQ09NUExFVEUgIkFORCBDT0FMRVNDRShcIm1ldGFkYXRhXCItPj4nY29tcGxldGUnLCcnKT0ndHJ1ZScgQU5EIENPQUxFU0NFKFwibWV0YWRhdGFcIi0+Pid3aW5kb3dTdGFydGVkQXQnLCcnKTw+JycgQU5EIENPQUxFU0NFKFwibWV0YWRhdGFcIi0+Pid3aW5kb3dFbmRlZEF0JywnJyk8PicnIgogICAgICAgICAgbWFjaGluZV9hdHRlc3QgUFJPRFVDVElPTl9FVklERU5DRV9SRUNPUkRFRCBQSEFTRTE3X1BST0RVQ1RJT05fRVZJREVOQ0VfUkVDT1JERUQgIkFORCBDT0FMRVNDRShcIm1ldGFkYXRhXCItPj4nc291cmNlJywnJyk9J2dpdGh1Yi1hY3Rpb25zLXByb2R1Y3Rpb24tYmF0Y2gxLXBsdXMtcG9zdGRlcGxveS1wcm9vZicgQU5EIENPQUxFU0NFKFwibWV0YWRhdGFcIi0+Pidwcm9kdWN0aW9uUnVuSWQnLCcnKTw+JycgQU5EIENPQUxFU0NFKFwibWV0YWRhdGFcIi0+Pidwcm9kdWN0aW9uUnVuTnVtYmVyJywnJyk8PicnIEFORCBDT0FMRVNDRShcIm1ldGFkYXRhXCItPj4ncHJvZHVjdGlvbldvcmtmbG93Q29uY2x1c2lvbicsJycpPSdzdWNjZXNzJyBBTkQgQ09BTEVTQ0UoXCJtZXRhZGF0YVwiLT4+J2V4YWN0TGl2ZVNoYVZlcmlmaWVkJywnJyk9J3RydWUnIEFORCBDT0FMRVNDRShcIm1ldGFkYXRhXCItPj4ndHJhY2tlZFdvcmt0cmVlQ2xlYW4nLCcnKT0ndHJ1ZScgQU5EIENPQUxFU0NFKFwibWV0YWRhdGFcIi0+Pidwcm9jZXNzSGVhbHRoVmVyaWZpZWQnLCcnKT0ndHJ1ZScgQU5EIENPQUxFU0NFKFwibWV0YWRhdGFcIi0+Pidsb2dpblNtb2tlVmVyaWZpZWQnLCcnKT0ndHJ1ZSciCg=="
         run: |
           set -Eeuo pipefail
+          python - "$OLD_B64" "$NEW_B64" <<'PY'
+          import base64, pathlib, sys
+          path = pathlib.Path('.github/workflows/whatsapp-agent-phase17-stage2-governance-v15.yml')
+          old = base64.b64decode(sys.argv[1]).decode()
+          new = base64.b64decode(sys.argv[2]).decode()
+          text = path.read_text()
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one old governance block, found {text.count(old)}')
+          path.write_text(text.replace(old, new))
+          PY
           git diff --check
-          changed="$(git diff --name-only)"
-          test "$changed" = ".github/workflows/whatsapp-agent-phase17-stage2-governance-v15.yml"
+          test "$(git diff --name-only)" = ".github/workflows/whatsapp-agent-phase17-stage2-governance-v15.yml"
           grep -F 'OPERATOR_VERIFIED_EXACT_SHA' .github/workflows/whatsapp-agent-phase17-stage2-governance-v15.yml >/dev/null
           grep -F 'MACHINE_VERIFIED_EXACT_SHA' .github/workflows/whatsapp-agent-phase17-stage2-governance-v15.yml >/dev/null
-          grep -F 'stage2-machine-evidence-policy' .github/workflows/whatsapp-agent-phase17-stage2-governance-v15.yml >/dev/null
-      - name: Commit hardened audit
-        shell: bash
-        run: |
-          set -Eeuo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add .github/workflows/whatsapp-agent-phase17-stage2-governance-v15.yml
