@@ -1,0 +1,193 @@
+name: WhatsApp Agent Phase17 Stage2 Release Readonly Audit
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-phase17-stage2-readonly-audit-release.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-phase17-stage2-release-readonly-audit
+  cancel-in-progress: false
+
+jobs:
+  audit-stage2-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_LIVE_SHA: 2b3efe35b8920082cc94dce989d1847842fb8825
+
+    steps:
+      - name: Validate production access inputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          missing=0
+          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            if [[ -z "${!variable_name:-}" ]]; then
+              printf 'Missing required production secret: %s\n' "$variable_name" >&2
+              missing=1
+            fi
+          done
+          test "$missing" = "0"
+          [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"
+          fi
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          private_key_file="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$private_key_file"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$private_key_file"
+          fi
+          chmod 600 "$private_key_file"
+          [[ "$SSH_HOST" =~ ^[^[:space:]/]+$ ]]
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          read -r _ supplied_key_type supplied_key_material _ <<< "$SSH_HOST_KEY"
+          test "$supplied_key_type" = "ssh-ed25519"
+          test -n "$supplied_key_material"
+          canonical_host="[$SSH_HOST]:$SSH_PORT"
+          printf '%s %s %s\n' "$canonical_host" "$supplied_key_type" "$supplied_key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$private_key_file" >/dev/null
+
+      - name: Read-only Stage2 production inventory
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh \
+            -p "$SSH_PORT" \
+            -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          LIVE_APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          WORKSPACE_ID=engagews_default
+          ENV_FILE="$LIVE_APP/.env"
+
+          test "$(id -u)" = "0"
+          test -d "$LIVE_APP"
+          test -f "$ENV_FILE"
+          test "$(git -C "$LIVE_APP" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
+          test -z "$(git -C "$LIVE_APP" status --porcelain --untracked-files=no)"
+          test -d "$LIVE_APP/node_modules"
+
+          read_env_value() {
+            local key="$1" file="$2"
+            node - "$file" "$key" <<'NODE'
+          const fs = require('node:fs');
+          const [file, key] = process.argv.slice(2);
+          if (!file || !key || !fs.existsSync(file)) process.exit(1);
+          const text = fs.readFileSync(file, 'utf8');
+          for (const rawLine of text.split(/\r?\n/)) {
+            const line = rawLine.trim();
+            if (!line || line.startsWith('#')) continue;
+            const normalized = line.startsWith('export ') ? line.slice(7).trim() : line;
+            const separator = normalized.indexOf('=');
+            if (separator < 1 || normalized.slice(0, separator).trim() !== key) continue;
+            let value = normalized.slice(separator + 1).trim();
+            if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) value = value.slice(1, -1);
+            process.stdout.write(value);
+            process.exit(0);
+          }
+          process.exit(1);
+          NODE
+          }
+
+          DATABASE_URL="$(read_env_value DATABASE_URL "$ENV_FILE")"
+          export DATABASE_URL NODE_ENV=production WORKSPACE_ID EXPECTED_LIVE_SHA
+          cd "$LIVE_APP"
+
+          node <<'NODE'
+          const { PrismaClient } = require('@prisma/client');
+          const prisma = new PrismaClient();
+          const workspaceId = process.env.WORKSPACE_ID;
+
+          async function main() {
+            const workspace = await prisma.engageWorkspace.findUnique({
+              where: { id: workspaceId },
+              select: { id: true, slug: true, name: true, isActive: true },
+            });
+            if (!workspace || !workspace.isActive) throw new Error('Expected active engagews_default workspace is unavailable.');
+
+            const state = await prisma.engageControlledLaunchState.findUnique({ where: { workspaceId } });
+            if (!state) throw new Error('Controlled-launch state is missing.');
+            if (state.stage !== 'INTERNAL_TEST_IDENTITIES' || state.mode !== 'SHADOW' || state.writePolicy !== 'NO_EXTERNAL_WRITES' || state.externalWritesAllowed !== false || state.version !== 1) {
+              throw new Error('Production is not in exact Stage1 SHADOW version 1 state.');
+            }
+
+            const history = await prisma.engageControlledLaunchTransition.findMany({
+              where: { workspaceId },
+              select: { toStage: true, toMode: true, resultingVersion: true, createdAt: true },
+              orderBy: { createdAt: 'asc' },
+            });
+            if (history.length !== 1 || history[0].toStage !== 'INTERNAL_TEST_IDENTITIES' || history[0].toMode !== 'SHADOW' || history[0].resultingVersion !== 1) {
+              throw new Error(`Expected exactly one Stage1 transition; found ${history.length}.`);
+            }
+
+            const connections = await prisma.engageChannelConnection.findMany({
+              where: { workspaceId },
+              select: {
+                id: true,
+                channel: true,
+                externalAccountId: true,
+                displayName: true,
+                status: true,
+                createdAt: true,
+                updatedAt: true,
+                _count: { select: { credentials: true } },
+              },
+              orderBy: [{ channel: 'asc' }, { createdAt: 'asc' }],
+            });
+
+            const enabledFeatureFlags = await prisma.engageFeatureFlag.count({ where: { workspaceId, enabled: true } });
+            const killSwitchCount = await prisma.engageKillSwitch.count({ where: { workspaceId } });
+            const stage1ActivatedAt = history[0].createdAt;
+            const stage1AgeSeconds = Math.max(0, Math.floor((Date.now() - stage1ActivatedAt.getTime()) / 1000));
+
+            console.log(`PHASE17_STAGE2_AUDIT_LIVE_SHA=${process.env.EXPECTED_LIVE_SHA}`);
+            console.log(`PHASE17_STAGE2_AUDIT_WORKSPACE=${workspace.id}`);
+            console.log(`PHASE17_STAGE2_AUDIT_CURRENT_STAGE=${state.stage}`);
+            console.log(`PHASE17_STAGE2_AUDIT_CURRENT_MODE=${state.mode}`);
+            console.log(`PHASE17_STAGE2_AUDIT_WRITE_POLICY=${state.writePolicy}`);
+            console.log(`PHASE17_STAGE2_AUDIT_EXTERNAL_WRITES_ALLOWED=${state.externalWritesAllowed}`);
+            console.log(`PHASE17_STAGE2_AUDIT_VERSION=${state.version}`);
+            console.log(`PHASE17_STAGE2_AUDIT_TRANSITION_COUNT=${history.length}`);
+            console.log(`PHASE17_STAGE2_AUDIT_STAGE1_ACTIVATED_AT=${stage1ActivatedAt.toISOString()}`);
+            console.log(`PHASE17_STAGE2_AUDIT_STAGE1_AGE_SECONDS=${stage1AgeSeconds}`);
+            console.log(`PHASE17_STAGE2_AUDIT_ENABLED_FEATURE_FLAGS=${enabledFeatureFlags}`);
+            console.log(`PHASE17_STAGE2_AUDIT_KILL_SWITCH_RECORDS=${killSwitchCount}`);
+            console.log(`PHASE17_STAGE2_AUDIT_CONNECTION_COUNT=${connections.length}`);
+            for (const connection of connections) {
+              console.log(`CONNECTION id=${connection.id} channel=${connection.channel} status=${connection.status} externalAccountId=${connection.externalAccountId} displayName=${JSON.stringify(connection.displayName)} credentialCount=${connection._count.credentials} createdAt=${connection.createdAt.toISOString()} updatedAt=${connection.updatedAt.toISOString()}`);
+            }
+            console.log('PASS: PHASE17_STAGE2_READONLY_INVENTORY_COMPLETE');
+          }
+
+          main().catch((error) => {
+            console.error(error instanceof Error ? error.message : String(error));
+            process.exitCode = 1;
+          }).finally(async () => {
+            await prisma.$disconnect();
+          });
+          NODE
+          REMOTE
