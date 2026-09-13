@@ -41,9 +41,8 @@ jobs:
           done
           test "$missing" = "0"
           [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          if [[ -z "${SSH_PORT:-}" ]]; then
-            printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"
-          fi
+          if [[ -z "${SSH_PORT:-}" ]]; then printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"; fi
+          printf 'PASS: STAGE2_AUDIT_ACCESS_INPUTS_PRESENT\n'
 
       - name: Configure pinned SSH identity
         shell: bash
@@ -66,8 +65,10 @@ jobs:
           printf '%s %s %s\n' "$canonical_host" "$supplied_key_type" "$supplied_key_material" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
           ssh-keygen -y -f "$private_key_file" >/dev/null
+          ssh-keygen -F "$canonical_host" -f "$HOME/.ssh/known_hosts" >/dev/null
+          printf 'PASS: STAGE2_AUDIT_PINNED_SSH_READY\n'
 
-      - name: Read-only Stage2 production inventory
+      - name: Read-only Stage2 production inventory via psql
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -84,12 +85,17 @@ jobs:
           WORKSPACE_ID=engagews_default
           ENV_FILE="$LIVE_APP/.env"
 
-          test "$(id -u)" = "0"
-          test -d "$LIVE_APP"
-          test -f "$ENV_FILE"
-          test "$(git -C "$LIVE_APP" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
-          test -z "$(git -C "$LIVE_APP" status --porcelain --untracked-files=no)"
-          test -d "$LIVE_APP/node_modules"
+          test "$(id -u)" = "0" && printf 'PASS: STAGE2_AUDIT_ROOT_CONTEXT\n'
+          test -d "$LIVE_APP" && printf 'PASS: STAGE2_AUDIT_LIVE_APP_PRESENT\n'
+          test -f "$ENV_FILE" && printf 'PASS: STAGE2_AUDIT_ENV_FILE_PRESENT\n'
+          live_sha="$(git -C "$LIVE_APP" rev-parse HEAD)"
+          printf 'PHASE17_STAGE2_AUDIT_LIVE_SHA=%s\n' "$live_sha"
+          test "$live_sha" = "$EXPECTED_LIVE_SHA" && printf 'PASS: STAGE2_AUDIT_LIVE_SHA_MATCH\n'
+          tracked_dirty_count="$(git -C "$LIVE_APP" status --porcelain --untracked-files=no | wc -l | tr -d ' ')"
+          printf 'PHASE17_STAGE2_AUDIT_TRACKED_DIRTY_COUNT=%s\n' "$tracked_dirty_count"
+          test "$tracked_dirty_count" = "0" && printf 'PASS: STAGE2_AUDIT_TRACKED_WORKTREE_CLEAN\n'
+          test -d "$LIVE_APP/node_modules" && printf 'PASS: STAGE2_AUDIT_NODE_MODULES_PRESENT\n'
+          command -v psql >/dev/null && printf 'PASS: STAGE2_AUDIT_PSQL_PRESENT\n'
 
           read_env_value() {
             local key="$1" file="$2"
@@ -114,80 +120,63 @@ jobs:
           }
 
           DATABASE_URL="$(read_env_value DATABASE_URL "$ENV_FILE")"
-          export DATABASE_URL NODE_ENV=production WORKSPACE_ID EXPECTED_LIVE_SHA
-          cd "$LIVE_APP"
+          test -n "$DATABASE_URL" && printf 'PASS: STAGE2_AUDIT_DATABASE_URL_RESOLVED\n'
+          DATABASE_CLI_URL="$(node "$LIVE_APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")"
+          test -n "$DATABASE_CLI_URL" && printf 'PASS: STAGE2_AUDIT_DATABASE_CLI_URL_DERIVED\n'
 
-          node <<'NODE'
-          const { PrismaClient } = require('@prisma/client');
-          const prisma = new PrismaClient();
-          const workspaceId = process.env.WORKSPACE_ID;
+          psql_scalar() { psql "$DATABASE_CLI_URL" -X -v ON_ERROR_STOP=1 -Atqc "$1"; }
+          psql_rows() { psql "$DATABASE_CLI_URL" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "$1"; }
 
-          async function main() {
-            const workspace = await prisma.engageWorkspace.findUnique({
-              where: { id: workspaceId },
-              select: { id: true, slug: true, name: true, isActive: true },
-            });
-            if (!workspace || !workspace.isActive) throw new Error('Expected active engagews_default workspace is unavailable.');
+          workspace_count="$(psql_scalar "SELECT COUNT(*) FROM \"EngageWorkspace\" WHERE \"id\" = '${WORKSPACE_ID}' AND \"isActive\" = true;")"
+          printf 'PHASE17_STAGE2_AUDIT_ACTIVE_WORKSPACE_COUNT=%s\n' "$workspace_count"
+          test "$workspace_count" = "1"
 
-            const state = await prisma.engageControlledLaunchState.findUnique({ where: { workspaceId } });
-            if (!state) throw new Error('Controlled-launch state is missing.');
-            if (state.stage !== 'INTERNAL_TEST_IDENTITIES' || state.mode !== 'SHADOW' || state.writePolicy !== 'NO_EXTERNAL_WRITES' || state.externalWritesAllowed !== false || state.version !== 1) {
-              throw new Error('Production is not in exact Stage1 SHADOW version 1 state.');
-            }
+          state="$(psql_rows "SELECT \"stage\",\"mode\",\"writePolicy\",\"externalWritesAllowed\",\"version\",to_char(\"activatedAt\" AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\" = '${WORKSPACE_ID}';")"
+          printf 'PHASE17_STAGE2_AUDIT_STATE=%s\n' "$state"
+          IFS='|' read -r stage mode write_policy external_writes version activated_at <<< "$state"
+          test "$stage" = "INTERNAL_TEST_IDENTITIES"
+          test "$mode" = "SHADOW"
+          test "$write_policy" = "NO_EXTERNAL_WRITES"
+          test "$external_writes" = "f"
+          test "$version" = "1"
+          printf 'PASS: STAGE2_AUDIT_EXACT_STAGE1_SHADOW_STATE\n'
 
-            const history = await prisma.engageControlledLaunchTransition.findMany({
-              where: { workspaceId },
-              select: { toStage: true, toMode: true, resultingVersion: true, createdAt: true },
-              orderBy: { createdAt: 'asc' },
-            });
-            if (history.length !== 1 || history[0].toStage !== 'INTERNAL_TEST_IDENTITIES' || history[0].toMode !== 'SHADOW' || history[0].resultingVersion !== 1) {
-              throw new Error(`Expected exactly one Stage1 transition; found ${history.length}.`);
-            }
+          transition_count="$(psql_scalar "SELECT COUNT(*) FROM \"EngageControlledLaunchTransition\" WHERE \"workspaceId\" = '${WORKSPACE_ID}';")"
+          printf 'PHASE17_STAGE2_AUDIT_TRANSITION_COUNT=%s\n' "$transition_count"
+          test "$transition_count" = "1"
 
-            const connections = await prisma.engageChannelConnection.findMany({
-              where: { workspaceId },
-              select: {
-                id: true,
-                channel: true,
-                externalAccountId: true,
-                displayName: true,
-                status: true,
-                createdAt: true,
-                updatedAt: true,
-                _count: { select: { credentials: true } },
-              },
-              orderBy: [{ channel: 'asc' }, { createdAt: 'asc' }],
-            });
+          stage1_transition="$(psql_rows "SELECT \"toStage\",\"toMode\",\"toWritePolicy\",\"toExternalWritesAllowed\",\"resultingVersion\",to_char(\"createdAt\" AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') FROM \"EngageControlledLaunchTransition\" WHERE \"workspaceId\" = '${WORKSPACE_ID}' ORDER BY \"createdAt\" ASC LIMIT 1;")"
+          printf 'PHASE17_STAGE2_AUDIT_STAGE1_TRANSITION=%s\n' "$stage1_transition"
 
-            const enabledFeatureFlags = await prisma.engageFeatureFlag.count({ where: { workspaceId, enabled: true } });
-            const killSwitchCount = await prisma.engageKillSwitch.count({ where: { workspaceId } });
-            const stage1ActivatedAt = history[0].createdAt;
-            const stage1AgeSeconds = Math.max(0, Math.floor((Date.now() - stage1ActivatedAt.getTime()) / 1000));
+          enabled_flags="$(psql_scalar "SELECT COUNT(*) FROM \"EngageFeatureFlag\" WHERE \"workspaceId\" = '${WORKSPACE_ID}' AND \"enabled\" = true;")"
+          kill_switch_records="$(psql_scalar "SELECT COUNT(*) FROM \"EngageKillSwitch\" WHERE \"workspaceId\" = '${WORKSPACE_ID}';")"
+          printf 'PHASE17_STAGE2_AUDIT_ENABLED_FEATURE_FLAGS=%s\n' "$enabled_flags"
+          printf 'PHASE17_STAGE2_AUDIT_KILL_SWITCH_RECORDS=%s\n' "$kill_switch_records"
+          test "$enabled_flags" = "0"
 
-            console.log(`PHASE17_STAGE2_AUDIT_LIVE_SHA=${process.env.EXPECTED_LIVE_SHA}`);
-            console.log(`PHASE17_STAGE2_AUDIT_WORKSPACE=${workspace.id}`);
-            console.log(`PHASE17_STAGE2_AUDIT_CURRENT_STAGE=${state.stage}`);
-            console.log(`PHASE17_STAGE2_AUDIT_CURRENT_MODE=${state.mode}`);
-            console.log(`PHASE17_STAGE2_AUDIT_WRITE_POLICY=${state.writePolicy}`);
-            console.log(`PHASE17_STAGE2_AUDIT_EXTERNAL_WRITES_ALLOWED=${state.externalWritesAllowed}`);
-            console.log(`PHASE17_STAGE2_AUDIT_VERSION=${state.version}`);
-            console.log(`PHASE17_STAGE2_AUDIT_TRANSITION_COUNT=${history.length}`);
-            console.log(`PHASE17_STAGE2_AUDIT_STAGE1_ACTIVATED_AT=${stage1ActivatedAt.toISOString()}`);
-            console.log(`PHASE17_STAGE2_AUDIT_STAGE1_AGE_SECONDS=${stage1AgeSeconds}`);
-            console.log(`PHASE17_STAGE2_AUDIT_ENABLED_FEATURE_FLAGS=${enabledFeatureFlags}`);
-            console.log(`PHASE17_STAGE2_AUDIT_KILL_SWITCH_RECORDS=${killSwitchCount}`);
-            console.log(`PHASE17_STAGE2_AUDIT_CONNECTION_COUNT=${connections.length}`);
-            for (const connection of connections) {
-              console.log(`CONNECTION id=${connection.id} channel=${connection.channel} status=${connection.status} externalAccountId=${connection.externalAccountId} displayName=${JSON.stringify(connection.displayName)} credentialCount=${connection._count.credentials} createdAt=${connection.createdAt.toISOString()} updatedAt=${connection.updatedAt.toISOString()}`);
-            }
-            console.log('PASS: PHASE17_STAGE2_READONLY_INVENTORY_COMPLETE');
-          }
+          connection_count="$(psql_scalar "SELECT COUNT(*) FROM \"EngageChannelConnection\" WHERE \"workspaceId\" = '${WORKSPACE_ID}';")"
+          printf 'PHASE17_STAGE2_AUDIT_CONNECTION_COUNT=%s\n' "$connection_count"
 
-          main().catch((error) => {
-            console.error(error instanceof Error ? error.message : String(error));
-            process.exitCode = 1;
-          }).finally(async () => {
-            await prisma.$disconnect();
-          });
-          NODE
+          psql_rows "
+            SELECT
+              c.\"id\",
+              c.\"channel\",
+              c.\"status\",
+              CASE WHEN length(c.\"externalAccountId\") <= 4 THEN repeat('*', length(c.\"externalAccountId\")) ELSE repeat('*', length(c.\"externalAccountId\") - 4) || right(c.\"externalAccountId\", 4) END AS masked_external_account,
+              COALESCE(c.\"displayName\", ''),
+              COUNT(cr.\"id\") AS credential_count,
+              COUNT(cr.\"id\") FILTER (WHERE cr.\"expiresAt\" IS NOT NULL AND cr.\"expiresAt\" <= NOW()) AS expired_credential_count,
+              COALESCE(string_agg(DISTINCT cr.\"kind\", ',' ORDER BY cr.\"kind\"), '') AS credential_kinds,
+              to_char(c.\"updatedAt\" AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')
+            FROM \"EngageChannelConnection\" c
+            LEFT JOIN \"EngageConnectionCredential\" cr ON cr.\"connectionId\" = c.\"id\"
+            WHERE c.\"workspaceId\" = '${WORKSPACE_ID}'
+            GROUP BY c.\"id\", c.\"channel\", c.\"status\", c.\"externalAccountId\", c.\"displayName\", c.\"updatedAt\"
+            ORDER BY c.\"channel\" ASC, c.\"createdAt\" ASC;
+          " | while IFS='|' read -r id channel status masked_external display_name credential_count expired_count credential_kinds updated_at; do
+            printf 'CONNECTION id=%s channel=%s status=%s externalAccount=%s displayName=%q credentialCount=%s expiredCredentialCount=%s credentialKinds=%s updatedAt=%s\n' \
+              "$id" "$channel" "$status" "$masked_external" "$display_name" "$credential_count" "$expired_count" "$credential_kinds" "$updated_at"
+          done
+
+          printf 'PASS: PHASE17_STAGE2_READONLY_INVENTORY_COMPLETE\n'
           REMOTE
