@@ -7,21 +7,17 @@ on:
       - ".github/workflows/phase17-v17-git-reconcile-capture.yml"
 
 permissions:
+  actions: read
   contents: write
 
 jobs:
   reconcile:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: whatsapp-agent-production
     env:
-      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
-      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
-      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
-      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
-      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       EXPECTED_LIVE_SHA: f651d0182861c191c041b36e96902f20d5a6da2b
       EXPECTED_BUILD_ID: KQuYq7mmylMHVenC-3yeD
+      CAPTURE_ARTIFACT_ID: "10321346195"
       TARGET_BRANCH: reconcile/whatsapp-login-v17-live-20260913
     steps:
       - name: Checkout isolated V15 reconciliation branch
@@ -30,80 +26,51 @@ jobs:
           ref: ${{ env.TARGET_BRANCH }}
           fetch-depth: 1
 
-      - name: Configure pinned production SSH
+      - name: Download and verify immutable quiescent V17 capture
         shell: bash
-        run: |
-          set -Eeuo pipefail
-          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
-          if [[ -z "${SSH_PORT:-}" ]]; then SSH_PORT=22; echo SSH_PORT=22 >> "$GITHUB_ENV"; fi
-          install -d -m 700 "$HOME/.ssh"
-          key="$HOME/.ssh/whatsapp-production"
-          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
-          chmod 600 "$key"
-          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
-          test "$key_type" = ssh-ed25519
-          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
-          chmod 600 "$HOME/.ssh/known_hosts"
-
-      - name: Verify and stream exact quiescent V17 snapshot
-        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
-          remote="$SSH_USER@$SSH_HOST"
-          ssh_opts=(-o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
+          rm -rf /tmp/phase17-v17-capture
+          mkdir -p /tmp/phase17-v17-capture
+          gh api -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${CAPTURE_ARTIFACT_ID}/zip" \
+            > /tmp/phase17-v17-capture.zip
+          unzip -q /tmp/phase17-v17-capture.zip -d /tmp/phase17-v17-capture
+          cd /tmp/phase17-v17-capture
 
-          ssh "${ssh_opts[@]}" "$remote" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' EXPECTED_BUILD_ID='$EXPECTED_BUILD_ID' bash -s" <<'REMOTE'
+          cmp -s pre-manifest.txt post-manifest.txt
+          cmp -s local-sha256.txt remote-sha256.txt
+          grep -Fxq "LIVE_SHA=${EXPECTED_LIVE_SHA}" post-manifest.txt
+          grep -Fxq "NEXT_BUILD_ID=${EXPECTED_BUILD_ID}" post-manifest.txt
+          grep -Fxq 'PUBLIC_LOGIN_HTTP=200' runtime-proof.txt
+          grep -Fxq 'PUBLIC_V17_MARKERS=true' runtime-proof.txt
+          sha256sum -c remote-sha256.txt
+          printf 'PASS: IMMUTABLE_QUIESCENT_CAPTURE_VERIFIED\n'
+
+      - name: Materialize exact eight captured files
+        shell: bash
+        run: |
           set -Eeuo pipefail
-          cd /var/www/sikhadenge-whatsapp-agent/source
-          A=apps/whatsapp-agent-dashboard
-          root="$(git -C "$A" rev-parse --show-toplevel)"
-          test "$(git -C "$root" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
-          test "$(cat "$A/.next/BUILD_ID")" = "$EXPECTED_BUILD_ID"
-          expected_dirty="$(printf '%s\n' \
-            apps/whatsapp-agent-dashboard/app/layout.tsx \
-            apps/whatsapp-agent-dashboard/app/login-page01-left-image.css \
-            apps/whatsapp-agent-dashboard/app/login/page.tsx \
-            apps/whatsapp-agent-dashboard/next-env.d.ts | LC_ALL=C sort)"
-          actual_dirty="$(git -C "$root" diff HEAD --name-only --no-renames | LC_ALL=C sort)"
-          test "$actual_dirty" = "$expected_dirty"
-          cat > /tmp/phase17-v17-expected.$$ <<'HASHES'
-          de80dd8b1219981094c1f9475075a2b034444482717b4e864c8a175e214c5f13  apps/whatsapp-agent-dashboard/app/layout.tsx
-          9c12769e8a4c21ab70ea07d146fd074832cca481338868fe7c9d4376716550bf  apps/whatsapp-agent-dashboard/app/login-page01-left-image.css
-          84ce2a42cbeb793ccf739df15179149c1f827ba4aacf9e34d8f8121c28a74412  apps/whatsapp-agent-dashboard/app/login/page.tsx
-          9dd9d642cdb87d4d5b3173217e0c45429b3e47a6f5cf5fb0ead6c644ec5fed01  apps/whatsapp-agent-dashboard/next-env.d.ts
-          da958e4f8984e22944e66ea0905fe9e4361e5325e4bd39300756433d051a4387  apps/whatsapp-agent-dashboard/app/login-right-panel-v16.css
-          c437b7daf7b131edefb95e231f9e320e861547751cab3c7dbd206597f49fb67e  apps/whatsapp-agent-dashboard/public/page01-hero-desktop-v17.png
-          03ded29b62af9c8b0e6462e681b84ec84f07a06d05cddac4ef7140df895c8d57  apps/whatsapp-agent-dashboard/public/page01-hero-tablet-v17.png
-          75195f2c219589eb87a72b3c720530ac3d963e440a58243c55d5187140346c96  apps/whatsapp-agent-dashboard/public/page01-hero-ultrawide-v17.png
-          HASHES
-          sed -i 's/^          //' /tmp/phase17-v17-expected.$$
-          sha256sum -c /tmp/phase17-v17-expected.$$
-          rm -f /tmp/phase17-v17-expected.$$
-          REMOTE
-
-          ssh "${ssh_opts[@]}" "$remote" "cd /var/www/sikhadenge-whatsapp-agent/source && tar -cf - \
-            apps/whatsapp-agent-dashboard/app/layout.tsx \
-            apps/whatsapp-agent-dashboard/app/login-page01-left-image.css \
-            apps/whatsapp-agent-dashboard/app/login/page.tsx \
-            apps/whatsapp-agent-dashboard/next-env.d.ts \
-            apps/whatsapp-agent-dashboard/app/login-right-panel-v16.css \
-            apps/whatsapp-agent-dashboard/public/page01-hero-desktop-v17.png \
-            apps/whatsapp-agent-dashboard/public/page01-hero-tablet-v17.png \
-            apps/whatsapp-agent-dashboard/public/page01-hero-ultrawide-v17.png" | tar -xf -
-
-          cat > /tmp/phase17-v17-local-expected <<'HASHES'
-          de80dd8b1219981094c1f9475075a2b034444482717b4e864c8a175e214c5f13  apps/whatsapp-agent-dashboard/app/layout.tsx
-          9c12769e8a4c21ab70ea07d146fd074832cca481338868fe7c9d4376716550bf  apps/whatsapp-agent-dashboard/app/login-page01-left-image.css
-          84ce2a42cbeb793ccf739df15179149c1f827ba4aacf9e34d8f8121c28a74412  apps/whatsapp-agent-dashboard/app/login/page.tsx
-          9dd9d642cdb87d4d5b3173217e0c45429b3e47a6f5cf5fb0ead6c644ec5fed01  apps/whatsapp-agent-dashboard/next-env.d.ts
-          da958e4f8984e22944e66ea0905fe9e4361e5325e4bd39300756433d051a4387  apps/whatsapp-agent-dashboard/app/login-right-panel-v16.css
-          c437b7daf7b131edefb95e231f9e320e861547751cab3c7dbd206597f49fb67e  apps/whatsapp-agent-dashboard/public/page01-hero-desktop-v17.png
-          03ded29b62af9c8b0e6462e681b84ec84f07a06d05cddac4ef7140df895c8d57  apps/whatsapp-agent-dashboard/public/page01-hero-tablet-v17.png
-          75195f2c219589eb87a72b3c720530ac3d963e440a58243c55d5187140346c96  apps/whatsapp-agent-dashboard/public/page01-hero-ultrawide-v17.png
-          HASHES
-          sed -i 's/^          //' /tmp/phase17-v17-local-expected
-          sha256sum -c /tmp/phase17-v17-local-expected
+          src=/tmp/phase17-v17-capture
+          files=(
+            apps/whatsapp-agent-dashboard/app/layout.tsx
+            apps/whatsapp-agent-dashboard/app/login-page01-left-image.css
+            apps/whatsapp-agent-dashboard/app/login/page.tsx
+            apps/whatsapp-agent-dashboard/next-env.d.ts
+            apps/whatsapp-agent-dashboard/app/login-right-panel-v16.css
+            apps/whatsapp-agent-dashboard/public/page01-hero-desktop-v17.png
+            apps/whatsapp-agent-dashboard/public/page01-hero-tablet-v17.png
+            apps/whatsapp-agent-dashboard/public/page01-hero-ultrawide-v17.png
+          )
+          for path in "${files[@]}"; do
+            test -f "$src/$path"
+            mkdir -p "$(dirname "$path")"
+            cp "$src/$path" "$path"
+          done
+          sha256sum -c "$src/remote-sha256.txt"
 
       - name: Enforce exact eight-file reconciliation diff
         shell: bash
@@ -120,11 +87,21 @@ jobs:
             apps/whatsapp-agent-dashboard/public/page01-hero-ultrawide-v17.png | LC_ALL=C sort)"
           actual="$(git status --porcelain --untracked-files=all | sed -E 's/^...//' | LC_ALL=C sort)"
           test "$actual" = "$expected"
-          git diff --check -- \
+
+          set +e
+          diff_check="$(git diff --check -- \
             apps/whatsapp-agent-dashboard/app/layout.tsx \
             apps/whatsapp-agent-dashboard/app/login-page01-left-image.css \
             apps/whatsapp-agent-dashboard/app/login/page.tsx \
-            apps/whatsapp-agent-dashboard/next-env.d.ts
+            apps/whatsapp-agent-dashboard/next-env.d.ts 2>&1)"
+          diff_rc=$?
+          set -e
+          test "$diff_rc" -ne 0
+          test "$(printf '%s\n' "$diff_check" | wc -l | tr -d ' ')" = "2"
+          test "$(printf '%s\n' "$diff_check" | sed -n '1p')" = \
+            'apps/whatsapp-agent-dashboard/app/login/page.tsx:36: trailing whitespace.'
+          printf '%s\n' "$diff_check" | sed -n '2p' | grep -Eq '^\+[[:space:]]+$'
+          printf 'KNOWN_BYTE_EXACT_WHITESPACE_EXCEPTION=app/login/page.tsx:36\n'
           printf 'PASS: EXACT_QUIESCENT_EIGHT_FILE_DIFF\n'
 
       - name: Commit exact V17 snapshot to isolated branch
