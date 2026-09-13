@@ -1,0 +1,72 @@
+name: SA2 Dashboard Switch Discovery 20260913
+
+on:
+  push:
+    branches:
+      - ops/sa2-dashboard-runtime-preflight-20260913
+    paths:
+      - '.github/workflows/sa2-dashboard-switch-discovery-20260913.yml'
+
+permissions:
+  contents: read
+
+env:
+  SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+  SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+  SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+  SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+  SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    environment: whatsapp-agent-production
+    timeout-minutes: 8
+    steps:
+      - name: Configure pinned SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SSH_PORT="${SSH_PORT:-22}"; echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
+          install -d -m 700 "$HOME/.ssh"; KEY="$HOME/.ssh/prod"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"; fi
+          chmod 600 "$KEY"; read -r _ kt km _ <<< "$SSH_HOST_KEY"; test "$kt" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"; chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Inspect release and PM2 switch contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          echo '=== SA2 DASHBOARD SWITCH DISCOVERY ==='
+          echo 'MODE=READ_ONLY'
+          EXPECTED='c02e6e060b76b9f5ab6d16258a354a161e53275c'
+          SRC=/opt/sikhadenge-dashboard
+          PM2_JSON="$(pm2 jlist)"
+          node -e '
+            let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{
+              const p=JSON.parse(b).find(x=>x.name==="sikhadenge-dashboard-revenue");if(!p)process.exit(2);const e=p.pm2_env||{};
+              const safe={name:p.name,pid:p.pid,status:e.status,cwd:e.pm_cwd,script:e.pm_exec_path,args:e.args,exec_mode:e.exec_mode,instances:e.instances,interpreter:e.exec_interpreter,watch:e.watch,cron_restart:e.cron_restart,autorestart:e.autorestart,max_memory_restart:e.max_memory_restart,namespace:e.namespace,PORT:e.PORT??e.env?.PORT??"UNSET",NODE_ENV:e.NODE_ENV??e.env?.NODE_ENV??"UNSET",HOST:e.HOST??e.env?.HOST??"UNSET",HOSTNAME:e.HOSTNAME??e.env?.HOSTNAME??"UNSET",DATABASE_URL_CONFIGURED:Boolean(e.DATABASE_URL??e.env?.DATABASE_URL),META_APP_SECRET_CONFIGURED:Boolean(e.META_WHATSAPP_APP_SECRET??e.env?.META_WHATSAPP_APP_SECRET),META_VERIFY_TOKEN_CONFIGURED:Boolean(e.META_WHATSAPP_WEBHOOK_VERIFY_TOKEN??e.env?.META_WHATSAPP_WEBHOOK_VERIFY_TOKEN),META_ACCESS_TOKEN_CONFIGURED:Boolean(e.META_WHATSAPP_ACCESS_TOKEN??e.env?.META_WHATSAPP_ACCESS_TOKEN),IDENTITY_HASH_SECRET_CONFIGURED:Boolean(e.IDENTITY_HASH_SECRET??e.env?.IDENTITY_HASH_SECRET)};
+              for(const [k,v] of Object.entries(safe))console.log(`${k}=${Array.isArray(v)?JSON.stringify(v):String(v)}`);
+            });' <<<"$PM2_JSON"
+          CWD="$(node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const p=JSON.parse(b).find(x=>x.name==="sikhadenge-dashboard-revenue");process.stdout.write(p?.pm2_env?.pm_cwd||"")})' <<<"$PM2_JSON")"
+          echo '--- RELEASE FILE CONTRACT ---'
+          for f in .env .env.local package.json package-lock.json next.config.js next.config.mjs; do
+            if [ -e "$CWD/$f" ] || [ -L "$CWD/$f" ]; then
+              if [ -L "$CWD/$f" ]; then echo "$f=SYMLINK->$(readlink -f "$CWD/$f")"; else echo "$f=REGULAR"; fi
+            else echo "$f=MISSING"; fi
+          done
+          echo "CURRENT_RELEASE_GIT_DIR=$([ -d "$CWD/.git" ] && echo YES || echo NO)"
+          echo "SOURCE_GIT_HEAD=$(git -C "$SRC" rev-parse HEAD)"
+          echo "SOURCE_DIRTY_COUNT=$(git -C "$SRC" status --porcelain=v1 --untracked-files=no | wc -l)"
+          if git -C "$SRC" cat-file -e "$EXPECTED^{commit}" 2>/dev/null; then echo 'EXPECTED_COMMIT_LOCAL_OBJECT=YES'; else echo 'EXPECTED_COMMIT_LOCAL_OBJECT=NO'; fi
+          if git -C "$SRC" ls-remote origin "$EXPECTED" >/dev/null 2>&1; then echo 'GIT_REMOTE_AUTH=PASS'; else echo 'GIT_REMOTE_AUTH=FAIL'; fi
+          echo "SOURCE_PACKAGE_LOCK=$([ -f "$SRC/package-lock.json" ] && echo YES || echo NO)"
+          echo "RELEASES_PARENT=$([ -d /opt/sikhadenge-dashboard-releases ] && echo YES || echo NO)"
+          echo 'RECENT_RELEASES_BEGIN'
+          find /opt/sikhadenge-dashboard-releases -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort | tail -n 8
+          echo 'RECENT_RELEASES_END'
+          df -Pk /opt | awk 'NR==2{print "OPT_FREE_KB="$4}'
+          echo 'SWITCH_DISCOVERY=DONE'
+          REMOTE
