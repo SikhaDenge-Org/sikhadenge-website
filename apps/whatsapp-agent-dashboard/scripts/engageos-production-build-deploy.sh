@@ -60,6 +60,42 @@ test -f "$STAGE_APP/.env"
 test -s "$STAGE_APP/public/sikhadenge-header-safe-320.png"
 test "$(git -C "$STAGE_APP" hash-object "$STAGE_APP/public/sikhadenge-header-safe-320.png")" = "473006e2913e828fe70f7eab869af8a29327295d"
 
+
+# Page 01 V11 exact-fit landscape asset.
+test -s "$STAGE_APP/public/page01-left-hq-v11.png"
+test "$(sha256sum "$STAGE_APP/public/page01-left-hq-v11.png" | awk '{print $1}')" = "051564a2f60b99f817416c8a01bb1a6672f4fc30b13a927b3626f33ee5320f8e"
+
+node - "$STAGE_APP/public/page01-left-hq-v11.png" <<'NODE'
+const fs = require('node:fs');
+
+const file = process.argv[2];
+const b = fs.readFileSync(file);
+
+if (b.length !== 1862778) {
+  throw new Error(`unexpected V11 bytes: ${b.length}`);
+}
+
+if (
+  b.subarray(0,8).toString('hex') !==
+  '89504e470d0a1a0a'
+) {
+  throw new Error('V11 hero is not PNG');
+}
+
+const width = b.readUInt32BE(16);
+const height = b.readUInt32BE(20);
+
+if (width !== 1421 || height !== 1107) {
+  throw new Error(
+    `unexpected V11 dimensions: ${width}x${height}`
+  );
+}
+
+console.log(
+  `PASS: PAGE01_HQ_V11_EXACT_ASSET_GATE bytes=${b.length} dimensions=${width}x${height}`
+);
+NODE
+
 # Page 01 V9 uses the committed original HQ PNG.
 # Validate exact bytes, PNG structure, dimensions and SHA-256 before building.
 node - "$STAGE_APP" <<'NODE'
@@ -195,6 +231,7 @@ if [[ "$RUNTIME_APP" != "$LIVE_APP" ]]; then
   install -d -m 755 "$RUNTIME_APP/public"
   install -m 644 "$LIVE_APP/public/sikhadenge-header-safe-320.png" "$RUNTIME_APP/public/sikhadenge-header-safe-320.png"
   install -m 644 "$LIVE_APP/public/page01-left-hq-v9.png" "$RUNTIME_APP/public/page01-left-hq-v9.png"
+  install -m 644 "$LIVE_APP/public/page01-left-hq-v11.png" "$RUNTIME_APP/public/page01-left-hq-v11.png"
   if [[ -f "$LIVE_APP/public/sikhadenge-official-logo.png" ]]; then
     install -m 644 "$LIVE_APP/public/sikhadenge-official-logo.png" "$RUNTIME_APP/public/sikhadenge-official-logo.png"
   fi

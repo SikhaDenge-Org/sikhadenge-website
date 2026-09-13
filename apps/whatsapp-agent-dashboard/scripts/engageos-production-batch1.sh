@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Production rollout marker: Page 01 V11 exact-fit local hero — 2026-09-13
 # Production rollout marker: Page 01 V10 stable-head retry — 2026-09-13
 # Production rollout marker: Page 01 canonical HQ V9 single-logo release — 2026-09-13
 # Production rollout marker: Phase17 Stage1 persisted SHADOW activation — 2026-09-13
@@ -172,6 +173,7 @@ bash "$STAGE_APP/scripts/engageos-production-build-deploy.sh"
 printf '===== PAGE 01 VALIDATED PUBLIC PROBES =====\n'
 probe_asset '/sikhadenge-header-safe-320.png' PAGE01_CANONICAL_LOGO 1000 image/png
 probe_asset '/page01-left-hq-v9.png' PAGE01_HQ_V9_HERO 1000000 image/png
+probe_asset '/page01-left-hq-v11.png' PAGE01_HQ_V11_HERO 1000000 image/png
 probe_login_hq
 
 printf '===== TASK 4/5: POST-DEPLOY VERIFICATION =====\n'

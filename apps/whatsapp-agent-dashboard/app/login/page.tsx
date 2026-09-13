@@ -8,8 +8,7 @@ import "../login-page01-left-image.css";
 export const dynamic = "force-dynamic";
 
 const BRAND_LOGO = "/sikhadenge-header-safe-320.png";
-const PAGE01_HERO_V11 =
-  "https://sikhadenge.in/reviews/Testimonial/Whatsapp%20Dashboard/neon_ai_agent_workspace_dashboard.png?v=11";
+const PAGE01_HERO_V11 = "/page01-left-hq-v11.png?v=11";
 
 function ShieldIcon() {
   return (
