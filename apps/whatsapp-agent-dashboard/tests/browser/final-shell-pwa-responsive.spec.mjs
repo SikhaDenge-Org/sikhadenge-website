@@ -51,15 +51,18 @@ for (const viewport of VIEWPORTS) {
     const password = page.getByLabel("Password", { exact: true });
     const submit = page.getByRole("button", { name: "Sign In" });
     const hero = page.locator(".split01__hero");
-    const topBrand = page.locator(".split01__brand img").first();
+    const heroImage = page.locator(".split01__hero-approved-image").first();
+    const legacyTopBrand = page.locator(".split01__brand img");
     const panelBrand = page.locator(".split01__signin-brand img").first();
 
     await expect(shell).toBeVisible();
+    await expect(shell).toHaveAttribute("data-page01-hero", "approved-hq-v10");
     await expect(email).toBeVisible();
     await expect(password).toBeVisible();
     await expect(submit).toBeVisible();
     await expect(hero).toBeVisible();
-    await expect(topBrand).toBeVisible();
+    await expect(heroImage).toBeVisible();
+    await expect(legacyTopBrand).toHaveCount(0);
     await expect(panelBrand).toBeVisible();
 
     for (const control of [email, password, submit]) {
@@ -68,15 +71,13 @@ for (const viewport of VIEWPORTS) {
       await expectInsideViewport(control, viewport.width);
     }
 
-    for (const brand of [topBrand, panelBrand]) {
-      const geometry = await brand.evaluate((node) => {
-        const rect = node.getBoundingClientRect();
-        return { width: rect.width, height: rect.height };
-      });
-      expect(geometry.width).toBeGreaterThanOrEqual(viewport.width <= 767 ? 96 : 120);
-      expect(geometry.height).toBeGreaterThan(20);
-      await expectInsideViewport(brand, viewport.width);
-    }
+    const brandGeometry = await panelBrand.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      return { width: rect.width, height: rect.height };
+    });
+    expect(brandGeometry.width).toBeGreaterThanOrEqual(viewport.width <= 767 ? 96 : 120);
+    expect(brandGeometry.height).toBeGreaterThan(20);
+    await expectInsideViewport(panelBrand, viewport.width);
 
     if (viewport.width <= 767) {
       const inputFont = await email.evaluate((node) => Number.parseFloat(getComputedStyle(node).fontSize));
