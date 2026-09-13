@@ -48,7 +48,6 @@ jobs:
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
           set -Eeuo pipefail
-
           echo '=== MODE ==='
           echo 'MODE=READ_ONLY'
           echo 'DB_MUTATION=NONE'
@@ -58,13 +57,11 @@ jobs:
 
           echo '=== SYSTEMD TIMER ==='
           systemctl cat sikhadenge-funnel-golden-guard.timer || true
-          systemctl show sikhadenge-funnel-golden-guard.timer \
-            -p ActiveState -p SubState -p Unit -p NextElapseUSecRealtime -p LastTriggerUSec -p Triggers || true
+          systemctl show sikhadenge-funnel-golden-guard.timer -p ActiveState -p SubState -p Unit -p NextElapseUSecRealtime -p LastTriggerUSec -p Triggers || true
 
           echo '=== SYSTEMD SERVICE ==='
           systemctl cat sikhadenge-funnel-golden-guard.service || true
-          systemctl show sikhadenge-funnel-golden-guard.service \
-            -p ActiveState -p SubState -p ExecMainStartTimestamp -p ExecMainExitTimestamp -p ExecMainStatus -p Result || true
+          systemctl show sikhadenge-funnel-golden-guard.service -p ActiveState -p SubState -p ExecMainStartTimestamp -p ExecMainExitTimestamp -p ExecMainStatus -p Result || true
 
           echo '=== INSTALLED GUARD ==='
           test -r /usr/local/sbin/sikhadenge-funnel-golden-guard
@@ -91,22 +88,7 @@ jobs:
           journalctl -u sikhadenge-funnel-golden-guard.service --since '2026-09-13 16:00:00' --no-pager -o short-iso | tail -220 || true
 
           echo '=== PM2 SAFE APP STATE ==='
-          pm2 jlist | python3 -c '
-import json,sys
-rows=json.load(sys.stdin)
-for p in rows:
-    n=p.get("name","")
-    if n in {"sikhadenge-whatsapp-agent","sikhadenge-dashboard-revenue"} or "claude" in n.lower() or "video" in n.lower() or "funnel" in n.lower():
-        e=p.get("pm2_env") or {}
-        print("|".join([
-            "name="+n,
-            "pid="+str(p.get("pid")),
-            "status="+str(e.get("status")),
-            "restarts="+str(e.get("restart_time")),
-            "unstable_restarts="+str(e.get("unstable_restarts")),
-            "cwd="+str(e.get("pm_cwd"))
-        ]))
-'
+          pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{for(const p of JSON.parse(b)){const n=p.name||"";if(n==="sikhadenge-whatsapp-agent"||n==="sikhadenge-dashboard-revenue"||/claude|video|funnel/i.test(n)){const e=p.pm2_env||{};console.log(["name="+n,"pid="+p.pid,"status="+e.status,"restarts="+e.restart_time,"unstable_restarts="+e.unstable_restarts,"cwd="+e.pm_cwd].join("|"));}}});'
 
           echo '=== FINAL ==='
           echo 'READ_ONLY_FORENSICS=PASS'
