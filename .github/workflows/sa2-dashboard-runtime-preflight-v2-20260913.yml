@@ -1,0 +1,205 @@
+name: SA2 Dashboard Runtime Preflight V2 20260913
+
+on:
+  push:
+    branches:
+      - ops/sa2-dashboard-runtime-preflight-20260913
+    paths:
+      - '.github/workflows/sa2-dashboard-runtime-preflight-v2-20260913.yml'
+
+permissions:
+  contents: read
+
+env:
+  SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+  SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+  SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+  SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+  SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    environment: whatsapp-agent-production
+    timeout-minutes: 10
+    steps:
+      - name: Configure pinned SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SSH_PORT="${SSH_PORT:-22}"
+          echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
+          install -d -m 700 "$HOME/.ssh"
+          KEY="$HOME/.ssh/prod"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"
+          fi
+          chmod 600 "$KEY"
+          read -r _ kt km _ <<< "$SSH_HOST_KEY"
+          test "$kt" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Read-only production preflight
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          EXPECTED_SHA='c02e6e060b76b9f5ab6d16258a354a161e53275c'
+          EXPECTED_MIGRATION='20260913093357_sa2_whatsapp_conversation_identity_consent'
+          DASH_NAME='sikhadenge-dashboard-revenue'
+          WA_NAME='sikhadenge-whatsapp-agent'
+          fail=0
+
+          echo '=== SA2 DASHBOARD RUNTIME PREFLIGHT V2 ==='
+          echo 'MODE=READ_ONLY'
+          echo 'MUTATION=NONE'
+          echo "EXPECTED_CANONICAL_SHA=$EXPECTED_SHA"
+
+          command -v pm2 >/dev/null || { echo 'PM2_PRESENT=NO'; exit 2; }
+          command -v node >/dev/null || { echo 'NODE_PRESENT=NO'; exit 2; }
+          PM2_JSON="$(pm2 jlist)"
+
+          proc_field() {
+            local name="$1" field="$2"
+            node -e '
+              let b=""; process.stdin.on("data",d=>b+=d); process.stdin.on("end",()=>{
+                const [name,field]=process.argv.slice(1); const p=JSON.parse(b).find(x=>x.name===name); if(!p) process.exit(3);
+                const e=p.pm2_env||{}; const m={pid:p.pid,status:e.status,cwd:e.pm_cwd,restart:e.restart_time,unstable:e.unstable_restarts,uptime:e.pm_uptime,script:e.pm_exec_path};
+                const v=m[field]; process.stdout.write(v===undefined||v===null?"":String(v));
+              });' "$name" "$field" <<<"$PM2_JSON"
+          }
+
+          DASH_PID="$(proc_field "$DASH_NAME" pid)"
+          DASH_STATUS="$(proc_field "$DASH_NAME" status)"
+          DASH_CWD="$(proc_field "$DASH_NAME" cwd)"
+          DASH_RESTART="$(proc_field "$DASH_NAME" restart)"
+          DASH_UNSTABLE="$(proc_field "$DASH_NAME" unstable)"
+          DASH_SCRIPT="$(proc_field "$DASH_NAME" script)"
+          WA_PID="$(proc_field "$WA_NAME" pid)"
+          WA_STATUS="$(proc_field "$WA_NAME" status)"
+          WA_CWD="$(proc_field "$WA_NAME" cwd)"
+          WA_RESTART="$(proc_field "$WA_NAME" restart)"
+          WA_UNSTABLE="$(proc_field "$WA_NAME" unstable)"
+
+          echo "DASH_STATUS=$DASH_STATUS"
+          echo "DASH_PID=$DASH_PID"
+          echo "DASH_CWD=$DASH_CWD"
+          echo "DASH_SCRIPT=$DASH_SCRIPT"
+          echo "DASH_RESTART_COUNTER=$DASH_RESTART"
+          echo "DASH_UNSTABLE_RESTARTS=$DASH_UNSTABLE"
+          echo "WA_STATUS=$WA_STATUS"
+          echo "WA_PID=$WA_PID"
+          echo "WA_CWD=$WA_CWD"
+          echo "WA_RESTART_COUNTER=$WA_RESTART"
+          echo "WA_UNSTABLE_RESTARTS=$WA_UNSTABLE"
+
+          [ "$DASH_STATUS" = online ] || { echo 'GATE_DASH_PM2=FAIL'; fail=1; }
+          [ "$WA_STATUS" = online ] || { echo 'GATE_WA_PM2=FAIL'; fail=1; }
+          [ "${WA_UNSTABLE:-0}" = 0 ] || { echo 'GATE_WA_UNSTABLE=FAIL'; fail=1; }
+
+          HTTP_CODE="$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3400/ || true)"
+          echo "DASH_PORT3400_HTTP=$HTTP_CODE"
+          case "$HTTP_CODE" in 2*|3*) echo 'GATE_DASH_HTTP=PASS' ;; *) echo 'GATE_DASH_HTTP=FAIL'; fail=1 ;; esac
+
+          echo '--- SELECTED RUNTIME FLAGS ---'
+          FLAG_JSON="$(node -e '
+            let b=""; process.stdin.on("data",d=>b+=d); process.stdin.on("end",()=>{
+              const name=process.argv[1]; const p=JSON.parse(b).find(x=>x.name===name); if(!p) process.exit(3); const e=p.pm2_env||{};
+              const names=["SALES_AI_ENABLED","WHATSAPP_INGEST_ENABLED","WHATSAPP_SA2_DOMAIN_PROCESSING_ENABLED","WHATSAPP_SA2_PRIVACY_ACTIONS_ENABLED","WHATSAPP_OUTBOUND_ENABLED","WHATSAPP_AI_REPLY_ENABLED","WHATSAPP_FOLLOWUP_ENABLED","WHATSAPP_PAYMENT_LINK_ACTION_ENABLED"];
+              const o={}; for(const k of names){const v=e[k]??e.env?.[k];o[k]=v===undefined?"UNSET":String(v)} process.stdout.write(JSON.stringify(o));
+            });' "$DASH_NAME" <<<"$PM2_JSON")"
+          node -e 'const o=JSON.parse(process.argv[1]);for(const [k,v] of Object.entries(o))console.log(`${k}=${v}`)' "$FLAG_JSON"
+          DANGEROUS_TRUE="$(node -e 'const o=JSON.parse(process.argv[1]);const b=["SALES_AI_ENABLED","WHATSAPP_SA2_DOMAIN_PROCESSING_ENABLED","WHATSAPP_SA2_PRIVACY_ACTIONS_ENABLED","WHATSAPP_OUTBOUND_ENABLED","WHATSAPP_AI_REPLY_ENABLED","WHATSAPP_FOLLOWUP_ENABLED","WHATSAPP_PAYMENT_LINK_ACTION_ENABLED"];process.stdout.write(String(b.filter(k=>o[k]==="true").length))' "$FLAG_JSON")"
+          if [ "$DANGEROUS_TRUE" = 0 ]; then echo 'GATE_DANGEROUS_FLAGS_OFF=PASS'; else echo "GATE_DANGEROUS_FLAGS_OFF=FAIL|count=$DANGEROUS_TRUE"; fail=1; fi
+          node -e 'const o=JSON.parse(process.argv[1]);console.log(`INGEST_EXACT_TRUE=${o.WHATSAPP_INGEST_ENABLED==="true"?"YES":"NO"}`)' "$FLAG_JSON"
+
+          echo '--- DASHBOARD SOURCE DISCOVERY ---'
+          REPO=''
+          p="$DASH_CWD"
+          while [ -n "$p" ] && [ "$p" != / ]; do
+            if [ -d "$p/.git" ]; then REPO="$p"; break; fi
+            p="$(dirname "$p")"
+          done
+          if [ -z "$REPO" ]; then
+            for c in /opt/sikhadenge-dashboard /var/www/sikhadenge-dashboard /var/www/sikhadenge-dashboard/source; do
+              if [ -d "$c/.git" ]; then REPO="$c"; break; fi
+            done
+          fi
+          if [ -n "$REPO" ]; then
+            echo "DASH_SOURCE_REPO=$REPO"
+            LOCAL_HEAD="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || true)"
+            echo "DASH_SOURCE_LOCAL_HEAD=${LOCAL_HEAD:-UNKNOWN}"
+            REMOTE_MAIN="$(git -C "$REPO" ls-remote origin refs/heads/main 2>/dev/null | awk '{print $1}' || true)"
+            if [ -n "$REMOTE_MAIN" ]; then
+              echo "CANONICAL_REMOTE_MAIN=$REMOTE_MAIN"
+              if [ "$REMOTE_MAIN" = "$EXPECTED_SHA" ]; then echo 'GATE_CANONICAL_MAIN=PASS'; else echo 'GATE_CANONICAL_MAIN=FAIL'; fail=1; fi
+              echo 'GIT_REMOTE_READ_ACCESS=PASS'
+            else
+              echo 'GIT_REMOTE_READ_ACCESS=FAIL'
+              echo 'GATE_CANONICAL_MAIN=UNPROVEN'
+              fail=1
+            fi
+          else
+            echo 'DASH_SOURCE_REPO=NOT_FOUND'
+            echo 'GATE_CANONICAL_MAIN=UNPROVEN'
+            fail=1
+          fi
+
+          echo '--- DATABASE READ-ONLY GATES ---'
+          DBURL="$(node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const n=process.argv[1];const p=JSON.parse(b).find(x=>x.name===n);if(!p)process.exit(3);const e=p.pm2_env||{};process.stdout.write(String(e.DATABASE_URL??e.env?.DATABASE_URL??""))})' "$DASH_NAME" <<<"$PM2_JSON")"
+          if [ -z "$DBURL" ] && [ -f "$DASH_CWD/.env" ]; then
+            DBURL="$(node -e 'const fs=require("fs");const s=fs.readFileSync(process.argv[1],"utf8");const l=s.split(/\r?\n/).find(x=>/^\s*DATABASE_URL\s*=/.test(x));if(!l)process.exit(0);let v=l.replace(/^\s*DATABASE_URL\s*=\s*/,"").trim();if((v.startsWith("\"")&&v.endsWith("\""))||(v.startsWith("\u0027")&&v.endsWith("\u0027")))v=v.slice(1,-1);process.stdout.write(v)' "$DASH_CWD/.env")"
+          fi
+          if [ -z "$DBURL" ]; then
+            echo 'DATABASE_URL_AVAILABLE=NO'
+            echo 'GATE_DB_STATE=UNPROVEN'
+            fail=1
+          else
+            echo 'DATABASE_URL_AVAILABLE=YES'
+            if (cd "$DASH_CWD" && DATABASE_URL="$DBURL" node - "$EXPECTED_MIGRATION" <<'NODE'
+          const {PrismaClient}=require('@prisma/client');
+          const migration=process.argv[2]; const p=new PrismaClient();
+          (async()=>{
+            const tables=await p.$queryRawUnsafe("SELECT count(*)::int AS count FROM pg_tables WHERE schemaname='public'");
+            const mig=await p.$queryRawUnsafe('SELECT migration_name, finished_at, rolled_back_at FROM "_prisma_migrations" WHERE migration_name = $1',migration);
+            const incomplete=await p.$queryRawUnsafe('SELECT count(*)::int AS count FROM "_prisma_migrations" WHERE finished_at IS NULL AND rolled_back_at IS NULL');
+            const longtx=await p.$queryRawUnsafe("SELECT count(*)::int AS count FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND xact_start IS NOT NULL AND now()-xact_start > interval '5 minutes'");
+            const sa2tables=await p.$queryRawUnsafe("SELECT count(*)::int AS count FROM pg_tables WHERE schemaname='public' AND tablename IN ('WhatsAppParticipant','WhatsAppConversation','WhatsAppConversationMessage','IdentityLinkDecision','WhatsAppConsent','WhatsAppSuppression','WhatsAppPrivacyEvent')");
+            console.log(`PUBLIC_TABLES=${tables[0].count}`);console.log(`SA2_TABLES=${sa2tables[0].count}`);console.log(`INCOMPLETE_MIGRATIONS=${incomplete[0].count}`);console.log(`LONG_TX_OVER_5M=${longtx[0].count}`);
+            const applied=mig.length===1&&mig[0].finished_at&&!mig[0].rolled_back_at;console.log(`SA2_MIGRATION_APPLIED=${applied?'YES':'NO'}`);
+            if(tables[0].count!==139||sa2tables[0].count!==7||incomplete[0].count!==0||longtx[0].count!==0||!applied)process.exitCode=2;
+          })().catch(e=>{console.error('DB_GATE_ERROR='+e.name);process.exitCode=3;}).finally(()=>p.$disconnect());
+          NODE
+            ); then echo 'GATE_DB_STATE=PASS'; else echo 'GATE_DB_STATE=FAIL'; fail=1; fi
+          fi
+
+          echo '--- CONCURRENCY / QUIESCENCE SHORT GATE ---'
+          pts_now(){ ps -eo pid=,args= | awk '/sshd: root@pts\/[0-9]+/ {print $1}' | sort -n | paste -sd, -; }
+          deploy_now(){ ps -eo args= | grep -E '[n]pm (ci|install|run build|exec prisma generate)|[n]ext build|[p]m2 (restart|reload|stop|start).*(sikhadenge-dashboard-revenue|sikhadenge-whatsapp-agent)|[g]it (pull|checkout|reset|fetch).*sikhadenge' || true; }
+          refresh_pm2(){ PM2_JSON="$(pm2 jlist)"; }
+          PTS_BEFORE="$(pts_now)"; WA_BEFORE="$WA_PID|$WA_RESTART"; DASH_BEFORE="$DASH_PID|$DASH_RESTART"
+          AK_BEFORE="$(sha256sum /root/.ssh/authorized_keys 2>/dev/null | awk '{print $1}' || true)"; DEPLOY_BEFORE="$(deploy_now)"
+          echo "PTS_SET_BEFORE=${PTS_BEFORE:-NONE}"; echo "WA_STATE_BEFORE=$WA_BEFORE"; echo "DASH_STATE_BEFORE=$DASH_BEFORE"
+          if [ -n "$DEPLOY_BEFORE" ]; then echo 'ACTIVE_DEPLOY_PROCESS_BEFORE=YES'; fail=1; else echo 'ACTIVE_DEPLOY_PROCESS_BEFORE=NO'; fi
+          sleep 30
+          refresh_pm2
+          PTS_AFTER="$(pts_now)"; WA_AFTER="$(proc_field "$WA_NAME" pid)|$(proc_field "$WA_NAME" restart)"; DASH_AFTER="$(proc_field "$DASH_NAME" pid)|$(proc_field "$DASH_NAME" restart)"
+          AK_AFTER="$(sha256sum /root/.ssh/authorized_keys 2>/dev/null | awk '{print $1}' || true)"; DEPLOY_AFTER="$(deploy_now)"
+          echo "PTS_SET_AFTER=${PTS_AFTER:-NONE}"; echo "WA_STATE_AFTER=$WA_AFTER"; echo "DASH_STATE_AFTER=$DASH_AFTER"
+          [ "$PTS_BEFORE" = "$PTS_AFTER" ] || { echo 'GATE_PTS_STABILITY=FAIL'; fail=1; }
+          [ "$WA_BEFORE" = "$WA_AFTER" ] || { echo 'GATE_WA_STABILITY=FAIL'; fail=1; }
+          [ "$DASH_BEFORE" = "$DASH_AFTER" ] || { echo 'GATE_DASH_STABILITY=FAIL'; fail=1; }
+          [ "$AK_BEFORE" = "$AK_AFTER" ] || { echo 'GATE_AUTHORIZED_KEYS_STABILITY=FAIL'; fail=1; }
+          [ -z "$DEPLOY_AFTER" ] || { echo 'ACTIVE_DEPLOY_PROCESS_AFTER=YES'; fail=1; }
+          [ "$PTS_BEFORE" = "$PTS_AFTER" ] && echo 'GATE_PTS_STABILITY=PASS'
+          [ "$WA_BEFORE" = "$WA_AFTER" ] && echo 'GATE_WA_STABILITY=PASS'
+          [ "$DASH_BEFORE" = "$DASH_AFTER" ] && echo 'GATE_DASH_STABILITY=PASS'
+          [ "$AK_BEFORE" = "$AK_AFTER" ] && echo 'GATE_AUTHORIZED_KEYS_STABILITY=PASS'
+          [ -z "$DEPLOY_AFTER" ] && echo 'ACTIVE_DEPLOY_PROCESS_AFTER=NO'
+
+          if [ "$fail" = 0 ]; then echo 'SA2_DASHBOARD_RUNTIME_PREFLIGHT=PASS'; else echo 'SA2_DASHBOARD_RUNTIME_PREFLIGHT=FAIL'; exit 4; fi
+          REMOTE
