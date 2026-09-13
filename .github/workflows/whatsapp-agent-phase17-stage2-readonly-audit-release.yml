@@ -45,7 +45,7 @@ jobs:
           ssh-keygen -y -f "$key" >/dev/null
           printf 'PASS: STAGE2_PROBE_SSH_READY\n'
 
-      - name: Probe Stage2 Meta candidates read-only
+      - name: Verify WhatsApp scopes subscription and persisted evidence read-only
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -57,27 +57,8 @@ jobs:
 
           read_env_value() {
             node - "$ENV_FILE" "$1" <<'NODE'
-          const fs = require('node:fs');
-          const [file, key] = process.argv.slice(2);
-          const text = fs.readFileSync(file, 'utf8');
-          for (const raw of text.split(/\r?\n/)) {
-            const line = raw.trim(); if (!line || line.startsWith('#')) continue;
-            const normalized = line.startsWith('export ') ? line.slice(7).trim() : line;
-            const i = normalized.indexOf('='); if (i < 1 || normalized.slice(0, i).trim() !== key) continue;
-            let value = normalized.slice(i + 1).trim();
-            if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) value = value.slice(1, -1);
-            process.stdout.write(value); process.exit(0);
-          }
-          process.exit(1);
-          NODE
-          }
-          env_present() { if value="$(read_env_value "$1" 2>/dev/null)" && [[ -n "$value" ]]; then printf 'true'; else printf 'false'; fi; }
-          token_shape() {
-            local value=""; value="$(read_env_value "$1" 2>/dev/null || true)"
-            node - "$value" <<'NODE'
-          const v = process.argv[2] || '';
-          const category = /^EA[A-Za-z0-9_-]+$/.test(v) ? 'META_EA' : /^IG[A-Za-z0-9_-]+$/.test(v) ? 'INSTAGRAM_IG' : /^[A-Za-z0-9._-]+$/.test(v) ? 'OPAQUE' : v ? 'NONSTANDARD' : 'EMPTY';
-          process.stdout.write(`length=${v.length},category=${category},hasWhitespace=${/\s/.test(v)}`);
+          const fs=require('node:fs'); const [file,key]=process.argv.slice(2); const text=fs.readFileSync(file,'utf8');
+          for(const raw of text.split(/\r?\n/)){const line=raw.trim(); if(!line||line.startsWith('#'))continue; const n=line.startsWith('export ')?line.slice(7).trim():line; const i=n.indexOf('='); if(i<1||n.slice(0,i).trim()!==key)continue; let v=n.slice(i+1).trim(); if(v.length>=2&&((v.startsWith('"')&&v.endsWith('"'))||(v.startsWith("'")&&v.endsWith("'"))))v=v.slice(1,-1); process.stdout.write(v); process.exit(0);} process.exit(1);
           NODE
           }
 
@@ -88,46 +69,52 @@ jobs:
 
           DATABASE_URL="$(read_env_value DATABASE_URL)"
           DATABASE_CLI_URL="$(node "$LIVE_APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")"
-          psql_scalar() { psql "$DATABASE_CLI_URL" -X -v ON_ERROR_STOP=1 -Atqc "$1"; }
           psql_rows() { psql "$DATABASE_CLI_URL" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "$1"; }
+          psql_scalar() { psql "$DATABASE_CLI_URL" -X -v ON_ERROR_STOP=1 -Atqc "$1"; }
           state="$(psql_rows "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
           printf 'CONTROLLED_STATE=%s\n' "$state"; test "$state" = "INTERNAL_TEST_IDENTITIES|SHADOW|NO_EXTERNAL_WRITES|false|1"
 
-          printf 'META_ENV_KEY_NAMES_BEGIN\n'
-          node - "$ENV_FILE" <<'NODE'
-          const fs=require('node:fs'); const text=fs.readFileSync(process.argv[2],'utf8');
-          const keys=[]; for(const raw of text.split(/\r?\n/)){let line=raw.trim(); if(!line||line.startsWith('#'))continue; if(line.startsWith('export '))line=line.slice(7).trim(); const i=line.indexOf('='); if(i<1)continue; const k=line.slice(0,i).trim(); if(/(INSTAGRAM|WHATSAPP|MESSENGER|META).*(TOKEN|SECRET|ID|VERSION)|^(INSTAGRAM|WHATSAPP|MESSENGER|META)_/.test(k))keys.push(k)}
-          [...new Set(keys)].sort().forEach(k=>console.log(k));
-          NODE
-          printf 'META_ENV_KEY_NAMES_END\n'
+          printf 'WHATSAPP_PERSISTED_EVIDENCE_BEGIN\n'
+          psql_rows "SELECT \"id\",\"status\",CASE WHEN length(\"externalAccountId\")<=4 THEN repeat('*',length(\"externalAccountId\")) ELSE repeat('*',length(\"externalAccountId\")-4)||right(\"externalAccountId\",4) END,COALESCE(\"capabilities\"->'evidence'->>'apiVerifiedAt',''),COALESCE(\"capabilities\"->'evidence'->>'webhookRequired',''),COALESCE(\"capabilities\"->'evidence'->>'webhookVerifiedAt',''),COALESCE(\"capabilities\"->'evidence'->>'permissionsVerified',''),COALESCE(\"capabilities\"->'evidence'->>'tokenExpiresAt',''),COALESCE(\"capabilities\"->'evidence'->>'revokedAt',''),COALESCE(\"capabilities\"->'evidence'->>'disconnectedAt','') FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\"='WHATSAPP';"
+          printf 'WHATSAPP_PERSISTED_EVIDENCE_END\n'
+          wa_count="$(psql_scalar "SELECT COUNT(*) FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\"='WHATSAPP';")"
+          test "$wa_count" = "1"
 
-          for key in INSTAGRAM_ACCESS_TOKEN INSTAGRAM_ACCOUNT_ID INSTAGRAM_GRAPH_VERSION WHATSAPP_ACCESS_TOKEN META_WHATSAPP_ACCESS_TOKEN WHATSAPP_PHONE_NUMBER_ID META_WHATSAPP_PHONE_NUMBER_ID WHATSAPP_GRAPH_VERSION META_GRAPH_API_VERSION; do
-            printf '%s_PRESENT=%s\n' "$key" "$(env_present "$key")"
-          done
-          printf 'INSTAGRAM_ACCESS_TOKEN_SHAPE=%s\n' "$(token_shape INSTAGRAM_ACCESS_TOKEN)"
-          if [[ "$(env_present WHATSAPP_ACCESS_TOKEN)" = true ]]; then printf 'WHATSAPP_ACCESS_TOKEN_SHAPE=%s\n' "$(token_shape WHATSAPP_ACCESS_TOKEN)"; fi
-          if [[ "$(env_present META_WHATSAPP_ACCESS_TOKEN)" = true ]]; then printf 'META_WHATSAPP_ACCESS_TOKEN_SHAPE=%s\n' "$(token_shape META_WHATSAPP_ACCESS_TOKEN)"; fi
+          export WA_TOKEN="$(read_env_value WHATSAPP_ACCESS_TOKEN)"
+          export WA_PHONE_ID="$(read_env_value WHATSAPP_PHONE_NUMBER_ID)"
+          export WA_WABA_ID="$(read_env_value WHATSAPP_BUSINESS_ACCOUNT_ID)"
+          export WA_VERSION="$(read_env_value WHATSAPP_GRAPH_VERSION)"
+          export WA_APP_ID="$(read_env_value WHATSAPP_APP_ID)"
+          export WA_APP_SECRET="$(read_env_value WHATSAPP_APP_SECRET)"
 
-          psql_rows "SELECT \"id\",\"channel\",\"status\",CASE WHEN length(\"externalAccountId\")<=4 THEN repeat('*',length(\"externalAccountId\")) ELSE repeat('*',length(\"externalAccountId\")-4)||right(\"externalAccountId\",4) END,COALESCE(\"capabilities\"->>'apiVerifiedAt',''),COALESCE(\"capabilities\"->>'webhookVerifiedAt',''),COALESCE(\"capabilities\"->>'permissionsVerified','') FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\" IN ('INSTAGRAM','WHATSAPP') ORDER BY \"channel\";" | while IFS='|' read -r id channel status masked api webhook permission; do printf 'CONNECTION id=%s channel=%s status=%s external=%s apiVerifiedAt=%s webhookVerifiedAt=%s permissionsVerified=%s\n' "$id" "$channel" "$status" "$masked" "$api" "$webhook" "$permission"; done
-
-          export IG_TOKEN="$(read_env_value INSTAGRAM_ACCESS_TOKEN 2>/dev/null || true)"
-          export IG_ID="$(read_env_value INSTAGRAM_ACCOUNT_ID 2>/dev/null || true)"
-          export IG_VERSION="$(read_env_value INSTAGRAM_GRAPH_VERSION 2>/dev/null || true)"
-          export WA_TOKEN="$(read_env_value WHATSAPP_ACCESS_TOKEN 2>/dev/null || read_env_value META_WHATSAPP_ACCESS_TOKEN 2>/dev/null || true)"
-          export WA_ID="$(read_env_value WHATSAPP_PHONE_NUMBER_ID 2>/dev/null || read_env_value META_WHATSAPP_PHONE_NUMBER_ID 2>/dev/null || true)"
-          export WA_VERSION="$(read_env_value WHATSAPP_GRAPH_VERSION 2>/dev/null || read_env_value META_GRAPH_API_VERSION 2>/dev/null || true)"
           node <<'NODE'
-          const safe=v=>String(v||'verification failed').replace(/\s+/g,' ').slice(0,180);
-          const out=(k,v)=>console.log(`${k}=${v}`);
-          async function probe(prefix, token, id, version, fields){
-            if(!token||!id||!version){out(`${prefix}_IDENTITY_VERIFIED`,false); out(`${prefix}_REASON`,'required configuration missing'); return;}
-            const u=new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(id)}`); u.searchParams.set('fields',fields);
-            const c=new AbortController(); const t=setTimeout(()=>c.abort(),10000);
-            try { const r=await fetch(u,{method:'GET',headers:{Authorization:`Bearer ${token}`,Accept:'application/json'},redirect:'error',cache:'no-store',signal:c.signal}); let b={}; try{b=await r.json()}catch{}; out(`${prefix}_IDENTITY_HTTP`,r.status); out(`${prefix}_IDENTITY_VERIFIED`,r.ok&&String(b?.id||'')===id); out(`${prefix}_EXTERNAL_WRITE_SENT`,false); if(!(r.ok&&String(b?.id||'')===id))out(`${prefix}_REASON`,safe(b?.error?.message||'identity mismatch')); }
-            catch(e){out(`${prefix}_IDENTITY_VERIFIED`,false);out(`${prefix}_EXTERNAL_WRITE_SENT`,false);out(`${prefix}_REASON`,safe(e?.name==='AbortError'?'probe timed out':e?.message));} finally{clearTimeout(t)}
-          }
-          (async()=>{await probe('INSTAGRAM',process.env.IG_TOKEN,process.env.IG_ID,process.env.IG_VERSION,'id'); await probe('WHATSAPP',process.env.WA_TOKEN,process.env.WA_ID,process.env.WA_VERSION,'id,display_phone_number,verified_name');})();
+          const env=process.env; const out=(k,v)=>console.log(`${k}=${String(v)}`); const safe=v=>String(v||'').replace(/\s+/g,' ').slice(0,220);
+          async function get(url, auth){ const c=new AbortController(); const t=setTimeout(()=>c.abort(),10000); try{const r=await fetch(url,{method:'GET',headers:{Accept:'application/json',...(auth?{Authorization:`Bearer ${auth}`}:{})},redirect:'error',cache:'no-store',signal:c.signal}); let b={}; try{b=await r.json()}catch{} return {r,b};}finally{clearTimeout(t)}}
+          (async()=>{
+            const {WA_TOKEN:token,WA_PHONE_ID:phoneId,WA_WABA_ID:wabaId,WA_VERSION:version,WA_APP_ID:appId,WA_APP_SECRET:appSecret}=env;
+            if(!token||!phoneId||!wabaId||!version||!appId||!appSecret) throw new Error('required WhatsApp production configuration missing');
+
+            const identityUrl=new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(phoneId)}`); identityUrl.searchParams.set('fields','id,display_phone_number,verified_name');
+            const identity=await get(identityUrl,token); const identityOk=identity.r.ok&&String(identity.b?.id||'')===phoneId;
+            out('WHATSAPP_IDENTITY_HTTP',identity.r.status); out('WHATSAPP_IDENTITY_VERIFIED',identityOk); if(!identityOk)out('WHATSAPP_IDENTITY_REASON',safe(identity.b?.error?.message));
+
+            const debugUrl=new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/debug_token`); debugUrl.searchParams.set('input_token',token); debugUrl.searchParams.set('access_token',`${appId}|${appSecret}`);
+            const debug=await get(debugUrl,null); const d=debug.b?.data||{}; const scopes=Array.isArray(d.scopes)?d.scopes.map(String).sort():[]; const granular=Array.isArray(d.granular_scopes)?d.granular_scopes.map(x=>String(x?.scope||'')).filter(Boolean).sort():[];
+            out('WHATSAPP_DEBUG_TOKEN_HTTP',debug.r.status); out('WHATSAPP_TOKEN_VALID',Boolean(debug.r.ok&&d.is_valid)); out('WHATSAPP_TOKEN_APP_MATCH',String(d.app_id||'')===appId); out('WHATSAPP_TOKEN_EXPIRES_AT',Number(d.expires_at||0)); out('WHATSAPP_TOKEN_DATA_ACCESS_EXPIRES_AT',Number(d.data_access_expires_at||0));
+            out('WHATSAPP_TOKEN_SCOPES',scopes.join(',')); out('WHATSAPP_TOKEN_GRANULAR_SCOPES',granular.join(','));
+            const messaging=scopes.includes('whatsapp_business_messaging')||granular.includes('whatsapp_business_messaging'); const management=scopes.includes('whatsapp_business_management')||granular.includes('whatsapp_business_management');
+            out('WHATSAPP_SCOPE_MESSAGING',messaging); out('WHATSAPP_SCOPE_MANAGEMENT',management); out('WHATSAPP_PERMISSION_EVIDENCE_ELIGIBLE',Boolean(identityOk&&debug.r.ok&&d.is_valid&&String(d.app_id||'')===appId&&messaging&&management));
+
+            const subUrl=new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(wabaId)}/subscribed_apps`); const sub=await get(subUrl,token); const apps=Array.isArray(sub.b?.data)?sub.b.data:[]; const matching=apps.find(x=>String(x?.id||'')===appId); const fields=matching&&Array.isArray(matching.subscribed_fields)?matching.subscribed_fields.map(String).sort():[];
+            out('WHATSAPP_SUBSCRIBED_APPS_HTTP',sub.r.status); out('WHATSAPP_EXPECTED_APP_SUBSCRIBED',Boolean(sub.r.ok&&matching)); out('WHATSAPP_SUBSCRIBED_FIELDS',fields.join(',')); if(!sub.r.ok)out('WHATSAPP_SUBSCRIPTION_REASON',safe(sub.b?.error?.message));
+            out('WHATSAPP_EXTERNAL_WRITE_SENT',false);
+          })().catch(e=>{out('WHATSAPP_PROBE_ERROR',safe(e?.message)); out('WHATSAPP_EXTERNAL_WRITE_SENT',false); process.exitCode=1;});
           NODE
-          unset IG_TOKEN IG_ID IG_VERSION WA_TOKEN WA_ID WA_VERSION
-          printf 'PASS: PHASE17_STAGE2_META_CANDIDATE_DIAGNOSTIC_COMPLETE\n'
+          unset WA_TOKEN WA_PHONE_ID WA_WABA_ID WA_VERSION WA_APP_ID WA_APP_SECRET
+
+          recent_webhook_events="$(psql_scalar "SELECT COUNT(*) FROM \"WebhookEvent\" WHERE \"receivedAt\" >= NOW() - INTERVAL '30 days';")"
+          replay_records="$(psql_scalar "SELECT COUNT(*) FROM \"EngageWebhookReplayRecord\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\"='WHATSAPP';")"
+          printf 'RECENT_WEBHOOK_EVENT_COUNT_30D=%s\n' "$recent_webhook_events"
+          printf 'WHATSAPP_REPLAY_RECORD_COUNT=%s\n' "$replay_records"
+          printf 'PASS: PHASE17_STAGE2_WHATSAPP_EVIDENCE_DIAGNOSTIC_COMPLETE\n'
           REMOTE
