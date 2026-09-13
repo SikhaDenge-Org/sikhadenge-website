@@ -137,21 +137,26 @@ jobs:
           printf 'ENABLED_FEATURE_FLAG_COUNT=%s\n' "$enabled_flags"
           [[ "$enabled_flags" == '0' ]] && proven HIGH_RISK_FLAGS || fail HIGH_RISK_FLAGS
 
-          attest_sha(){
+          operator_attest(){
             local gate="$1" action="$2" extra="${3:-}" count
-            count="$(q "SELECT COUNT(*) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"action\"='${action}' AND \"outcome\"='VERIFIED' AND COALESCE(\"metadata\"->>'liveSha','')='${EXPECTED_LIVE_SHA}' ${extra}")"
+            count="$(q "SELECT COUNT(*) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"action\"='${action}' AND \"outcome\"='VERIFIED' AND COALESCE(\"entityType\",'')='CONTROLLED_LAUNCH_GOVERNANCE' AND COALESCE(\"entityId\",'')='${EXPECTED_LIVE_SHA}' AND COALESCE(\"reasonCode\",'')='OPERATOR_VERIFIED_EXACT_SHA' AND COALESCE(\"actorId\",'')<>'' AND COALESCE(\"requestId\",'')<>'' AND COALESCE(\"metadata\"->>'liveSha','')='${EXPECTED_LIVE_SHA}' AND COALESCE(\"metadata\"->>'proofRef','')<>'' AND COALESCE(\"metadata\"->>'verifiedAt','') ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$' ${extra}")"
             [[ "$count" -gt 0 ]] && proven "$gate" || unknown "$gate"
           }
-          attest_sha CRITICAL_INCIDENTS PHASE17_CRITICAL_INCIDENT_REVIEW "AND COALESCE(\"metadata\"->>'unresolvedCriticalIncidents','')='0'"
-          attest_sha DUPLICATE_SENDS PHASE17_DUPLICATE_SEND_REVIEW "AND COALESCE(\"metadata\"->>'unexplainedDuplicateSends','')='0'"
-          attest_sha ROLLBACK_TESTED PHASE17_ROLLBACK_REHEARSAL
-          attest_sha MONITORING_ACTIVE PHASE17_MONITORING_ACTIVE
-          attest_sha POLICY_VERIFIED PHASE17_POLICY_VERIFIED
-          attest_sha SCOPE_APPROVED PHASE17_STAGE2_SCOPE_APPROVED "AND COALESCE(\"metadata\"->>'candidateId','')='${CANDIDATE_ID}'"
-          attest_sha AUTHENTICATED_SMOKE PHASE17_AUTHENTICATED_SMOKE
-          attest_sha SUPPORT_RUNBOOK_ACTIVE PHASE17_SUPPORT_RUNBOOK_ACTIVE
-          attest_sha OBSERVATION_WINDOW_COMPLETE PHASE17_OBSERVATION_WINDOW_COMPLETE
-          attest_sha PRODUCTION_EVIDENCE_RECORDED PHASE17_PRODUCTION_EVIDENCE_RECORDED
+          machine_attest(){
+            local gate="$1" action="$2" extra="${3:-}" count
+            count="$(q "SELECT COUNT(*) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"action\"='${action}' AND \"outcome\"='VERIFIED' AND COALESCE(\"entityType\",'')='CONTROLLED_LAUNCH_GOVERNANCE' AND COALESCE(\"entityId\",'')='${EXPECTED_LIVE_SHA}' AND COALESCE(\"reasonCode\",'')='MACHINE_VERIFIED_EXACT_SHA' AND \"actorId\" IS NULL AND COALESCE(\"requestId\",'')<>'' AND COALESCE(\"metadata\"->>'liveSha','')='${EXPECTED_LIVE_SHA}' ${extra}")"
+            [[ "$count" -gt 0 ]] && proven "$gate" || unknown "$gate"
+          }
+          operator_attest CRITICAL_INCIDENTS PHASE17_CRITICAL_INCIDENT_REVIEW "AND COALESCE(\"metadata\"->>'unresolvedCriticalIncidents','')='0'"
+          operator_attest DUPLICATE_SENDS PHASE17_DUPLICATE_SEND_REVIEW "AND COALESCE(\"metadata\"->>'unexplainedDuplicateSends','')='0'"
+          operator_attest ROLLBACK_TESTED PHASE17_ROLLBACK_REHEARSAL "AND COALESCE(\"metadata\"->>'result','')='PASS'"
+          operator_attest MONITORING_ACTIVE PHASE17_MONITORING_ACTIVE "AND COALESCE(\"metadata\"->>'monitoringStatus','')='ACTIVE'"
+          machine_attest POLICY_VERIFIED PHASE17_POLICY_VERIFIED "AND COALESCE(\"metadata\"->>'source','')='github-actions-phase17-stage2-machine-evidence' AND COALESCE(\"metadata\"->>'policyRunId','')<>'' AND COALESCE(\"metadata\"->>'policyCommitSha','')='${EXPECTED_LIVE_SHA}' AND COALESCE(\"metadata\"->'checks','[]'::jsonb) @> '[\"typecheck\",\"phase17-controlled-launch\",\"phase17-production-readiness\",\"stage2-governance-evidence\",\"stage2-machine-evidence-policy\"]'::jsonb"
+          operator_attest SCOPE_APPROVED PHASE17_STAGE2_SCOPE_APPROVED "AND COALESCE(\"metadata\"->>'candidateId','')='${CANDIDATE_ID}' AND COALESCE(\"metadata\"->>'decision','')='APPROVED'"
+          operator_attest AUTHENTICATED_SMOKE PHASE17_AUTHENTICATED_SMOKE "AND COALESCE(\"metadata\"->>'result','')='PASS' AND COALESCE(\"metadata\"->>'authenticated','')='true' AND COALESCE(\"metadata\"->>'readOnly','')='true' AND COALESCE(\"metadata\"->>'externalWritesAttempted','')='false'"
+          operator_attest SUPPORT_RUNBOOK_ACTIVE PHASE17_SUPPORT_RUNBOOK_ACTIVE "AND COALESCE(\"metadata\"->>'runbookStatus','')='ACTIVE'"
+          operator_attest OBSERVATION_WINDOW_COMPLETE PHASE17_OBSERVATION_WINDOW_COMPLETE "AND COALESCE(\"metadata\"->>'complete','')='true' AND COALESCE(\"metadata\"->>'windowStartedAt','') ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$' AND COALESCE(\"metadata\"->>'windowEndedAt','') ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$' AND CASE WHEN COALESCE(\"metadata\"->>'windowStartedAt','') ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$' AND COALESCE(\"metadata\"->>'windowEndedAt','') ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$' THEN (\"metadata\"->>'windowEndedAt')::timestamptz >= (\"metadata\"->>'windowStartedAt')::timestamptz ELSE false END"
+          machine_attest PRODUCTION_EVIDENCE_RECORDED PHASE17_PRODUCTION_EVIDENCE_RECORDED "AND COALESCE(\"metadata\"->>'source','')='github-actions-production-batch1-plus-postdeploy-proof' AND COALESCE(\"metadata\"->>'productionRunId','')<>'' AND COALESCE(\"metadata\"->>'productionRunNumber','')<>'' AND COALESCE(\"metadata\"->>'productionWorkflowConclusion','')='success' AND COALESCE(\"metadata\"->>'exactLiveShaVerified','')='true' AND COALESCE(\"metadata\"->>'trackedWorktreeClean','')='true' AND COALESCE(\"metadata\"->>'processHealthVerified','')='true' AND COALESCE(\"metadata\"->>'loginSmokeVerified','')='true'"
 
           pm2_state="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(String(p?.pm2_env?.status||"missing"))})')"
           printf 'PM2_STATE=%s\n' "$pm2_state"
