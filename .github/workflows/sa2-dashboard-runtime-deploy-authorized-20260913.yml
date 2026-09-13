@@ -1,0 +1,389 @@
+name: SA2 Dashboard Runtime Deploy Authorized 20260913
+
+on:
+  push:
+    branches:
+      - ops/wa-restart-forensics-20260913
+    paths:
+      - '.github/workflows/sa2-dashboard-runtime-deploy-authorized-20260913.yml'
+
+permissions:
+  contents: read
+
+env:
+  SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+  SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+  SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+  SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+  SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: whatsapp-agent-production
+    timeout-minutes: 40
+    steps:
+      - name: Configure pinned SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SSH_PORT="${SSH_PORT:-22}"
+          echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
+          install -d -m 700 "$HOME/.ssh"
+          KEY="$HOME/.ssh/prod"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"
+          fi
+          chmod 600 "$KEY"
+          read -r _ kt km _ <<< "$SSH_HOST_KEY"
+          test "$kt" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Authorized immutable SA2 dashboard runtime deployment
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+
+          REPO="/opt/sikhadenge-dashboard"
+          RELEASE_ROOT="/opt/sikhadenge-dashboard-releases"
+          PROCESS="sikhadenge-dashboard-revenue"
+          WA_PROCESS="sikhadenge-whatsapp-agent"
+          PORT="3400"
+          CANARY_PORT="3499"
+          EXPECTED_MAIN="c02e6e060b76b9f5ab6d16258a354a161e53275c"
+          BASELINE="20260913000000_canonical_baseline"
+          BASELINE_SHA="3526a0e2a9844d63ee6d2e46f71e72a7ca0a470da36698a6cebc8dd30caa0d96"
+          SA2="20260913093357_sa2_whatsapp_conversation_identity_consent"
+          SA2_SHA="68c5f5cfab1c0209e958dbb0de0539289481b1fb4176c3929e35117d3b569223"
+          BUILD_DB="sikhadenge_sa2_runtime_validation_20260913_164840"
+          STAMP="$(date +%Y%m%d_%H%M%S)"
+          SHORT="${EXPECTED_MAIN:0:8}"
+          RELEASE="$RELEASE_ROOT/sa2-${STAMP}-${SHORT}"
+          EVIDENCE="/root/migration-evidence/sa2-runtime-deploy-${STAMP}"
+          OLD_CFG="$EVIDENCE/pm2-old.config.json"
+          NEW_CFG="$EVIDENCE/pm2-new.config.json"
+          PM2_SECURE="$EVIDENCE/pm2-before-secure.json"
+          SWITCH_ATTEMPTED=0
+          SUCCESS=0
+          CANARY_PID=""
+          OLD_CWD=""
+
+          mkdir -p "$EVIDENCE" "$RELEASE_ROOT"
+          chmod 700 "$EVIDENCE"
+          exec > >(tee "$EVIDENCE/deploy.log") 2>&1
+
+          rollback_runtime() {
+            set +e
+            if [ "$SWITCH_ATTEMPTED" = "1" ] && [ -s "$OLD_CFG" ]; then
+              echo "ROLLBACK_ATTEMPT=START"
+              pm2 startOrReload "$OLD_CFG" --only "$PROCESS" --update-env >/dev/null 2>&1
+              for _ in $(seq 1 30); do
+                RP="$(pm2 pid "$PROCESS" | tail -1)"
+                RCWD=""
+                [ -n "$RP" ] && [ -e "/proc/$RP/cwd" ] && RCWD="$(readlink -f "/proc/$RP/cwd")"
+                RHTTP="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/" 2>/dev/null || true)"
+                if [ "$RCWD" = "$OLD_CWD" ] && [[ "$RHTTP" =~ ^[23][0-9][0-9]$ ]]; then
+                  pm2 save >/dev/null 2>&1 || true
+                  echo "ROLLBACK_RESULT=PASS"
+                  return 0
+                fi
+                sleep 2
+              done
+              echo "ROLLBACK_RESULT=FAIL"
+            fi
+          }
+
+          cleanup() {
+            rc=$?
+            set +e
+            if [ -n "$CANARY_PID" ] && kill -0 "$CANARY_PID" 2>/dev/null; then
+              kill -TERM "$CANARY_PID" >/dev/null 2>&1 || true
+              wait "$CANARY_PID" 2>/dev/null || true
+            fi
+            if [ "$SUCCESS" != "1" ]; then
+              rollback_runtime
+              if [ "$SWITCH_ATTEMPTED" = "0" ] && [ -d "$RELEASE" ]; then
+                rm -rf "$RELEASE" >/dev/null 2>&1 || true
+              fi
+              echo "SA2_RUNTIME_DEPLOYMENT=FAIL"
+              echo "EXIT_CODE=$rc"
+              echo "EVIDENCE_DIR=$EVIDENCE"
+            fi
+            exit "$rc"
+          }
+          trap cleanup EXIT
+
+          echo "==========================================="
+          echo "=== AUTHORIZED SA2 PRODUCTION RUNTIME DEPLOY ==="
+          echo "==========================================="
+          echo "TARGET_MAIN=$EXPECTED_MAIN"
+          echo "DB_MIGRATION=NOT_RUN"
+          echo "PRISMA_DB_PUSH=NOT_RUN"
+          echo "PRISMA_MIGRATE_RESOLVE=NOT_RUN"
+          echo "WHATSAPP_PM2_RESTART=NOT_AUTHORIZED"
+          echo "FEATURE_FLAG_ENABLE=NONE"
+
+          echo "=== 1. EXACT MAIN / DISK / TOOLCHAIN ==="
+          git -C "$REPO" fetch origin main --prune
+          REMOTE_MAIN="$(git -C "$REPO" rev-parse origin/main)"
+          echo "REMOTE_MAIN=$REMOTE_MAIN"
+          [ "$REMOTE_MAIN" = "$EXPECTED_MAIN" ]
+          [ "$(node -v)" = "v20.20.0" ]
+          FREE_KB="$(df -Pk "$RELEASE_ROOT" | awk 'NR==2 {print $4}')"
+          echo "FREE_KB=$FREE_KB"
+          [ "$FREE_KB" -ge 8388608 ]
+          echo "SOURCE_DISK_TOOLCHAIN_GATE=PASS"
+
+          echo "=== 2. PRODUCTION DB POST-SA2 GATE ==="
+          PROD_META="$(runuser -u postgres -- psql -d sikhadenge_dashboard -X -At -F '|' -c "SELECT migration_name, checksum FROM public._prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY started_at, migration_name;")"
+          EXPECTED_META="$(printf '%s\n%s' "${BASELINE}|${BASELINE_SHA}" "${SA2}|${SA2_SHA}")"
+          [ "$PROD_META" = "$EXPECTED_META" ]
+          [ "$(runuser -u postgres -- psql -d sikhadenge_dashboard -X -Atc "SELECT COUNT(*) FROM pg_tables WHERE schemaname='public';")" = "139" ]
+          [ "$(runuser -u postgres -- psql -d sikhadenge_dashboard -X -Atc "SELECT COUNT(*) FROM public._prisma_migrations WHERE finished_at IS NULL OR rolled_back_at IS NOT NULL;")" = "0" ]
+          echo "PRODUCTION_DB_GATE=PASS"
+
+          echo "=== 3. CURRENT RUNTIME + SAFETY FLAGS ==="
+          DASH_PID="$(pm2 pid "$PROCESS" | tail -1)"
+          WA_PID="$(pm2 pid "$WA_PROCESS" | tail -1)"
+          [[ "$DASH_PID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$WA_PID" =~ ^[1-9][0-9]*$ ]]
+          OLD_CWD="$(readlink -f "/proc/$DASH_PID/cwd")"
+          OLD_HTTP="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/")"
+          [[ "$OLD_HTTP" =~ ^[23][0-9][0-9]$ ]]
+          WA_INITIAL_RESTARTS="$(pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const p=JSON.parse(b).find(x=>x.name==="sikhadenge-whatsapp-agent");if(!p)process.exit(2);process.stdout.write(String(p.pm2_env?.restart_time ?? -1));});')"
+          WA_INITIAL_PID="$WA_PID"
+          WA_SOURCE="/var/www/sikhadenge-whatsapp-agent/source"
+          WA_SOURCE_HASH="$( { git -C "$WA_SOURCE" rev-parse HEAD 2>/dev/null || true; git -C "$WA_SOURCE" status --porcelain=v1 --untracked-files=no -- apps/whatsapp-agent-dashboard 2>/dev/null || true; git -C "$WA_SOURCE" diff --binary -- apps/whatsapp-agent-dashboard 2>/dev/null || true; } | sha256sum | awk '{print $1}' )"
+          AK_SHA="$(sha256sum /root/.ssh/authorized_keys | awk '{print $1}')"
+          ALL_FLAGS='SALES_AI_ENABLED|WHATSAPP_SA2_DOMAIN_PROCESSING_ENABLED|WHATSAPP_SA2_PRIVACY_ACTIONS_ENABLED|WHATSAPP_OUTBOUND_ENABLED|WHATSAPP_AI_REPLY_ENABLED|WHATSAPP_FOLLOWUP_ENABLED|WHATSAPP_PAYMENT_LINK_ACTION_ENABLED'
+          for P in "$DASH_PID" "$WA_PID"; do
+            BAD="$(tr '\0' '\n' < "/proc/$P/environ" | grep -E "^($ALL_FLAGS)=true$" || true)"
+            [ -z "$BAD" ] || { echo "UNSAFE_FLAG_DETECTED"; exit 30; }
+          done
+          echo "OLD_DASHBOARD_CWD=$OLD_CWD"
+          echo "OLD_DASHBOARD_HTTP=$OLD_HTTP"
+          echo "WA_INITIAL_RESTARTS=$WA_INITIAL_RESTARTS"
+          echo "DANGEROUS_AUTOMATION_FLAGS=OFF"
+          echo "CURRENT_RUNTIME_GATE=PASS"
+
+          echo "=== 4. BUILD-CLONE DB + RELEASE PREP ==="
+          [ "$(runuser -u postgres -- psql -d postgres -X -Atc "SELECT COUNT(*) FROM pg_database WHERE datname='${BUILD_DB}';")" = "1" ]
+          [ "$(runuser -u postgres -- psql -d "$BUILD_DB" -X -Atc "SELECT COUNT(*) FROM pg_tables WHERE schemaname='public';")" = "139" ]
+          PROD_URL="$(tr '\0' '\n' < "/proc/$DASH_PID/environ" | sed -n 's/^DATABASE_URL=//p' | head -1)"
+          [ -n "$PROD_URL" ]
+          BUILD_URL="$(PROD_URL="$PROD_URL" TARGET_DB="$BUILD_DB" node - <<'NODE'
+          const u=new URL(process.env.PROD_URL);u.pathname='/' + encodeURIComponent(process.env.TARGET_DB);process.stdout.write(u.toString());
+          NODE
+          )"
+          BUILD_IDENTITY="$(DB_URL="$BUILD_URL" node - <<'NODE'
+          const u=new URL(process.env.DB_URL);process.stdout.write([u.hostname,decodeURIComponent(u.pathname.slice(1)),decodeURIComponent(u.username)].join('|'));
+          NODE
+          )"
+          IFS='|' read -r BH BD BU <<< "$BUILD_IDENTITY"
+          case "$BH" in 127.0.0.1|localhost|::1) ;; *) exit 40 ;; esac
+          [ "$BD" = "$BUILD_DB" ]
+          [ "$BU" = "sdadmin" ]
+          git clone --no-hardlinks "$REPO" "$RELEASE" >/dev/null 2>&1
+          git -C "$RELEASE" checkout --detach "$EXPECTED_MAIN" >/dev/null 2>&1
+          [ "$(git -C "$RELEASE" rev-parse HEAD)" = "$EXPECTED_MAIN" ]
+          for f in .env .env.production .env.local .env.production.local; do
+            if [ -f "$OLD_CWD/$f" ]; then
+              cp -p "$OLD_CWD/$f" "$RELEASE/$f"
+            fi
+          done
+          printf '%s\n' "$EXPECTED_MAIN" > "$RELEASE/.release-sha"
+          echo "RELEASE_PATH=$RELEASE"
+          echo "RELEASE_SOURCE_GATE=PASS"
+
+          echo "=== 5. EXACT INSTALL + BUILD AGAINST SAFE CLONE DB ==="
+          python3 - "$DASH_PID" "$RELEASE" "$BUILD_URL" <<'PY'
+          import os,sys,subprocess
+          pid,release,build_url=sys.argv[1:]
+          raw=open(f'/proc/{pid}/environ','rb').read().split(b'\0')
+          env={}
+          for item in raw:
+              if b'=' in item:
+                  k,v=item.split(b'=',1); env[k.decode(errors='ignore')]=v.decode(errors='ignore')
+          env['DATABASE_URL']=build_url
+          env['SHADOW_DATABASE_URL']=build_url
+          env['NODE_ENV']='production'
+          env['PWD']=release
+          for cmd in (["npm","ci","--no-audit","--no-fund"],["npm","run","whatsapp:sa2-validate"],["npm","run","build"]):
+              r=subprocess.run(cmd,cwd=release,env=env)
+              if r.returncode: sys.exit(r.returncode)
+          PY
+          [ -s "$RELEASE/.next/BUILD_ID" ]
+          echo "INSTALL_BUILD_VALIDATOR_GATE=PASS"
+
+          echo "=== 6. ISOLATED CANARY ON PORT 3499 ==="
+          if ss -ltn | awk '{print $4}' | grep -Eq "(^|:)${CANARY_PORT}$"; then
+            echo "CANARY_PORT_IN_USE"
+            exit 50
+          fi
+          python3 - "$DASH_PID" "$RELEASE" "$BUILD_URL" "$CANARY_PORT" <<'PY' >"$EVIDENCE/canary.log" 2>&1 &
+          import os,sys
+          pid,release,build_url,port=sys.argv[1:]
+          raw=open(f'/proc/{pid}/environ','rb').read().split(b'\0')
+          env={}
+          for item in raw:
+              if b'=' in item:
+                  k,v=item.split(b'=',1); env[k.decode(errors='ignore')]=v.decode(errors='ignore')
+          env['DATABASE_URL']=build_url
+          env['SHADOW_DATABASE_URL']=build_url
+          env['NODE_ENV']='production'
+          env['PWD']=release
+          node='/usr/bin/node'
+          binary=os.path.join(release,'node_modules','next','dist','bin','next')
+          os.chdir(release)
+          os.execve(node,[node,binary,'start','-p',port],env)
+          PY
+          CANARY_PID=$!
+          CANARY_HTTP=""
+          for _ in $(seq 1 30); do
+            CANARY_HTTP="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${CANARY_PORT}/" 2>/dev/null || true)"
+            if [[ "$CANARY_HTTP" =~ ^[23][0-9][0-9]$ ]]; then break; fi
+            if ! kill -0 "$CANARY_PID" 2>/dev/null; then break; fi
+            sleep 2
+          done
+          echo "CANARY_HTTP=$CANARY_HTTP"
+          [[ "$CANARY_HTTP" =~ ^[23][0-9][0-9]$ ]]
+          kill -TERM "$CANARY_PID" >/dev/null 2>&1 || true
+          wait "$CANARY_PID" 2>/dev/null || true
+          CANARY_PID=""
+          echo "ISOLATED_CANARY_GATE=PASS"
+
+          echo "=== 7. PRE-SWITCH CONCURRENCY / QUIESCENCE GATE ==="
+          CURRENT_WA_RESTARTS="$(pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const p=JSON.parse(b).find(x=>x.name==="sikhadenge-whatsapp-agent");if(!p)process.exit(2);process.stdout.write(String(p.pm2_env?.restart_time ?? -1));});')"
+          CURRENT_WA_PID="$(pm2 pid "$WA_PROCESS" | tail -1)"
+          CURRENT_SOURCE_HASH="$( { git -C "$WA_SOURCE" rev-parse HEAD 2>/dev/null || true; git -C "$WA_SOURCE" status --porcelain=v1 --untracked-files=no -- apps/whatsapp-agent-dashboard 2>/dev/null || true; git -C "$WA_SOURCE" diff --binary -- apps/whatsapp-agent-dashboard 2>/dev/null || true; } | sha256sum | awk '{print $1}' )"
+          CURRENT_AK_SHA="$(sha256sum /root/.ssh/authorized_keys | awk '{print $1}')"
+          [ "$CURRENT_WA_RESTARTS" = "$WA_INITIAL_RESTARTS" ]
+          [ "$CURRENT_WA_PID" = "$WA_INITIAL_PID" ]
+          [ "$CURRENT_SOURCE_HASH" = "$WA_SOURCE_HASH" ]
+          [ "$CURRENT_AK_SHA" = "$AK_SHA" ]
+          [ -z "$(ps -eo args= | grep -E '[p]npm (exec prisma generate|run build)|[n]ext build|[p]m2 (restart|reload|stop|start).*sikhadenge-whatsapp-agent' || true)" ]
+          [ -z "$(ps -eo args= | grep -E '^sshd: root@pts/[0-9]+' || true)" ]
+          QUIET_BASE="$CURRENT_WA_RESTARTS|$CURRENT_SOURCE_HASH|$CURRENT_AK_SHA"
+          for _ in $(seq 1 15); do
+            sleep 2
+            QR="$(pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const p=JSON.parse(b).find(x=>x.name==="sikhadenge-whatsapp-agent");if(!p)process.exit(2);process.stdout.write(String(p.pm2_env?.restart_time ?? -1));});')"
+            QS="$( { git -C "$WA_SOURCE" rev-parse HEAD 2>/dev/null || true; git -C "$WA_SOURCE" status --porcelain=v1 --untracked-files=no -- apps/whatsapp-agent-dashboard 2>/dev/null || true; git -C "$WA_SOURCE" diff --binary -- apps/whatsapp-agent-dashboard 2>/dev/null || true; } | sha256sum | awk '{print $1}' )"
+            QK="$(sha256sum /root/.ssh/authorized_keys | awk '{print $1}')"
+            [ "$QR|$QS|$QK" = "$QUIET_BASE" ] || { echo "QUIESCENCE_CHANGED"; exit 60; }
+            [ -z "$(ps -eo args= | grep -E '^sshd: root@pts/[0-9]+' || true)" ] || { echo "ROOT_PTS_SESSION_DETECTED"; exit 61; }
+            [ -z "$(ps -eo args= | grep -E '[p]npm (exec prisma generate|run build)|[n]ext build|[p]m2 (restart|reload|stop|start).*sikhadenge-whatsapp-agent' || true)" ] || { echo "CONCURRENT_DEPLOY_PROCESS_DETECTED"; exit 62; }
+          done
+          echo "PRE_SWITCH_QUIESCENCE_GATE=PASS"
+
+          echo "=== 8. BUILD SECURE PM2 ROLLBACK / NEW CONFIGS ==="
+          pm2 jlist > "$PM2_SECURE"
+          chmod 600 "$PM2_SECURE"
+          node - "$PM2_SECURE" "$DASH_PID" "$PROCESS" "$OLD_CWD" "$RELEASE" "$OLD_CFG" "$NEW_CFG" "$PORT" <<'NODE'
+          const fs=require('fs');
+          const [jlistPath,pid,name,oldCwd,newCwd,oldOut,newOut,port]=process.argv.slice(2);
+          const rows=JSON.parse(fs.readFileSync(jlistPath,'utf8'));
+          const p=rows.find(x=>x.name===name); if(!p) process.exit(2);
+          const e=p.pm2_env||{};
+          const raw=fs.readFileSync(`/proc/${pid}/environ`).toString('utf8').split('\0').filter(Boolean);
+          const env={}; for(const item of raw){ const i=item.indexOf('='); if(i>0) env[item.slice(0,i)]=item.slice(i+1); }
+          for(const k of ['NODE_APP_INSTANCE','pm_id','unique_id']) delete env[k];
+          const args=Array.isArray(e.args)?e.args:['start','-p',port];
+          const mk=(cwd,script)=>({apps:[{name,script,cwd,args,interpreter:e.exec_interpreter||'node',exec_mode:'fork',instances:1,autorestart:e.autorestart!==false,watch:false,env:{...env,PWD:cwd}}]});
+          fs.writeFileSync(oldOut,JSON.stringify(mk(oldCwd,e.pm_exec_path),null,2),{mode:0o600});
+          fs.writeFileSync(newOut,JSON.stringify(mk(newCwd,`${newCwd}/node_modules/next/dist/bin/next`),null,2),{mode:0o600});
+          NODE
+          chmod 600 "$OLD_CFG" "$NEW_CFG"
+          echo "PM2_ROLLBACK_CONFIG_GATE=PASS"
+
+          echo "=== 9. AUTHORIZED PM2 SWITCH: DASHBOARD ONLY ==="
+          SWITCH_ATTEMPTED=1
+          pm2 startOrReload "$NEW_CFG" --only "$PROCESS" --update-env
+          NEW_PID=""
+          NEW_CWD=""
+          NEW_HTTP=""
+          for _ in $(seq 1 40); do
+            NEW_PID="$(pm2 pid "$PROCESS" | tail -1)"
+            if [[ "$NEW_PID" =~ ^[1-9][0-9]*$ ]] && [ -e "/proc/$NEW_PID/cwd" ]; then
+              NEW_CWD="$(readlink -f "/proc/$NEW_PID/cwd")"
+            fi
+            NEW_HTTP="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/" 2>/dev/null || true)"
+            STATUS="$(pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const p=JSON.parse(b).find(x=>x.name==="sikhadenge-dashboard-revenue");process.stdout.write(p?.pm2_env?.status||"");});')"
+            if [ "$STATUS" = "online" ] && [ "$NEW_CWD" = "$RELEASE" ] && [[ "$NEW_HTTP" =~ ^[23][0-9][0-9]$ ]]; then break; fi
+            sleep 2
+          done
+          echo "NEW_DASHBOARD_PID=$NEW_PID"
+          echo "NEW_DASHBOARD_CWD=$NEW_CWD"
+          echo "NEW_DASHBOARD_HTTP=$NEW_HTTP"
+          [ "$NEW_CWD" = "$RELEASE" ]
+          [[ "$NEW_HTTP" =~ ^[23][0-9][0-9]$ ]]
+          [ "$(git -C "$NEW_CWD" rev-parse HEAD)" = "$EXPECTED_MAIN" ]
+          echo "DASHBOARD_SWITCH_HEALTH_GATE=PASS"
+
+          echo "=== 10. POST-SWITCH SAFETY / DB / WA ISOLATION ==="
+          BAD_NEW="$(tr '\0' '\n' < "/proc/$NEW_PID/environ" | grep -E "^($ALL_FLAGS)=true$" || true)"
+          [ -z "$BAD_NEW" ]
+          WA_FINAL_PID="$(pm2 pid "$WA_PROCESS" | tail -1)"
+          WA_FINAL_RESTARTS="$(pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const p=JSON.parse(b).find(x=>x.name==="sikhadenge-whatsapp-agent");if(!p)process.exit(2);process.stdout.write(String(p.pm2_env?.restart_time ?? -1));});')"
+          [ "$WA_FINAL_PID" = "$WA_INITIAL_PID" ]
+          [ "$WA_FINAL_RESTARTS" = "$WA_INITIAL_RESTARTS" ]
+          WA_HTTP="$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/)"
+          [[ "$WA_HTTP" =~ ^[23][0-9][0-9]$ ]]
+          POST_META="$(runuser -u postgres -- psql -d sikhadenge_dashboard -X -At -F '|' -c "SELECT migration_name, checksum FROM public._prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY started_at, migration_name;")"
+          [ "$POST_META" = "$EXPECTED_META" ]
+          [ "$(runuser -u postgres -- psql -d sikhadenge_dashboard -X -Atc "SELECT COUNT(*) FROM pg_tables WHERE schemaname='public';")" = "139" ]
+          echo "DANGEROUS_AUTOMATION_FLAGS=OFF"
+          echo "WHATSAPP_PROCESS_UNCHANGED=PASS"
+          echo "PRODUCTION_DB_POST_RUNTIME_GATE=PASS"
+
+          echo "=== 11. PERSIST PM2 STATE ==="
+          pm2 save
+          echo "PM2_SAVE=PASS"
+
+          cat > "$EVIDENCE/manifest.txt" <<EOF
+          authorization=SA2_PRODUCTION_RUNTIME_DEPLOYMENT_AUTHORIZED
+          main=$EXPECTED_MAIN
+          release=$RELEASE
+          previous_release=$OLD_CWD
+          dashboard_process=$PROCESS
+          dashboard_http=$NEW_HTTP
+          whatsapp_http=$WA_HTTP
+          whatsapp_pid_unchanged=PASS
+          whatsapp_restart_counter_unchanged=PASS
+          production_db_schema=POST_SA2_CONFIRMED
+          dangerous_automation_flags=OFF
+          sa2_domain_processing_enabled=NO
+          sa2_privacy_actions_enabled=NO
+          outbound_enabled=NO
+          ai_reply_enabled=NO
+          followup_enabled=NO
+          payment_link_action_enabled=NO
+          prisma_migrate_deploy=NOT_RUN
+          prisma_db_push=NOT_RUN
+          prisma_migrate_resolve=NOT_RUN
+          pm2_dashboard_switch=PASS
+          pm2_save=PASS
+          EOF
+          chmod 600 "$EVIDENCE/manifest.txt"
+
+          SUCCESS=1
+          echo "=========================================="
+          echo "=== SA2 PRODUCTION RUNTIME DEPLOY PASS ==="
+          echo "=========================================="
+          echo "RELEASE=$RELEASE"
+          echo "PREVIOUS_RELEASE=$OLD_CWD"
+          echo "DASHBOARD_HTTP=$NEW_HTTP"
+          echo "WHATSAPP_HTTP=$WA_HTTP"
+          echo "WHATSAPP_PROCESS_UNCHANGED=PASS"
+          echo "DANGEROUS_AUTOMATION_FLAGS=OFF"
+          echo "PRODUCTION_DB_POST_RUNTIME_GATE=PASS"
+          echo "PRISMA_MIGRATE_DEPLOY=NOT_RUN"
+          echo "PRISMA_DB_PUSH=NOT_RUN"
+          echo "PRISMA_MIGRATE_RESOLVE=NOT_RUN"
+          echo "PM2_SAVE=PASS"
+          echo "EVIDENCE_DIR=$EVIDENCE"
+          REMOTE
