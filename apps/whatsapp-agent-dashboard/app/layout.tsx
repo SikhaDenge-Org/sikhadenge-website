@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Manrope } from "next/font/google";
 import SidebarNavigationBridge from "../components/navigation/SidebarNavigationBridge";
 import InboxTemplatePickerBridge from "../components/templates/InboxTemplatePickerBridge";
 import InboxComposerDockBridge from "../components/inbox/InboxComposerDockBridge";
@@ -50,11 +50,12 @@ import "./inbox-sx-composer-responsive.css";
 import "./enterprise-ui-v2.css";
 import "./enterprise-ui-v2-hardening.css";
 import "./enterprise-product-polish.css";
+import "./ui-foundation-v14.css";
 
-const inter = Inter({
+const manrope = Manrope({
   subsets: ["latin"],
   display: "swap",
-  variable: "--font-inter",
+  variable: "--font-manrope",
 });
 
 const DASHBOARD_FAVICON = "/sikhadenge-live-favicon-aa30502f5ec9.png";
@@ -78,7 +79,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={`${inter.className} ${inter.variable}`}>
+      <body
+        className={`${manrope.className} ${manrope.variable}`}
+        data-ui-foundation="manrope-v14"
+      >
         <ServiceWorkerRegistration />
         <SidebarNavigationBridge />
         <InboxTemplatePickerBridge />
