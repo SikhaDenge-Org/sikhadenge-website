@@ -21,7 +21,7 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     environment: whatsapp-agent-production
-    timeout-minutes: 5
+    timeout-minutes: 7
     steps:
       - name: Configure pinned SSH
         shell: bash
@@ -42,62 +42,163 @@ jobs:
           printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
 
-      - name: Read-only deployment command provenance
+      - name: Read-only four-minute quiescence gate
         shell: bash
         run: |
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
           set -Eeuo pipefail
-          redact() {
-            sed -E \
-              -e 's/[0-9]{1,3}(\.[0-9]{1,3}){3}/IP_REDACTED/g' \
-              -e 's#(postgres(ql)?://)[^[:space:]]+#\1REDACTED#g' \
-              -e 's#(Bearer[[:space:]]+)[A-Za-z0-9._~+/-]+#\1REDACTED#g' \
-              -e 's#((TOKEN|SECRET|PASSWORD|PASS|API_KEY|ACCESS_KEY|DATABASE_URL)[A-Za-z0-9_]*[=:][[:space:]]*)[^[:space:]]+#\1REDACTED#gI'
+
+          SRC='/var/www/sikhadenge-whatsapp-agent/source'
+          APP="$SRC/apps/whatsapp-agent-dashboard"
+          SUSPECT_PROVIDER_SSHD='2523035'
+          WINDOW=240
+          STEP=2
+
+          wa_state() {
+            pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const p=JSON.parse(b).find(x=>x.name==="sikhadenge-whatsapp-agent");if(!p)process.exit(2);const e=p.pm2_env||{};console.log([p.pid,e.status,e.restart_time,e.unstable_restarts,e.pm_uptime,e.pm_cwd].join("|"));});'
           }
 
-          echo '========================================='
-          echo '=== DEPLOYMENT COMMAND PROVENANCE AUDIT ==='
-          echo '========================================='
+          source_fingerprint() {
+            {
+              git -C "$SRC" rev-parse --verify HEAD 2>/dev/null || true
+              git -C "$SRC" status --porcelain=v1 --untracked-files=no -- apps/whatsapp-agent-dashboard 2>/dev/null || true
+              git -C "$SRC" diff --binary -- apps/whatsapp-agent-dashboard 2>/dev/null || true
+              for f in \
+                "$APP/app/login-right-panel-v16.css" \
+                "$APP/app/login-page01-left-image.css" \
+                "$APP/app/layout.tsx" \
+                "$APP/app/login/page.tsx"; do
+                [[ -e "$f" ]] && stat -c '%Y|%s|%n' "$f"
+              done
+            } | sha256sum | awk '{print $1}'
+          }
+
+          active_deploy_processes() {
+            ps -eo pid=,ppid=,user=,args= 2>/dev/null | grep -E '[p]npm (exec prisma generate|run build)|[n]ext build|[p]m2 (restart|reload|stop|start).*sikhadenge-whatsapp-agent' || true
+          }
+
+          root_pts_pids() {
+            ps -eo pid=,args= 2>/dev/null | awk '/sshd: root@pts\/[0-9]+/ {print $1}' | sort -n | paste -sd, -
+          }
+
+          echo '=========================================='
+          echo '=== WHATSAPP PROD READ-ONLY QUIESCENCE ==='
+          echo '=========================================='
           echo 'MODE=READ_ONLY'
           echo 'DB_MUTATION=NONE'
           echo 'PM2_MUTATION=NONE'
           echo 'CODE_MUTATION=NONE'
           echo 'ENV_MUTATION=NONE'
+          echo 'SSH_MUTATION=NONE'
+          echo "WINDOW_SECONDS=$WINDOW"
 
-          echo '=== ROOT HISTORY RELEVANT COMMANDS ONLY ==='
-          if [[ -r /root/.bash_history ]]; then
-            nl -ba /root/.bash_history | grep -Ei \
-              'sikhadenge-whatsapp-agent|APP=|PROCESS=|pm2[[:space:]]+(restart|reload|start|stop|show|describe)|prisma generate|pnpm (exec prisma|run build)|NODE_ENV=production|login-right-panel|login-page01|git (status|diff|checkout|switch|pull|fetch|reset|rev-parse)|next build|release/whatsapp-instagram-agent-flow' | \
-              tail -260 | redact || true
+          BASE_WA="$(wa_state)"
+          BASE_RESTARTS="$(cut -d'|' -f3 <<<"$BASE_WA")"
+          BASE_SOURCE="$(source_fingerprint)"
+          BASE_AK="$(sha256sum /root/.ssh/authorized_keys 2>/dev/null | awk '{print $1}' || true)"
+          BASE_ROOT_PTS="$(root_pts_pids)"
+          BASE_DEPLOY="$(active_deploy_processes)"
+
+          echo "BASE_WA_STATE=$BASE_WA"
+          echo "BASE_SOURCE_FINGERPRINT=$BASE_SOURCE"
+          echo "BASE_AUTHORIZED_KEYS_SHA256=$BASE_AK"
+          echo "BASE_ROOT_PTS_PIDS=${BASE_ROOT_PTS:-NONE}"
+          echo "BASE_ACTIVE_DEPLOY_PROCESS_COUNT=$(printf '%s\n' "$BASE_DEPLOY" | sed '/^$/d' | wc -l)"
+
+          if [[ -n "$BASE_DEPLOY" ]]; then
+            echo 'QUIESCENCE_START_DEPLOY_PROCESS=DETECTED'
+            printf '%s\n' "$BASE_DEPLOY" | sed -E 's/[0-9]{1,3}(\.[0-9]{1,3}){3}/IP_REDACTED/g'
+            exit 30
           fi
 
-          SRC='/var/www/sikhadenge-whatsapp-agent/source'
-          APP="$SRC/apps/whatsapp-agent-dashboard"
+          if [[ -d "/proc/$SUSPECT_PROVIDER_SSHD" ]] && ps -o args= -p "$SUSPECT_PROVIDER_SSHD" 2>/dev/null | grep -Eq '^sshd: root@pts/[0-9]+'; then
+            echo "KNOWN_PROVIDER_SESSION_ACTIVE=YES|pid=$SUSPECT_PROVIDER_SSHD"
+            exit 31
+          fi
+          echo 'KNOWN_PROVIDER_SESSION_ACTIVE=NO'
 
-          echo '=== SOURCE TRACKED DIFF NAMES / STATS ==='
-          git -C "$SRC" status --short --untracked-files=no 2>/dev/null || true
-          git -C "$SRC" diff --stat -- apps/whatsapp-agent-dashboard 2>/dev/null || true
-          git -C "$SRC" diff --name-status -- apps/whatsapp-agent-dashboard 2>/dev/null || true
+          START_EPOCH="$(date +%s)"
+          END_EPOCH=$((START_EPOCH+WINDOW))
+          NEW_ROOT_PTS=0
+          DEPLOY_PROCESS_SEEN=0
+          RESTART_CHANGE_SEEN=0
+          SOURCE_CHANGE_SEEN=0
+          AK_CHANGE_SEEN=0
 
-          echo '=== SOURCE RELEVANT DIFF HUNKS — STRUCTURAL ONLY ==='
-          git -C "$SRC" diff -U0 -- apps/whatsapp-agent-dashboard/app/layout.tsx apps/whatsapp-agent-dashboard/app/login/page.tsx apps/whatsapp-agent-dashboard/app/login-page01-left-image.css 2>/dev/null | \
-            grep -E '^(diff --git|index |--- |\+\+\+ |@@)' | head -160 || true
+          while (( $(date +%s) < END_EPOCH )); do
+            CUR_WA="$(wa_state 2>/dev/null || true)"
+            CUR_RESTARTS="$(cut -d'|' -f3 <<<"$CUR_WA")"
+            if [[ "$CUR_RESTARTS" != "$BASE_RESTARTS" ]]; then
+              RESTART_CHANGE_SEEN=1
+              echo "WA_RESTART_COUNTER_CHANGED=$BASE_RESTARTS->$CUR_RESTARTS"
+              break
+            fi
 
-          echo '=== RECENT APP FILE MTIMES ==='
-          for f in \
-            "$APP/app/login-right-panel-v16.css" \
-            "$APP/app/login-page01-left-image.css" \
-            "$APP/app/layout.tsx" \
-            "$APP/app/login/page.tsx"; do
-            [[ -e "$f" ]] && stat -c '%y|%s|%n' "$f" | sed "s#${SRC}#SOURCE#g"
+            CUR_SOURCE="$(source_fingerprint)"
+            if [[ "$CUR_SOURCE" != "$BASE_SOURCE" ]]; then
+              SOURCE_CHANGE_SEEN=1
+              echo "SOURCE_FINGERPRINT_CHANGED=$BASE_SOURCE->$CUR_SOURCE"
+              break
+            fi
+
+            CUR_AK="$(sha256sum /root/.ssh/authorized_keys 2>/dev/null | awk '{print $1}' || true)"
+            if [[ "$CUR_AK" != "$BASE_AK" ]]; then
+              AK_CHANGE_SEEN=1
+              echo "AUTHORIZED_KEYS_CHANGED=$BASE_AK->$CUR_AK"
+              break
+            fi
+
+            CUR_DEPLOY="$(active_deploy_processes)"
+            if [[ -n "$CUR_DEPLOY" ]]; then
+              DEPLOY_PROCESS_SEEN=1
+              echo 'DEPLOY_PROCESS_SEEN=YES'
+              printf '%s\n' "$CUR_DEPLOY" | sed -E 's/[0-9]{1,3}(\.[0-9]{1,3}){3}/IP_REDACTED/g'
+              break
+            fi
+
+            CUR_ROOT_PTS="$(root_pts_pids)"
+            if [[ ",$CUR_ROOT_PTS," != *",$BASE_ROOT_PTS,"* && -n "$CUR_ROOT_PTS" ]]; then
+              :
+            fi
+            for p in ${CUR_ROOT_PTS//,/ }; do
+              [[ -n "$p" ]] || continue
+              if [[ ",${BASE_ROOT_PTS}," != *",${p},"* ]]; then
+                NEW_ROOT_PTS=1
+                echo "NEW_ROOT_PTS_SESSION=YES|pid=$p"
+                break 2
+              fi
+            done
+
+            sleep "$STEP"
           done
 
-          echo '=== ACTIVE ROOT PTS SESSION SAFE STATE ==='
-          ps -eo pid=,ppid=,user=,lstart=,etimes=,tty=,args= | grep -E '[s]shd: root@pts/[0-9]+|[p]m2 .*sikhadenge-whatsapp-agent|[p]npm .*build|[p]risma .*generate' | tail -100 | redact || true
+          FINAL_WA="$(wa_state)"
+          FINAL_SOURCE="$(source_fingerprint)"
+          FINAL_AK="$(sha256sum /root/.ssh/authorized_keys 2>/dev/null | awk '{print $1}' || true)"
+          FINAL_ROOT_PTS="$(root_pts_pids)"
+          FINAL_DEPLOY="$(active_deploy_processes)"
+          FINAL_RESTARTS="$(cut -d'|' -f3 <<<"$FINAL_WA")"
 
-          echo '=== CURRENT WA PM2 SAFE STATE ==='
-          pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const p=JSON.parse(b).find(x=>x.name==="sikhadenge-whatsapp-agent");const e=p?.pm2_env||{};console.log(["status="+e.status,"pid="+p?.pid,"restarts="+e.restart_time,"unstable_restarts="+e.unstable_restarts,"cwd="+e.pm_cwd].join("|"));});'
+          echo "FINAL_WA_STATE=$FINAL_WA"
+          echo "FINAL_SOURCE_FINGERPRINT=$FINAL_SOURCE"
+          echo "FINAL_AUTHORIZED_KEYS_SHA256=$FINAL_AK"
+          echo "FINAL_ROOT_PTS_PIDS=${FINAL_ROOT_PTS:-NONE}"
+          echo "FINAL_ACTIVE_DEPLOY_PROCESS_COUNT=$(printf '%s\n' "$FINAL_DEPLOY" | sed '/^$/d' | wc -l)"
+          echo "WA_RESTART_COUNTER_DELTA=$((FINAL_RESTARTS-BASE_RESTARTS))"
+          echo "DEPLOY_PROCESS_SEEN=$DEPLOY_PROCESS_SEEN"
+          echo "SOURCE_CHANGE_SEEN=$SOURCE_CHANGE_SEEN"
+          echo "AUTHORIZED_KEYS_CHANGE_SEEN=$AK_CHANGE_SEEN"
+          echo "NEW_ROOT_PTS_SESSION_SEEN=$NEW_ROOT_PTS"
 
-          echo 'READ_ONLY_COMMAND_PROVENANCE=PASS'
+          [[ "$FINAL_RESTARTS" == "$BASE_RESTARTS" ]]
+          [[ "$FINAL_SOURCE" == "$BASE_SOURCE" ]]
+          [[ "$FINAL_AK" == "$BASE_AK" ]]
+          [[ -z "$FINAL_DEPLOY" ]]
+          [[ "$DEPLOY_PROCESS_SEEN" == 0 ]]
+          [[ "$SOURCE_CHANGE_SEEN" == 0 ]]
+          [[ "$AK_CHANGE_SEEN" == 0 ]]
+          [[ "$NEW_ROOT_PTS" == 0 ]]
+
+          echo 'WHATSAPP_PROD_QUIESCENCE_GATE=PASS'
           REMOTE
