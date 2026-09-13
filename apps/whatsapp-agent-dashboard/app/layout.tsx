@@ -54,6 +54,8 @@ import "./ui-foundation-v14.css";
 
 const manrope = Manrope({
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
+  style: ["normal"],
   display: "swap",
   variable: "--font-manrope",
 });
@@ -78,10 +80,10 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={manrope.variable}>
       <body
-        className={`${manrope.className} ${manrope.variable}`}
-        data-ui-foundation="manrope-v14"
+        className={manrope.className}
+        data-ui-foundation="manrope-v15-hard-lock"
       >
         <ServiceWorkerRegistration />
         <SidebarNavigationBridge />
