@@ -1,0 +1,86 @@
+/* EngageOS Font Hard Lock V15
+ * Canonical product typeface: Manrope.
+ * Imported last so legacy module CSS cannot switch the UI back to Inter/system fonts.
+ */
+
+:root {
+  --engageos-font: var(--font-manrope), "Manrope", sans-serif;
+}
+
+html,
+body {
+  font-family: var(--engageos-font) !important;
+  font-style: normal;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body *:not(code):not(pre):not(kbd):not(samp),
+button,
+input,
+textarea,
+select,
+option {
+  font-family: var(--engageos-font) !important;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+strong,
+b {
+  font-family: var(--engageos-font) !important;
+}
+
+/* Reference lock: the requested desktop heading sample is Manrope 700 / 36 / 40. */
+.split01__signin[data-auth-ui="right-auth-v12"] .split01__signin-heading h2 {
+  font-family: var(--engageos-font) !important;
+  font-size: 36px !important;
+  line-height: 40px !important;
+  font-weight: 700 !important;
+  font-style: normal !important;
+}
+
+.split01__signin[data-auth-ui="right-auth-v12"] .split01-form__label-row label,
+.split01__signin[data-auth-ui="right-auth-v12"] .split01-form__field > label,
+.split01__signin[data-auth-ui="right-auth-v12"] .split01-form__forgot,
+.split01__signin[data-auth-ui="right-auth-v12"] .split01-form__submit,
+.split01__signin[data-auth-ui="right-auth-v12"] .split01-form__reset-submit,
+.split01__signin .split01__product-name,
+.topbar h1,
+.module-page h1,
+.enterprise-page h1,
+.page-header h1,
+.panel-heading h2,
+.chat-header h2,
+.lead-card-head h2 {
+  font-family: var(--engageos-font) !important;
+  font-weight: 700 !important;
+}
+
+/* Preserve code/technical surfaces as monospace. */
+code,
+pre,
+kbd,
+samp {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+}
+
+@media (max-width: 900px) {
+  .split01__signin[data-auth-ui="right-auth-v12"] .split01__signin-heading h2 {
+    font-size: 34px !important;
+    line-height: 38px !important;
+  }
+}
+
+@media (max-width: 620px) {
+  .split01__signin[data-auth-ui="right-auth-v12"] .split01__signin-heading h2 {
+    font-size: 32px !important;
+    line-height: 36px !important;
+  }
+}
