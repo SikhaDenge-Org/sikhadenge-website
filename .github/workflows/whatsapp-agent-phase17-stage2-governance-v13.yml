@@ -1,4 +1,4 @@
-name: WhatsApp Agent Phase17 Stage2 Governance V13
+name: WhatsApp Agent Phase17 Stage2 Governance Current Release
 
 on:
   push:
@@ -27,13 +27,25 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
-      EXPECTED_LIVE_SHA: 706395c01944732a90025110f34271061e4fd3f9
       WORKSPACE_ID: engagews_default
       CANDIDATE_ID: cmtv8n9v50001kw3hzm6b2y0b
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
 
     steps:
       - name: Checkout governance branch
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve exact current release SHA
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git fetch origin "+refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH"
+          release_sha="$(git rev-parse "refs/remotes/origin/$RELEASE_BRANCH")"
+          [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]]
+          printf 'EXPECTED_LIVE_SHA=%s\n' "$release_sha" >> "$GITHUB_ENV"
+          printf 'GOVERNANCE_TARGET_RELEASE_SHA=%s\n' "$release_sha"
 
       - name: Validate evidence derivation and TypeScript
         shell: bash
@@ -64,14 +76,14 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
           ssh-keygen -y -f "$key" >/dev/null
 
-      - name: Audit V13 production governance read-only
+      - name: Audit current production governance read-only
         shell: bash
         run: |
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' WORKSPACE_ID='$WORKSPACE_ID' CANDIDATE_ID='$CANDIDATE_ID' bash -s" <<'REMOTE'
+            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' WORKSPACE_ID='$WORKSPACE_ID' CANDIDATE_ID='$CANDIDATE_ID' RELEASE_BRANCH='$RELEASE_BRANCH' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           A=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           E="$A/.env"
@@ -96,9 +108,11 @@ jobs:
           fail(){ printf 'GATE_%s=FAIL\n' "$1"; hard_fail=$((hard_fail+1)); }
           unknown(){ printf 'GATE_%s=UNPROVEN\n' "$1"; unproven=$((unproven+1)); }
 
+          server_release_sha="$(git -C "$A" ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')"
           live_sha="$(git -C "$A" rev-parse HEAD)"
           dirty="$(git -C "$A" status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
-          printf 'LIVE_SHA=%s\nEXPECTED_LIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\n' "$live_sha" "$EXPECTED_LIVE_SHA" "$dirty"
+          printf 'WORKFLOW_RELEASE_SHA=%s\nSERVER_RELEASE_SHA=%s\nLIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\n' "$EXPECTED_LIVE_SHA" "$server_release_sha" "$live_sha" "$dirty"
+          [[ "$server_release_sha" == "$EXPECTED_LIVE_SHA" ]] && proven RELEASE_HEAD_STABLE || fail RELEASE_HEAD_STABLE
           [[ "$live_sha" == "$EXPECTED_LIVE_SHA" ]] && proven EXACT_SHA || fail EXACT_SHA
           [[ "$dirty" == "0" ]] && proven CLEAN_WORKTREE || fail CLEAN_WORKTREE
 
