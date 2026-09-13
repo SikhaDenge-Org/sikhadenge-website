@@ -1,0 +1,67 @@
+name: SA2 Fingerprint Diff Readonly 20260913
+
+on:
+  push:
+    branches: [ops/wa-restart-forensics-20260913]
+    paths: ['.github/workflows/sa2-fingerprint-diff-readonly-20260913.yml']
+
+permissions:
+  contents: read
+
+env:
+  SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+  SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+  SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+  SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+  SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    environment: whatsapp-agent-production
+    timeout-minutes: 5
+    steps:
+      - name: Configure pinned SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SSH_PORT="${SSH_PORT:-22}"; echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
+          install -d -m 700 "$HOME/.ssh"; KEY="$HOME/.ssh/prod"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"; fi
+          chmod 600 "$KEY"; read -r _ kt km _ <<< "$SSH_HOST_KEY"; test "$kt" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"; chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Read-only exact fingerprint entry diff
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          E='/root/migration-evidence/sa2-fingerprint-classifier2-20260913-184339'
+          C="$E/clean.json"; S="$E/snapshot.json"
+          echo '=== SA2 FINGERPRINT ENTRY DIFF READ ONLY ==='
+          echo 'PRODUCTION_DB_MUTATION=NONE'; echo 'PM2_MUTATION=NONE'; echo 'CODE_MUTATION=NONE'; echo 'FEATURE_FLAG_CHANGE=NONE'; echo 'DATABASE_CREATE_DROP=NONE'; echo 'PRISMA_COMMANDS=NONE'
+          [[ -s "$C" && -s "$S" ]]
+          node - "$C" "$S" <<'NODE'
+          const fs=require('fs');
+          const [cp,sp]=process.argv.slice(2);
+          const c=JSON.parse(fs.readFileSync(cp,'utf8'));
+          const s=JSON.parse(fs.readFileSync(sp,'utf8'));
+          if(c.sha256!=='30dff7abcf1be59a61437a38a4327af799acad82598835da77f9fe690bca0dd5'||c.entryCount!==2296) throw new Error('clean fingerprint changed');
+          if(s.sha256!=='e081f0daee1d411645c450f27d51fde7130f77c658373e691745a004a4298126'||s.entryCount!==2303) throw new Error('snapshot fingerprint changed');
+          const cs=new Set(c.entries), ss=new Set(s.entries);
+          const onlyS=s.entries.filter(x=>!cs.has(x));
+          const onlyC=c.entries.filter(x=>!ss.has(x));
+          console.log('CLEAN_REFERENCE_ACCEPTED_FINGERPRINT=PASS');
+          console.log('SNAPSHOT_FINGERPRINT_REPRODUCIBLE=PASS');
+          console.log(`ONLY_IN_PRODUCTION_SNAPSHOT=${onlyS.length}`);
+          console.log(`ONLY_IN_CLEAN_REFERENCE=${onlyC.length}`);
+          console.log('--- EXACT ONLY-IN-PRODUCTION-SNAPSHOT ENTRIES ---');
+          onlyS.forEach((x,i)=>console.log(`${i+1}. ${x}`));
+          console.log('--- EXACT ONLY-IN-CLEAN-REFERENCE ENTRIES ---');
+          onlyC.forEach((x,i)=>console.log(`${i+1}. ${x}`));
+          if(onlyS.length!==7||onlyC.length!==0) throw new Error('unexpected delta cardinality');
+          console.log('EXACT_SEVEN_EXTRA_ENTRY_HYPOTHESIS=PASS');
+          NODE
+          echo 'SA2_FINGERPRINT_ENTRY_DIFF=PASS'
+          REMOTE
