@@ -1,4 +1,4 @@
-name: SA2 Dashboard Emergency Recover SA1 V2 20260913
+name: SA2 Dashboard Recovery Finalize 20260913
 
 on:
   push:
@@ -18,10 +18,10 @@ env:
   SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
 
 jobs:
-  recover:
+  verify:
     runs-on: ubuntu-latest
     environment: whatsapp-agent-production
-    timeout-minutes: 10
+    timeout-minutes: 8
     steps:
       - name: Configure pinned production SSH
         shell: bash
@@ -33,7 +33,7 @@ jobs:
           chmod 600 "$KEY"; read -r _ kt km _ <<< "$SSH_HOST_KEY"; test "$kt" = ssh-ed25519
           printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"; chmod 600 "$HOME/.ssh/known_hosts"
 
-      - name: Recover only dashboard to known-good SA1 immutable release
+      - name: Verify recovered dashboard and persist PM2 state
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -42,76 +42,36 @@ jobs:
           APP='sikhadenge-dashboard-revenue'
           WA='sikhadenge-whatsapp-agent'
           OLD='/opt/sikhadenge-dashboard-releases/sa1-20260911-221949-d60ab5a4'
-          TMP="/tmp/${APP}-recover-$$.json"
-          trap 'rm -f "$TMP"' EXIT
-
-          echo '=== DASHBOARD EMERGENCY RECOVERY V2 ==='
-          echo 'TARGET=KNOWN_GOOD_SA1_RELEASE'
-          echo 'DATABASE_MUTATION=NONE'
-          echo 'WA_PROCESS_MUTATION=PROHIBITED'
-          test -d "$OLD"
-          test -f "$OLD/package.json"
-          test -d "$OLD/.next"
-          test "$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.scripts?.start||"")' "$OLD/package.json")" = 'next start'
+          EXPECTED_MIGRATION='20260913093357_sa2_whatsapp_conversation_identity_consent'
 
           read_pm2(){ pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const p=JSON.parse(b).find(x=>x.name===process.argv[1]);if(!p)process.exit(3);const e=p.pm2_env||{};console.log([p.pid,e.status,e.pm_cwd,e.restart_time,e.unstable_restarts].join("|"))})' "$1"; }
-          WA_BEFORE="$(read_pm2 "$WA")"
-          IFS='|' read -r WA_PID WA_STATUS WA_CWD WA_RESTART WA_UNSTABLE <<< "$WA_BEFORE"
-          echo "WA_BEFORE=${WA_PID}|${WA_STATUS}|${WA_RESTART}|${WA_UNSTABLE}"
-          test "$WA_STATUS" = online
-          test "$WA_RESTART" = 47
-          test "$WA_UNSTABLE" = 0
-          test "$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/ || true)" = 307
+          APP_STATE="$(read_pm2 "$APP")"; WA_STATE="$(read_pm2 "$WA")"
+          IFS='|' read -r APP_PID APP_STATUS APP_CWD APP_RESTART APP_UNSTABLE <<< "$APP_STATE"
+          IFS='|' read -r WA_PID WA_STATUS WA_CWD WA_RESTART WA_UNSTABLE <<< "$WA_STATE"
+          echo "DASHBOARD_STATE=$APP_STATE"
+          echo "WA_STATE=${WA_PID}|${WA_STATUS}|${WA_RESTART}|${WA_UNSTABLE}"
+          test "$APP_STATUS" = online; test "$APP_CWD" = "$OLD"; test "$APP_RESTART" = 0; test "$APP_UNSTABLE" = 0
+          test "$WA_PID" = 2568802; test "$WA_STATUS" = online; test "$WA_RESTART" = 47; test "$WA_UNSTABLE" = 0
+          ROOT="$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3400/)"; WA_HTTP="$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/)"
+          echo "DASHBOARD_HTTP=$ROOT"; echo "WA_HTTP=$WA_HTTP"
+          case "$ROOT" in 2*|3*) ;; *) exit 10;; esac
+          test "$WA_HTTP" = 307
 
-          CURRENT_ROOT="$(curl --max-time 4 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3400/ 2>/dev/null || true)"
-          echo "DASHBOARD_HTTP_BEFORE=$CURRENT_ROOT"
-
-          pm2 jlist | node -e '
-            const fs=require("fs"); const [name,cwd,out]=process.argv.slice(1); let b="";
-            process.stdin.on("data",d=>b+=d); process.stdin.on("end",()=>{
-              const p=JSON.parse(b).find(x=>x.name===name); if(!p) throw new Error("dashboard_pm2_entry_missing");
-              const env={...(p.pm2_env||{})}; const enabled=v=>String(v||"").trim().toLowerCase()==="true";
-              const bad=["SALES_AI_ENABLED","WHATSAPP_SA2_DOMAIN_PROCESSING_ENABLED","WHATSAPP_SA2_PRIVACY_ACTIONS_ENABLED","WHATSAPP_OUTBOUND_ENABLED","WHATSAPP_AI_REPLY_ENABLED","WHATSAPP_FOLLOWUP_ENABLED","WHATSAPP_PAYMENT_LINK_ACTION_ENABLED"];
-              if(!enabled(env.WHATSAPP_INGEST_ENABLED)||bad.some(k=>enabled(env[k]))) throw new Error("unsafe_dashboard_env");
-              const drop=["pm_id","status","pm_uptime","restart_time","unstable_restarts","created_at","pm_cwd","pm_exec_path","exec_interpreter","exec_mode","instances","name","namespace","args","node_args","watch","vizion","autorestart","autostart","merge_logs","max_memory_restart","env"];
-              for(const k of drop) delete env[k]; for(const k of Object.keys(env)) if(k.startsWith("axm_")||k.startsWith("pm2_")) delete env[k];
-              env.PWD=cwd; delete env.OLDPWD; env.NODE_ENV="production";
-              const cfg={apps:[{name,script:"/usr/bin/npm",cwd,args:["start","--","-p","3400"],exec_mode:"fork",instances:1,autorestart:true,env}]};
-              fs.writeFileSync(out,JSON.stringify(cfg),{mode:0o600}); console.log("RECOVERY_CONFIG=READY");
-            });' "$APP" "$OLD" "$TMP"
-
-          pm2 delete "$APP" >/dev/null 2>&1 || true
-          pm2 start "$TMP" --only "$APP" >/dev/null
-
-          HTTP=000
-          for i in $(seq 1 35); do
-            HTTP="$(curl --max-time 3 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3400/ 2>/dev/null || true)"
-            case "$HTTP" in 2*|3*) break;; esac
-            sleep 1
-          done
-          echo "DASHBOARD_HTTP_AFTER=$HTTP"
-          case "$HTTP" in 2*|3*) ;; *) echo 'RECOVERY_HEALTH=FAIL'; pm2 logs "$APP" --lines 40 --nostream || true; exit 20;; esac
-
-          APP_AFTER="$(read_pm2 "$APP")"
-          IFS='|' read -r APP_PID APP_STATUS APP_CWD APP_RESTART APP_UNSTABLE <<< "$APP_AFTER"
-          echo "DASHBOARD_AFTER=${APP_PID}|${APP_STATUS}|${APP_CWD}|${APP_RESTART}|${APP_UNSTABLE}"
-          test "$APP_STATUS" = online
-          test "$APP_CWD" = "$OLD"
-          test "$APP_UNSTABLE" = 0
-
-          node - "$APP_PID" <<'NODE'
-          const fs=require('fs');const pid=process.argv[2];const env=Object.fromEntries(fs.readFileSync(`/proc/${pid}/environ`).toString().split('\0').filter(Boolean).map(s=>{const i=s.indexOf('=');return [s.slice(0,i),s.slice(i+1)]}));
+          node - "$APP_PID" "$OLD" "$EXPECTED_MIGRATION" <<'NODE'
+          const fs=require('fs');const {spawnSync}=require('child_process');const {createRequire}=require('module');
+          const [pid,cwd,migration]=process.argv.slice(2);
+          const env=Object.fromEntries(fs.readFileSync(`/proc/${pid}/environ`).toString().split('\0').filter(Boolean).map(s=>{const i=s.indexOf('=');return [s.slice(0,i),s.slice(i+1)]}));
           const enabled=v=>String(v||'').trim().toLowerCase()==='true';const bad=['SALES_AI_ENABLED','WHATSAPP_SA2_DOMAIN_PROCESSING_ENABLED','WHATSAPP_SA2_PRIVACY_ACTIONS_ENABLED','WHATSAPP_OUTBOUND_ENABLED','WHATSAPP_AI_REPLY_ENABLED','WHATSAPP_FOLLOWUP_ENABLED','WHATSAPP_PAYMENT_LINK_ACTION_ENABLED'];
-          if(!enabled(env.WHATSAPP_INGEST_ENABLED)||bad.some(k=>enabled(env[k]))) throw new Error('unsafe_recovered_env');console.log('RECOVERED_FLAGS_SAFE=YES');
+          if(!enabled(env.WHATSAPP_INGEST_ENABLED)||bad.some(k=>enabled(env[k])))throw new Error('unsafe_runtime_flags');
+          console.log('RECOVERED_FLAGS_SAFE=YES');
+          const r=spawnSync('npm',['run','whatsapp:runtime-preflight'],{cwd,env:{...env,PWD:cwd},stdio:'inherit'});if(r.status!==0)throw new Error('runtime_preflight_failed_'+r.status);console.log('RUNTIME_PREFLIGHT_WITH_PROCESS_ENV=PASS');
+          Object.assign(process.env,env);const req=createRequire(cwd+'/package.json');const {PrismaClient}=req('@prisma/client');const p=new PrismaClient();
+          (async()=>{const t=await p.$queryRawUnsafe("SELECT count(*)::int AS count FROM pg_tables WHERE schemaname='public'");const s=await p.$queryRawUnsafe("SELECT count(*)::int AS count FROM pg_tables WHERE schemaname='public' AND tablename IN ('WhatsAppParticipant','WhatsAppConversation','WhatsAppConversationMessage','IdentityLinkDecision','WhatsAppConsent','WhatsAppSuppression','WhatsAppPrivacyEvent')");const i=await p.$queryRawUnsafe('SELECT count(*)::int AS count FROM "_prisma_migrations" WHERE finished_at IS NULL AND rolled_back_at IS NULL');const g=await p.$queryRawUnsafe('SELECT finished_at, rolled_back_at FROM "_prisma_migrations" WHERE migration_name=$1',migration);const x=await p.$queryRawUnsafe("SELECT count(*)::int AS count FROM pg_stat_activity WHERE pid<>pg_backend_pid() AND xact_start IS NOT NULL AND now()-xact_start > interval '5 minutes'");const ok=t[0].count===139&&s[0].count===7&&i[0].count===0&&x[0].count===0&&g.length===1&&g[0].finished_at&&!g[0].rolled_back_at;console.log(`DB_GATE=${ok?'PASS':'FAIL'}|PUBLIC=${t[0].count}|SA2=${s[0].count}|INCOMPLETE=${i[0].count}|LONG_TX=${x[0].count}`);if(!ok)process.exitCode=2})().finally(()=>p.$disconnect());
           NODE
 
-          WA_AFTER="$(read_pm2 "$WA")"
-          echo "WA_AFTER=$WA_AFTER"
-          test "$WA_AFTER" = "$WA_BEFORE"
-          test "$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/ || true)" = 307
-
-          (cd "$OLD" && npm run whatsapp:runtime-preflight)
+          test "$(read_pm2 "$WA")" = "$WA_STATE"
           pm2 save >/dev/null
-          echo 'DASHBOARD_SA1_RECOVERY=PASS'
+          echo 'PM2_SAVE=PASS'
+          echo 'DASHBOARD_RECOVERY_EXIT_GATE=PASS'
           echo 'WA_UNCHANGED=PASS'
           REMOTE
