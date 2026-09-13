@@ -1,0 +1,84 @@
+name: SA2 Dashboard Listener Readonly Diagnostic 20260913
+
+on:
+  push:
+    branches:
+      - ops/sa2-dashboard-runtime-preflight-20260913
+    paths:
+      - '.github/workflows/sa2-dashboard-listener-readonly-diagnostic-20260913.yml'
+
+permissions:
+  contents: read
+
+env:
+  SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+  SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+  SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+  SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+  SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    environment: whatsapp-agent-production
+    timeout-minutes: 10
+    steps:
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SSH_PORT="${SSH_PORT:-22}"
+          echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
+          install -d -m 700 "$HOME/.ssh"
+          KEY="$HOME/.ssh/prod"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"
+          fi
+          chmod 600 "$KEY"
+          read -r _ kt km _ <<< "$SSH_HOST_KEY"
+          test "$kt" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Identify port 3400 owner without mutation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          echo '=== PORT3400_OWNER_READONLY ==='
+          date -Is
+          echo "SSH_USER=$(id -un) UID=$(id -u)"
+          echo 'MUTATION_COMMANDS_RUN=NO'
+          echo '--- SS NORMAL ---'
+          ss -ltnp 2>&1 | grep -E 'State|:3400[[:space:]]|:3100[[:space:]]' || true
+          echo '--- SS SUDO NONINTERACTIVE ---'
+          if sudo -n true 2>/dev/null; then
+            echo 'SUDO_NONINTERACTIVE=YES'
+            sudo -n ss -ltnp 2>&1 | grep -E 'State|:3400[[:space:]]|:3100[[:space:]]' || true
+          else
+            echo 'SUDO_NONINTERACTIVE=NO'
+          fi
+          echo '--- LSOF/FUSER ---'
+          command -v lsof >/dev/null && lsof -nP -iTCP:3400 -sTCP:LISTEN 2>&1 || true
+          command -v fuser >/dev/null && fuser -v 3400/tcp 2>&1 || true
+          if sudo -n true 2>/dev/null; then
+            command -v lsof >/dev/null && sudo -n lsof -nP -iTCP:3400 -sTCP:LISTEN 2>&1 || true
+            command -v fuser >/dev/null && sudo -n fuser -v 3400/tcp 2>&1 || true
+          fi
+          echo '--- PROCESS CANDIDATES ---'
+          ps -eo pid=,ppid=,user=,lstart=,args= | grep -E 'next-server|next start|npm start|3400' | grep -v -E 'grep -E|PORT3400_OWNER_READONLY' | tail -n 80 || true
+          echo '--- CANDIDATE CWD ---'
+          for pid in $(ps -eo pid=,args= | awk '/next-server|next start|npm start|3400/ && $0 !~ /awk|grep|bash -s/ {print $1}' | sort -un); do
+            [ -d "/proc/$pid" ] || continue
+            cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || echo '<denied>')"
+            ppid="$(awk '/^PPid:/{print $2}' "/proc/$pid/status" 2>/dev/null || echo '?')"
+            comm="$(cat "/proc/$pid/comm" 2>/dev/null || echo '?')"
+            echo "PID=$pid PPID=$ppid COMM=$comm CWD=$cwd"
+          done
+          echo '--- PM2 SANITIZED ---'
+          pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{for(const n of process.argv.slice(1)){const p=JSON.parse(b).find(x=>x.name===n);if(!p){console.log(n+"=MISSING");continue;}const e=p.pm2_env||{};console.log(`${n}|pid=${p.pid}|status=${e.status}|cwd=${e.pm_cwd}|restart=${e.restart_time}|args=${JSON.stringify(e.args||[])}`)}})' sikhadenge-dashboard-revenue sikhadenge-whatsapp-agent
+          echo 'PORT3400_OWNER_READONLY=PASS'
+          REMOTE
