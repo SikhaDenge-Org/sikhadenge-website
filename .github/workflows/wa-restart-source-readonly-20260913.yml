@@ -42,13 +42,12 @@ jobs:
           printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
 
-      - name: Snapshot suspected provider root session safely
+      - name: Read-only deployment command provenance
         shell: bash
         run: |
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
           set -Eeuo pipefail
-
           redact() {
             sed -E \
               -e 's/[0-9]{1,3}(\.[0-9]{1,3}){3}/IP_REDACTED/g' \
@@ -58,75 +57,47 @@ jobs:
           }
 
           echo '========================================='
-          echo '=== PROVIDER ROOT SESSION SAFE SNAPSHOT ==='
+          echo '=== DEPLOYMENT COMMAND PROVENANCE AUDIT ==='
           echo '========================================='
           echo 'MODE=READ_ONLY'
           echo 'DB_MUTATION=NONE'
           echo 'PM2_MUTATION=NONE'
-          echo 'SYSTEMD_MUTATION=NONE'
-          echo 'SSH_CONFIG_MUTATION=NONE'
-          echo 'AUTHORIZED_KEYS_MUTATION=NONE'
+          echo 'CODE_MUTATION=NONE'
           echo 'ENV_MUTATION=NONE'
 
-          echo '=== ACTIVE ROOT PTS SSH SESSIONS ==='
-          ps -eo pid=,ppid=,user=,lstart=,etimes=,tty=,args= | grep -E '[s]shd: root@pts/[0-9]+' | redact || true
-
-          SUSPECT="$(ps -eo pid=,etimes=,args= | awk '/sshd: root@pts\/[0-9]+/ {if(min=="" || $2<min){min=$2;pid=$1}} END{if(pid)print pid}')"
-          echo "SUSPECT_SSHD_PID=${SUSPECT:-NONE}"
-
-          if [[ -n "$SUSPECT" && -d "/proc/$SUSPECT" ]]; then
-            echo '=== SUSPECT SESSION PROCESS TREE ==='
-            pstree -aps "$SUSPECT" 2>/dev/null | head -100 | redact || true
-
-            SHELL_PID="$(pgrep -P "$SUSPECT" -n bash 2>/dev/null || true)"
-            if [[ -z "$SHELL_PID" ]]; then
-              SHELL_PID="$(pgrep -P "$SUSPECT" -n 2>/dev/null || true)"
-            fi
-            echo "SUSPECT_SHELL_PID=${SHELL_PID:-NONE}"
-
-            if [[ -n "$SHELL_PID" && -d "/proc/$SHELL_PID" ]]; then
-              echo '=== SUSPECT SHELL SAFE PROC METADATA ==='
-              printf 'CWD='; readlink -f "/proc/$SHELL_PID/cwd" 2>/dev/null || true
-              printf 'EXE='; readlink -f "/proc/$SHELL_PID/exe" 2>/dev/null || true
-              printf 'TTY='; ps -o tty= -p "$SHELL_PID" | xargs || true
-              printf 'SID='; ps -o sid= -p "$SHELL_PID" | xargs || true
-              printf 'PGID='; ps -o pgid= -p "$SHELL_PID" | xargs || true
-              printf 'CGROUP='; tr '\n' ';' < "/proc/$SHELL_PID/cgroup" 2>/dev/null | redact || true; echo
-              printf 'LOGINUID='; cat "/proc/$SHELL_PID/loginuid" 2>/dev/null || true
-
-              echo '=== SUSPECT SHELL ENV NAMES ONLY ==='
-              tr '\0' '\n' < "/proc/$SHELL_PID/environ" 2>/dev/null | sed 's/=.*//' | sort -u | grep -E '^(SSH_|TERM|TERM_PROGRAM|COLORTERM|LANG|LC_|XDG_|HOSTINGER|HST_|AGENT|CI|GITHUB|CODEX|OPENAI|CLAUDE|USER|LOGNAME|HOME|SHELL|PWD|OLDPWD|SHLVL)' || true
-
-              echo '=== SUSPECT SHELL SAFE ENV VALUES ==='
-              tr '\0' '\n' < "/proc/$SHELL_PID/environ" 2>/dev/null | grep -E '^(TERM|TERM_PROGRAM|COLORTERM|LANG|LC_[A-Z_]+|XDG_SESSION_TYPE|XDG_SESSION_CLASS|USER|LOGNAME|SHELL|PWD|OLDPWD|SHLVL|HOSTINGER[^=]*|HST_[^=]*|AGENT[^=]*|CI|GITHUB_ACTIONS)=' | redact || true
-            fi
-          fi
-
-          echo '=== SOURCE REPO SAFE STATE ==='
-          SRC='/var/www/sikhadenge-whatsapp-agent/source'
-          if [[ -d "$SRC/.git" ]]; then
-            git -C "$SRC" rev-parse --verify HEAD 2>/dev/null | sed 's/^/SOURCE_HEAD=/' || true
-            git -C "$SRC" branch --show-current 2>/dev/null | sed 's/^/SOURCE_BRANCH=/' || true
-            git -C "$SRC" status --short --untracked-files=no 2>/dev/null | head -120 | sed 's/^/SOURCE_TRACKED_CHANGE=/' || true
-            git -C "$SRC" log -1 --format='SOURCE_LAST_COMMIT=%H|%cI|%s' 2>/dev/null || true
-          else
-            echo 'SOURCE_GIT=NOT_FOUND'
-          fi
-
-          APP="$SRC/apps/whatsapp-agent-dashboard"
-          echo '=== APP RECENT FILE ACTIVITY SAFE PATHS ==='
-          find "$APP" -maxdepth 3 -type f -newermt '2026-09-13 18:10:00' ! -path '*/node_modules/*' ! -path '*/.next/*' -printf '%TY-%Tm-%TdT%TH:%TM:%TS %p\n' 2>/dev/null | sort | tail -120 | sed "s#${SRC}#SOURCE#g" || true
-
-          echo '=== ROOT HISTORY DEPLOY/RESTART MATCHES ONLY ==='
+          echo '=== ROOT HISTORY RELEVANT COMMANDS ONLY ==='
           if [[ -r /root/.bash_history ]]; then
-            grep -Ein 'sikhadenge-whatsapp-agent|pnpm (run )?build|prisma generate|pm2 (restart|reload|start|show).*whatsapp' /root/.bash_history | tail -120 | redact || true
+            nl -ba /root/.bash_history | grep -Ei \
+              'sikhadenge-whatsapp-agent|APP=|PROCESS=|pm2[[:space:]]+(restart|reload|start|stop|show|describe)|prisma generate|pnpm (exec prisma|run build)|NODE_ENV=production|login-right-panel|login-page01|git (status|diff|checkout|switch|pull|fetch|reset|rev-parse)|next build|release/whatsapp-instagram-agent-flow' | \
+              tail -260 | redact || true
           fi
 
-          echo '=== RECENT PROVIDER KEY / SSH EVENTS ==='
-          journalctl --since '2026-09-13 18:10:00' --no-pager -o short-iso 2>/dev/null | grep -Ei 'qemu-ga.*(sshd -T|ssh|authorized)|Accepted publickey for root|Accepted password for root|pam_unix\(sshd:session\)' | tail -180 | redact || true
+          SRC='/var/www/sikhadenge-whatsapp-agent/source'
+          APP="$SRC/apps/whatsapp-agent-dashboard"
+
+          echo '=== SOURCE TRACKED DIFF NAMES / STATS ==='
+          git -C "$SRC" status --short --untracked-files=no 2>/dev/null || true
+          git -C "$SRC" diff --stat -- apps/whatsapp-agent-dashboard 2>/dev/null || true
+          git -C "$SRC" diff --name-status -- apps/whatsapp-agent-dashboard 2>/dev/null || true
+
+          echo '=== SOURCE RELEVANT DIFF HUNKS — STRUCTURAL ONLY ==='
+          git -C "$SRC" diff -U0 -- apps/whatsapp-agent-dashboard/app/layout.tsx apps/whatsapp-agent-dashboard/app/login/page.tsx apps/whatsapp-agent-dashboard/app/login-page01-left-image.css 2>/dev/null | \
+            grep -E '^(diff --git|index |--- |\+\+\+ |@@)' | head -160 || true
+
+          echo '=== RECENT APP FILE MTIMES ==='
+          for f in \
+            "$APP/app/login-right-panel-v16.css" \
+            "$APP/app/login-page01-left-image.css" \
+            "$APP/app/layout.tsx" \
+            "$APP/app/login/page.tsx"; do
+            [[ -e "$f" ]] && stat -c '%y|%s|%n' "$f" | sed "s#${SRC}#SOURCE#g"
+          done
+
+          echo '=== ACTIVE ROOT PTS SESSION SAFE STATE ==='
+          ps -eo pid=,ppid=,user=,lstart=,etimes=,tty=,args= | grep -E '[s]shd: root@pts/[0-9]+|[p]m2 .*sikhadenge-whatsapp-agent|[p]npm .*build|[p]risma .*generate' | tail -100 | redact || true
 
           echo '=== CURRENT WA PM2 SAFE STATE ==='
           pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const p=JSON.parse(b).find(x=>x.name==="sikhadenge-whatsapp-agent");const e=p?.pm2_env||{};console.log(["status="+e.status,"pid="+p?.pid,"restarts="+e.restart_time,"unstable_restarts="+e.unstable_restarts,"cwd="+e.pm_cwd].join("|"));});'
 
-          echo 'READ_ONLY_PROVIDER_SESSION_SNAPSHOT=PASS'
+          echo 'READ_ONLY_COMMAND_PROVENANCE=PASS'
           REMOTE
