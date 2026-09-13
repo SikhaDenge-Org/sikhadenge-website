@@ -1,0 +1,74 @@
+name: WhatsApp Agent Phase17 Stage2 Governance Audit V12
+
+on:
+  push:
+    branches: [phase17-stage2-governance-v12-20260913]
+    paths: [".github/workflows/whatsapp-agent-phase17-stage2-governance-audit.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  audit-stage2-governance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_LIVE_SHA: c5a4f6bf55e9d60e5b40eece82de6b223d907cba
+      WORKSPACE_ID: engagews_default
+      CANDIDATE_ID: cmtv8n9v50001kw3hzm6b2y0b
+    steps:
+      - name: Configure pinned SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          [[ -n "${SSH_PORT:-}" ]] || echo SSH_PORT=22 >> "$GITHUB_ENV"
+          install -d -m 700 "$HOME/.ssh"; key="$HOME/.ssh/prod"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"; read -r _ kt km _ <<< "$SSH_HOST_KEY"; test "$kt" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "${SSH_PORT:-22}" "$kt" "$km" > "$HOME/.ssh/known_hosts"; chmod 600 "$HOME/.ssh/known_hosts"
+      - name: Audit V12 governance read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' WORKSPACE_ID='$WORKSPACE_ID' CANDIDATE_ID='$CANDIDATE_ID' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          A=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard; E="$A/.env"
+          envv(){ node - "$E" "$1" <<'NODE'
+          const f=require('fs'),[p,k]=process.argv.slice(2);for(const r of f.readFileSync(p,'utf8').split(/\r?\n/)){let l=r.trim();if(!l||l[0]=='#')continue;if(l.startsWith('export '))l=l.slice(7).trim();let i=l.indexOf('=');if(i<1||l.slice(0,i).trim()!=k)continue;let v=l.slice(i+1).trim();if(v.length>1&&((v[0]=='"'&&v.at(-1)=='"')||(v[0]=="'"&&v.at(-1)=="'")))v=v.slice(1,-1);process.stdout.write(v);process.exit(0)}process.exit(1)
+          NODE
+          }
+          g(){ printf 'GATE_%s=%s\n' "$1" "$2"; }
+          sha=$(git -C "$A" rev-parse HEAD); dirty=$(git -C "$A" status --porcelain --untracked-files=no|sed '/^$/d'|wc -l|tr -d ' ')
+          printf 'LIVE_SHA=%s\nEXPECTED_LIVE_SHA=%s\n' "$sha" "$EXPECTED_LIVE_SHA"
+          [[ "$sha" == "$EXPECTED_LIVE_SHA" ]] && g EXACT_SHA PROVEN || g EXACT_SHA FAIL
+          [[ "$dirty" == 0 ]] && g CLEAN_WORKTREE PROVEN || g CLEAN_WORKTREE FAIL
+          DB=$(node "$A/scripts/prisma-postgres-cli-url.mjs" "$(envv DATABASE_URL)")
+          q(){ psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "$1"; }
+          state=$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",\"externalWritesAllowed\",\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}'")
+          hist=$(q "SELECT COUNT(*) FROM \"EngageControlledLaunchTransition\" WHERE \"workspaceId\"='${WORKSPACE_ID}'")
+          printf 'CONTROLLED_LAUNCH_STATE=%s\nTRANSITION_COUNT=%s\n' "$state" "$hist"
+          [[ "$state" == 'INTERNAL_TEST_IDENTITIES|SHADOW|NO_EXTERNAL_WRITES|f|1' && "$hist" == 1 ]] && g STAGE1_BASELINE PROVEN || g STAGE1_BASELINE FAIL
+          cand=$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"channel\",\"status\",COALESCE(\"capabilities\"->'evidence'->>'apiVerifiedAt',''),COALESCE(\"capabilities\"->'evidence'->>'webhookVerifiedAt',''),COALESCE(\"capabilities\"->'evidence'->>'permissionsVerified','') FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"id\"='${CANDIDATE_ID}'")
+          IFS='|' read -r ch st api wh perm <<< "$cand"; [[ "$ch" == WHATSAPP && "$st" == CONNECTED ]] && g CANDIDATE_CONNECTED PROVEN || g CANDIDATE_CONNECTED FAIL
+          [[ -n "$api" && -n "$wh" && "$perm" == true ]] && g PERMISSIONS_WEBHOOK PROVEN || g PERMISSIONS_WEBHOOK FAIL
+          ks=$(q "SELECT COUNT(*) FROM \"EngageKillSwitch\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"active\"=true"); printf 'ACTIVE_KILL_SWITCH_COUNT=%s\n' "$ks"; [[ "$ks" == 0 ]] && g EMERGENCY_STOP PROVEN || g EMERGENCY_STOP FAIL
+          ff=$(q "SELECT COUNT(*) FROM \"EngageFeatureFlag\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"enabled\"=true"); printf 'ENABLED_FEATURE_FLAG_COUNT=%s\n' "$ff"; [[ "$ff" == 0 ]] && g HIGH_RISK_FLAGS PROVEN || g HIGH_RISK_FLAGS FAIL
+          attest(){ local gate=$1 action=$2 extra=${3:-}; local c; c=$(q "SELECT COUNT(*) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"action\"='${action}' AND \"outcome\"='VERIFIED' ${extra}"); [[ "$c" -gt 0 ]] && g "$gate" PROVEN || g "$gate" UNPROVEN; }
+          attest CRITICAL_INCIDENTS PHASE17_CRITICAL_INCIDENT_REVIEW "AND COALESCE(\"metadata\"->>'unresolvedCriticalIncidents','')='0'"
+          attest DUPLICATE_SENDS PHASE17_DUPLICATE_SEND_REVIEW "AND COALESCE(\"metadata\"->>'unexplainedDuplicateSends','')='0'"
+          for x in 'ROLLBACK_TESTED:PHASE17_ROLLBACK_REHEARSAL' 'MONITORING_ACTIVE:PHASE17_MONITORING_ACTIVE' 'SCOPE_APPROVED:PHASE17_STAGE2_SCOPE_APPROVED' 'SUPPORT_RUNBOOK_ACTIVE:PHASE17_SUPPORT_RUNBOOK_ACTIVE' 'OBSERVATION_WINDOW_COMPLETE:PHASE17_OBSERVATION_WINDOW_COMPLETE' 'PRODUCTION_EVIDENCE_RECORDED:PHASE17_PRODUCTION_EVIDENCE_RECORDED' 'AUTHENTICATED_SMOKE:PHASE17_AUTHENTICATED_SMOKE'; do gate=${x%%:*}; action=${x#*:}; attest "$gate" "$action" "AND COALESCE(\"metadata\"->>'liveSha','')='${EXPECTED_LIVE_SHA}'"; done
+          pm=$(pm2 jlist 2>/dev/null|node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{let p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(String(p?.pm2_env?.status||"missing"))})'); printf 'PM2_STATE=%s\n' "$pm"; [[ "$pm" == online ]] && g PROCESS_HEALTH PROVEN || g PROCESS_HEALTH FAIL
+          h=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login||true); printf 'LOGIN_HTTP=%s\n' "$h"; [[ "$h" == 200 ]] && g BASIC_SMOKE PROVEN || g BASIC_SMOKE FAIL
+          printf 'GOVERNANCE_READY=false\nRESULT=READ_ONLY_AUDIT_COMPLETE_NO_MUTATION\n'
+          REMOTE
