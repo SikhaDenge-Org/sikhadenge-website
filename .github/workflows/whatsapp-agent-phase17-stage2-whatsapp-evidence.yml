@@ -1,0 +1,129 @@
+name: WhatsApp Agent Phase17 Stage2 WhatsApp Evidence
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-phase17-stage2-whatsapp-evidence.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  reconcile-whatsapp-evidence:
+    if: contains(github.event.head_commit.message, '[phase17-stage2-evidence]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_LIVE_SHA: 37ef3b22e10c5684722d699fd3d92aa7e1d0128e
+      EVIDENCE_RUN_ID: stage2-whatsapp-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Reconcile verified WhatsApp API and permission evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' EVIDENCE_RUN_ID='$EVIDENCE_RUN_ID' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          LIVE_APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ENV_FILE="$LIVE_APP/.env"
+          WORKSPACE_ID=engagews_default
+          read_env() {
+            node - "$ENV_FILE" "$1" <<'NODE'
+          const fs=require('node:fs'); const [file,key]=process.argv.slice(2); for(const raw of fs.readFileSync(file,'utf8').split(/\r?\n/)){const l=raw.trim(); if(!l||l.startsWith('#'))continue; const n=l.startsWith('export ')?l.slice(7).trim():l; const i=n.indexOf('='); if(i<1||n.slice(0,i).trim()!==key)continue; let v=n.slice(i+1).trim(); if(v.length>=2&&((v.startsWith('"')&&v.endsWith('"'))||(v.startsWith("'")&&v.endsWith("'"))))v=v.slice(1,-1); process.stdout.write(v); process.exit(0)} process.exit(1);
+          NODE
+          }
+
+          test "$(id -u)" = "0"
+          test "$(git -C "$LIVE_APP" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
+          test -z "$(git -C "$LIVE_APP" status --porcelain --untracked-files=no)"
+          test -f "$ENV_FILE"
+          test -d "$LIVE_APP/node_modules"
+
+          export DATABASE_URL="$(read_env DATABASE_URL)"
+          export WHATSAPP_ACCESS_TOKEN="$(read_env WHATSAPP_ACCESS_TOKEN)"
+          export WHATSAPP_PHONE_NUMBER_ID="$(read_env WHATSAPP_PHONE_NUMBER_ID)"
+          export WHATSAPP_BUSINESS_ACCOUNT_ID="$(read_env WHATSAPP_BUSINESS_ACCOUNT_ID)"
+          export WHATSAPP_GRAPH_VERSION="$(read_env WHATSAPP_GRAPH_VERSION)"
+          export WHATSAPP_APP_ID="$(read_env WHATSAPP_APP_ID)"
+          export WHATSAPP_APP_SECRET="$(read_env WHATSAPP_APP_SECRET)"
+
+          DB="$(node "$LIVE_APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")"
+          state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
+          test "$state" = "INTERNAL_TEST_IDENTITIES|SHADOW|NO_EXTERNAL_WRITES|false|1"
+
+          before="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"id\",\"status\",COALESCE(\"capabilities\"::text,'{}') FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\"='WHATSAPP';")"
+          test -n "$before"
+          backup_dir="/root/sikhadenge-backups/$EVIDENCE_RUN_ID"
+          install -d -m 700 "$backup_dir"
+          printf '%s\n' "$before" > "$backup_dir/whatsapp-health-before.txt"
+          chmod 600 "$backup_dir/whatsapp-health-before.txt"
+
+          cd "$LIVE_APP"
+          npx tsx -e '
+            import { verifyMetaProviderReadOnly } from "./lib/integrations/read-only-verifier";
+            import { persistMetaApiVerification, recordMetaPermissionEvidence, listPersistedIntegrationHealth } from "./modules/integrations/infrastructure/prisma-integration-health";
+            import { prisma } from "./lib/db/prisma";
+            const required=(name:string)=>{const v=process.env[name]?.trim();if(!v)throw new Error(`${name} missing`);return v};
+            const get=async(url:URL,token?:string)=>{const c=new AbortController();const timer=setTimeout(()=>c.abort(),10000);try{const r=await fetch(url,{method:"GET",headers:{Accept:"application/json",...(token?{Authorization:`Bearer ${token}`}:{})},redirect:"error",cache:"no-store",signal:c.signal});let b:any={};try{b=await r.json()}catch{}return{r,b}}finally{clearTimeout(timer)}};
+            const token=required("WHATSAPP_ACCESS_TOKEN"), phoneId=required("WHATSAPP_PHONE_NUMBER_ID"), wabaId=required("WHATSAPP_BUSINESS_ACCOUNT_ID"), version=required("WHATSAPP_GRAPH_VERSION"), appId=required("WHATSAPP_APP_ID"), appSecret=required("WHATSAPP_APP_SECRET");
+            const identity=await verifyMetaProviderReadOnly("META_WHATSAPP");
+            if(!identity.verified||identity.accountReference!==phoneId||identity.externalWriteSent)throw new Error("provider identity gate failed");
+            const debugUrl=new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/debug_token`);debugUrl.searchParams.set("input_token",token);debugUrl.searchParams.set("access_token",`${appId}|${appSecret}`);const debug=await get(debugUrl);const d=debug.b?.data||{};const scopes=[...(Array.isArray(d.scopes)?d.scopes:[]),...(Array.isArray(d.granular_scopes)?d.granular_scopes.map((x:any)=>x?.scope):[])].filter(Boolean).map(String);if(!debug.r.ok||d.is_valid!==true||String(d.app_id||"")!==appId||!scopes.includes("whatsapp_business_messaging")||!scopes.includes("whatsapp_business_management"))throw new Error("provider permission gate failed");
+            const subUrl=new URL(`https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(wabaId)}/subscribed_apps`);const sub=await get(subUrl,token);const apps=Array.isArray(sub.b?.data)?sub.b.data:[];const subscribed=apps.some((x:any)=>String(x?.id||x?.whatsapp_business_api_data?.id||"")===appId);if(!sub.r.ok||!subscribed)throw new Error("provider subscription gate failed");
+            const current=(await listPersistedIntegrationHealth()).find((x)=>x.provider==="META_WHATSAPP"&&x.externalAccountId===phoneId);if(!current?.evidence.webhookVerifiedAt||!current.evidence.webhookRequired)throw new Error("real signed webhook evidence is missing");
+            await persistMetaApiVerification({provider:"META_WHATSAPP",verified:true,checkedAt:new Date(identity.checkedAt),externalAccountId:phoneId});
+            await recordMetaPermissionEvidence({channel:"WHATSAPP",externalAccountId:phoneId});
+            const next=(await listPersistedIntegrationHealth()).find((x)=>x.provider==="META_WHATSAPP"&&x.externalAccountId===phoneId);if(!next||next.status!=="CONNECTED"||!next.evidence.apiVerifiedAt||!next.evidence.permissionsVerified||!next.evidence.webhookVerifiedAt)throw new Error("post-write integration health is not CONNECTED");
+            console.log("WHATSAPP_PROVIDER_IDENTITY_VERIFIED=true");
+            console.log("WHATSAPP_PROVIDER_PERMISSIONS_VERIFIED=true");
+            console.log("WHATSAPP_SIGNED_WEBHOOK_EVIDENCE_PRESERVED=true");
+            console.log("WHATSAPP_PROVIDER_EXTERNAL_WRITE_SENT=false");
+            console.log("WHATSAPP_PERSISTED_STATUS=CONNECTED");
+            await prisma.$disconnect();
+          '
+
+          after="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"id\",\"status\",COALESCE(\"capabilities\"->'evidence'->>'apiVerifiedAt',''),COALESCE(\"capabilities\"->'evidence'->>'webhookVerifiedAt',''),COALESCE(\"capabilities\"->'evidence'->>'permissionsVerified','') FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\"='WHATSAPP';")"
+          printf '%s\n' "$after" > "$backup_dir/whatsapp-health-after.txt"
+          chmod 600 "$backup_dir/whatsapp-health-after.txt"
+          IFS='|' read -r connection_id status api_verified webhook_verified permissions_verified <<< "$after"
+          test -n "$connection_id"
+          test "$status" = "CONNECTED"
+          test -n "$api_verified"
+          test -n "$webhook_verified"
+          test "$permissions_verified" = "true"
+
+          state_after="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
+          test "$state_after" = "INTERNAL_TEST_IDENTITIES|SHADOW|NO_EXTERNAL_WRITES|false|1"
+          printf 'WHATSAPP_CONNECTION_ID=%s\n' "$connection_id"
+          printf 'WHATSAPP_HEALTH=%s\n' "$status"
+          printf 'CONTROLLED_LAUNCH_STATE=%s\n' "$state_after"
+          printf 'PASS: PHASE17_STAGE2_WHATSAPP_EVIDENCE_RECONCILED\n'
+          REMOTE
