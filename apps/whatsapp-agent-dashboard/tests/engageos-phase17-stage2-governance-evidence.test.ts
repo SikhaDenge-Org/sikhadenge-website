@@ -12,13 +12,15 @@ const liveSha = "sha-current";
 const candidateId = "wa-1";
 const verifiedAt = "2026-09-13T12:00:00.000Z";
 
-const derive = (events: readonly Record<string, unknown>[]) => deriveStage2GovernanceEvidence({
+type GovernanceEvents = Parameters<typeof deriveStage2GovernanceEvidence>[0]["events"];
+
+const derive = (events: GovernanceEvents) => deriveStage2GovernanceEvidence({
   liveSha,
   candidateId,
   exactShaVerified: true,
   permissionsVerified: true,
   emergencyStopActive: false,
-  events: events as Parameters<typeof deriveStage2GovernanceEvidence>[0]["events"],
+  events,
 });
 
 const empty = derive([]);
