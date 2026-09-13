@@ -83,7 +83,16 @@ async function main() {
     where: { workspaceId: WORKSPACE_ID },
     orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
     take: 500,
-    select: { action: true, outcome: true, metadata: true },
+    select: {
+      action: true,
+      outcome: true,
+      metadata: true,
+      entityType: true,
+      entityId: true,
+      reasonCode: true,
+      actorId: true,
+      requestId: true,
+    },
   });
 
   const evidence = deriveStage2GovernanceEvidence({
