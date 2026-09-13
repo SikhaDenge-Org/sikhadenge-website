@@ -69,7 +69,7 @@ jobs:
           ssh-keygen -y -f "$private_key_file" >/dev/null
           ssh-keygen -F "$canonical_host" -f "$HOME/.ssh/known_hosts" >/dev/null
 
-      - name: Preserve and canonicalize exact Page01 drift
+      - name: Preserve and canonicalize exact Stage2 blocker drift
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -83,7 +83,7 @@ jobs:
             "RUN_ID='$RECOVERY_RUN_ID' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           LIVE_APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
-          EXPECTED_LIVE_SHA=98533d6eed006f31d94f0204d633718ac9d39188
+          EXPECTED_LIVE_SHA=2b3efe35b8920082cc94dce989d1847842fb8825
           cd "$LIVE_APP"
           repo_root="$(git rev-parse --show-toplevel)"
           live_sha="$(git rev-parse HEAD)"
@@ -92,6 +92,7 @@ jobs:
           expected_paths=(
             apps/whatsapp-agent-dashboard/app/login-page01-left-image.css
             apps/whatsapp-agent-dashboard/app/login/page.tsx
+            apps/whatsapp-agent-dashboard/next-env.d.ts
           )
           actual_paths="$(git -C "$repo_root" diff HEAD --name-only --no-renames | LC_ALL=C sort)"
           expected_list="$(printf '%s\n' "${expected_paths[@]}" | LC_ALL=C sort)"
@@ -102,24 +103,33 @@ jobs:
           fi
 
           recovery_dir="/root/sikhadenge-backups/${RUN_ID}"
-          patch_file="$recovery_dir/page01-production-drift.patch"
-          manifest_file="$recovery_dir/page01-production-drift-manifest.txt"
+          patch_file="$recovery_dir/stage2-production-drift.patch"
+          manifest_file="$recovery_dir/stage2-production-drift-manifest.txt"
           install -d -m 700 "$recovery_dir"
           git -C "$repo_root" diff HEAD --binary -- "${expected_paths[@]}" > "$patch_file"
           test -s "$patch_file"
           chmod 600 "$patch_file"
           patch_sha256="$(sha256sum "$patch_file" | awk '{print $1}')"
           {
-            printf 'FORMAT_VERSION=1\n'
+            printf 'FORMAT_VERSION=2\n'
             printf 'RUN_ID=%s\n' "$RUN_ID"
             printf 'LIVE_SHA=%s\n' "$live_sha"
             printf 'PATCH_SHA256=%s\n' "$patch_sha256"
+            printf 'CAPTURED_UTC=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
             printf 'TRACKED_STATUS_BEGIN\n'
             git -C "$repo_root" status --porcelain --untracked-files=no -- "${expected_paths[@]}"
             printf 'TRACKED_STATUS_END\n'
             printf 'DIFF_NUMSTAT_BEGIN\n'
             git -C "$repo_root" diff HEAD --numstat --no-renames -- "${expected_paths[@]}"
             printf 'DIFF_NUMSTAT_END\n'
+            for path in "${expected_paths[@]}"; do
+              printf 'FILE path=%s mtime=%s working_sha256=%s head_blob=%s head_sha256=%s\n' \
+                "$path" \
+                "$(stat -c '%y' "$repo_root/$path")" \
+                "$(sha256sum "$repo_root/$path" | awk '{print $1}')" \
+                "$(git -C "$repo_root" rev-parse "HEAD:$path")" \
+                "$(git -C "$repo_root" show "HEAD:$path" | sha256sum | awk '{print $1}')"
+            done
           } > "$manifest_file"
           chmod 600 "$manifest_file"
 
@@ -132,5 +142,6 @@ jobs:
 
           printf 'RECOVERY_PATCH_SHA256=%s\n' "$patch_sha256"
           printf 'RECOVERY_MANIFEST=%s\n' "$manifest_file"
-          printf 'PASS: PAGE01_PRODUCTION_DRIFT_PRESERVED_AND_CANONICALIZED\n'
+          cat "$manifest_file"
+          printf 'PASS: STAGE2_PRODUCTION_DRIFT_PRESERVED_AND_CANONICALIZED\n'
           REMOTE
