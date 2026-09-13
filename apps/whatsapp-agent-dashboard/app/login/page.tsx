@@ -4,6 +4,7 @@ import LoginForm from "../../components/auth/LoginForm";
 import { getCurrentDashboardUser } from "../../lib/auth/session";
 import "../login-page01-code.css";
 import "../login-page01-left-image.css";
+import "../login-page01-auth-v12.css";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +40,7 @@ export default async function LoginPage() {
         />
       </section>
 
-      <section className="split01__signin" aria-labelledby="login-title">
+      <section className="split01__signin" data-auth-ui="right-auth-v12" aria-labelledby="login-title">
         <div className="split01__orb split01__orb--top" aria-hidden="true" />
         <div className="split01__orb split01__orb--bottom" aria-hidden="true" />
         <div className="split01__right-dots" aria-hidden="true" />
@@ -56,7 +57,7 @@ export default async function LoginPage() {
             <span>Sign in to manage conversations, qualified leads,<br className="split01__desktop-break" /> agent knowledge and counselor handoffs.</span>
           </div>
 
-          <div className="split01__form-card">
+          <div className="split01__form-card" data-auth-card="v12">
             <LoginForm />
             <p className="split01__access-note">
               <ShieldIcon />
