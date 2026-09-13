@@ -1,0 +1,327 @@
+name: SA2 Dashboard Production Runtime Switch Auth Contract 20260913
+
+on:
+  push:
+    branches:
+      - ops/sa2-dashboard-runtime-preflight-20260913
+    paths:
+      - '.github/workflows/sa2-dashboard-production-runtime-switch-auth-contract-20260913.yml'
+
+permissions:
+  contents: read
+
+env:
+  SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+  SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+  SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+  SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+  SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+jobs:
+  switch:
+    runs-on: ubuntu-latest
+    environment: whatsapp-agent-production
+    timeout-minutes: 15
+    steps:
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SSH_PORT="${SSH_PORT:-22}"
+          echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
+          install -d -m 700 "$HOME/.ssh"
+          KEY="$HOME/.ssh/prod"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"
+          fi
+          chmod 600 "$KEY"
+          read -r _ kt km _ <<< "$SSH_HOST_KEY"
+          test "$kt" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Guarded SA2 runtime switch with verified middleware and route auth contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+
+          APP='sikhadenge-dashboard-revenue'
+          WA='sikhadenge-whatsapp-agent'
+          SRC='/opt/sikhadenge-dashboard'
+          OLD='/opt/sikhadenge-dashboard-releases/sa1-20260911-221949-d60ab5a4'
+          NEW='/opt/sikhadenge-dashboard-releases/sa2-20260913-143436-c02e6e06'
+          EXPECTED_SHA='c02e6e060b76b9f5ab6d16258a354a161e53275c'
+          EXPECTED_MIGRATION='20260913093357_sa2_whatsapp_conversation_identity_consent'
+          EXPECTED_MIGRATION_SHA='68c5f5cfab1c0209e958dbb0de0539289481b1fb4176c3929e35117d3b569223'
+          ROUTE_PATH='/api/integrations/whatsapp/identity-conflicts?limit=1'
+          OLD_CFG="/tmp/${APP}-old-auth-contract-$$.json"
+          NEW_CFG="/tmp/${APP}-new-auth-contract-$$.json"
+          HDR="/tmp/${APP}-headers-$$"
+          BODY="/tmp/${APP}-body-$$"
+          SWITCHED=0
+          PRE_WA_STATE=''
+
+          read_pm2(){
+            pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const p=JSON.parse(b).find(x=>x.name===process.argv[1]);if(!p)process.exit(3);const e=p.pm2_env||{};console.log([p.pid,e.status,e.pm_cwd,e.restart_time,e.unstable_restarts].join("|"))})' "$1"
+          }
+          wait_http(){
+            local port="$1" path="$2" h=000
+            for _ in $(seq 1 40); do
+              h="$(curl --max-time 3 -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}${path}" 2>/dev/null || true)"
+              case "$h" in 2*|3*|401) echo "$h"; return 0;; esac
+              sleep 1
+            done
+            echo "$h"
+            return 1
+          }
+          start_cfg(){
+            local cfg="$1"
+            pm2 delete "$APP" >/dev/null 2>&1 || true
+            pm2 start "$cfg" --only "$APP" >/dev/null
+          }
+          on_exit(){
+            local rc=$?
+            trap - EXIT
+            if [ "$rc" -ne 0 ] && [ "$SWITCHED" -eq 1 ]; then
+              echo "SWITCH_FAILURE_RC=$rc"
+              echo '--- AUTOMATIC ROLLBACK USING PROVEN SA1 ECOSYSTEM CONTRACT ---'
+              set +e
+              start_cfg "$OLD_CFG"
+              RB_HTTP="$(wait_http 3400 / 2>/dev/null)"
+              RB_WAIT_RC=$?
+              RB_STATE="$(read_pm2 "$APP" 2>/dev/null)"
+              RB_STATE_RC=$?
+              WA_RB="$(read_pm2 "$WA" 2>/dev/null)"
+              WA_RB_RC=$?
+              echo "ROLLBACK_HTTP=$RB_HTTP"
+              echo "ROLLBACK_STATE=$RB_STATE"
+              echo "ROLLBACK_WA_STATE=$WA_RB"
+              RB_OK=1
+              case "$RB_HTTP" in 2*|3*) ;; *) RB_OK=0;; esac
+              IFS='|' read -r RB_PID RB_STATUS RB_CWD RB_RESTART RB_UNSTABLE <<< "$RB_STATE"
+              [ "$RB_WAIT_RC" -eq 0 ] || RB_OK=0
+              [ "$RB_STATE_RC" -eq 0 ] || RB_OK=0
+              [ "$WA_RB_RC" -eq 0 ] || RB_OK=0
+              [ "$RB_STATUS" = online ] || RB_OK=0
+              [ "$RB_CWD" = "$OLD" ] || RB_OK=0
+              [ "$RB_UNSTABLE" = 0 ] || RB_OK=0
+              [ "$WA_RB" = "$PRE_WA_STATE" ] || RB_OK=0
+              if [ "$RB_OK" -eq 1 ]; then
+                pm2 save >/dev/null 2>&1
+                echo 'ROLLBACK=PASS'
+              else
+                echo 'ROLLBACK=FAIL'
+                rc=90
+              fi
+              set -e
+            fi
+            rm -f "$OLD_CFG" "$NEW_CFG" "$HDR" "$BODY"
+            exit "$rc"
+          }
+          trap on_exit EXIT
+
+          echo '=== SA2 AUTH-CONTRACT FINAL PRODUCTION SWITCH ==='
+          echo "EXPECTED_SHA=$EXPECTED_SHA"
+          echo "OLD_RELEASE=$OLD"
+          echo "NEW_RELEASE=$NEW"
+          echo 'DATABASE_MIGRATION=PROHIBITED_NOT_RUN'
+          echo 'PRISMA_DB_PUSH=PROHIBITED_NOT_RUN'
+          echo 'PRISMA_MIGRATE_RESOLVE=PROHIBITED_NOT_RUN'
+          echo 'WHATSAPP_PORT3100_RUNTIME_CHANGED=NO'
+
+          test -d "$OLD"
+          test -d "$NEW"
+          test -f "$NEW/.release-sha"
+          test "$(cat "$NEW/.release-sha")" = "$EXPECTED_SHA"
+          test -d "$NEW/.next"
+          test -d "$NEW/node_modules"
+          test -f "$NEW/package.json"
+          test -f "$NEW/prisma/migrations/$EXPECTED_MIGRATION/migration.sql"
+          ACTUAL_MIG_SHA="$(sha256sum "$NEW/prisma/migrations/$EXPECTED_MIGRATION/migration.sql" | awk '{print $1}')"
+          echo "SA2_MIGRATION_FILE_SHA=$ACTUAL_MIG_SHA"
+          test "$ACTUAL_MIG_SHA" = "$EXPECTED_MIGRATION_SHA"
+          test "$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.scripts?.start||"")' "$NEW/package.json")" = 'next start'
+          REMOTE_MAIN="$(git -C "$SRC" ls-remote origin refs/heads/main | awk '{print $1}')"
+          echo "REMOTE_MAIN=$REMOTE_MAIN"
+          test "$REMOTE_MAIN" = "$EXPECTED_SHA"
+          SOURCE_HEAD_BEFORE="$(git -C "$SRC" rev-parse HEAD)"
+          SOURCE_STATUS_BEFORE="$(git -C "$SRC" status --porcelain=v1 --untracked-files=no | sha256sum | awk '{print $1}')"
+
+          PRE_APP_STATE="$(read_pm2 "$APP")"
+          PRE_WA_STATE="$(read_pm2 "$WA")"
+          IFS='|' read -r OLD_PID OLD_STATUS OLD_CWD OLD_RESTART OLD_UNSTABLE <<< "$PRE_APP_STATE"
+          IFS='|' read -r WA_PID WA_STATUS WA_CWD WA_RESTART WA_UNSTABLE <<< "$PRE_WA_STATE"
+          echo "PRE_DASHBOARD_STATE=$PRE_APP_STATE"
+          echo "PRE_WA_STATE=$PRE_WA_STATE"
+          test "$OLD_STATUS" = online
+          test "$OLD_CWD" = "$OLD"
+          test "$OLD_UNSTABLE" = 0
+          test "$WA_STATUS" = online
+          test "$WA_UNSTABLE" = 0
+          PRE_ROOT="$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3400/)"
+          PRE_WA_HTTP="$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/)"
+          echo "PRE_ROOT_HTTP=$PRE_ROOT"
+          echo "PRE_WA_HTTP=$PRE_WA_HTTP"
+          case "$PRE_ROOT" in 2*|3*) ;; *) exit 10;; esac
+          case "$PRE_WA_HTTP" in 2*|3*) ;; *) exit 11;; esac
+
+          echo '--- PRE-SWITCH FLAGS / PREFLIGHT / READ-ONLY DB GATE ---'
+          node - "$OLD_PID" "$OLD" "$EXPECTED_MIGRATION" <<'NODE'
+          const fs=require('fs');
+          const {spawnSync}=require('child_process');
+          const {createRequire}=require('module');
+          const [pid,cwd,migration]=process.argv.slice(2);
+          const env=Object.fromEntries(fs.readFileSync(`/proc/${pid}/environ`).toString().split('\0').filter(Boolean).map(s=>{const i=s.indexOf('=');return [s.slice(0,i),s.slice(i+1)]}));
+          const enabled=v=>String(v||'').trim().toLowerCase()==='true';
+          const bad=['SALES_AI_ENABLED','WHATSAPP_SA2_DOMAIN_PROCESSING_ENABLED','WHATSAPP_SA2_PRIVACY_ACTIONS_ENABLED','WHATSAPP_OUTBOUND_ENABLED','WHATSAPP_AI_REPLY_ENABLED','WHATSAPP_FOLLOWUP_ENABLED','WHATSAPP_PAYMENT_LINK_ACTION_ENABLED'];
+          if(!enabled(env.WHATSAPP_INGEST_ENABLED)||bad.some(k=>enabled(env[k]))) throw new Error('unsafe_runtime_flags');
+          console.log('PRE_FLAGS_SAFE=YES');
+          const r=spawnSync('npm',['run','whatsapp:runtime-preflight'],{cwd,env:{...env,PWD:cwd},stdio:'inherit'});
+          if(r.status!==0) throw new Error('preflight_failed_'+r.status);
+          console.log('PRE_RUNTIME_PREFLIGHT=PASS');
+          Object.assign(process.env,env);
+          const req=createRequire(cwd+'/package.json');
+          const {PrismaClient}=req('@prisma/client');
+          const p=new PrismaClient();
+          (async()=>{
+            const t=await p.$queryRawUnsafe("SELECT count(*)::int AS count FROM pg_tables WHERE schemaname='public'");
+            const s=await p.$queryRawUnsafe("SELECT count(*)::int AS count FROM pg_tables WHERE schemaname='public' AND tablename IN ('WhatsAppParticipant','WhatsAppConversation','WhatsAppConversationMessage','IdentityLinkDecision','WhatsAppConsent','WhatsAppSuppression','WhatsAppPrivacyEvent')");
+            const i=await p.$queryRawUnsafe('SELECT count(*)::int AS count FROM "_prisma_migrations" WHERE finished_at IS NULL AND rolled_back_at IS NULL');
+            const g=await p.$queryRawUnsafe('SELECT finished_at, rolled_back_at FROM "_prisma_migrations" WHERE migration_name=$1',migration);
+            const x=await p.$queryRawUnsafe("SELECT count(*)::int AS count FROM pg_stat_activity WHERE pid<>pg_backend_pid() AND xact_start IS NOT NULL AND now()-xact_start > interval '5 minutes'");
+            const ok=t[0].count===139&&s[0].count===7&&i[0].count===0&&x[0].count===0&&g.length===1&&g[0].finished_at&&!g[0].rolled_back_at;
+            console.log(`PRE_DB_GATE=${ok?'PASS':'FAIL'}|PUBLIC=${t[0].count}|SA2=${s[0].count}|INCOMPLETE=${i[0].count}|LONG_TX=${x[0].count}`);
+            if(!ok) process.exitCode=2;
+          })().finally(()=>p.$disconnect());
+          NODE
+
+          node - "$OLD_PID" "$NEW" <<'NODE'
+          const fs=require('fs');
+          const {spawnSync}=require('child_process');
+          const [pid,cwd]=process.argv.slice(2);
+          const env=Object.fromEntries(fs.readFileSync(`/proc/${pid}/environ`).toString().split('\0').filter(Boolean).map(s=>{const i=s.indexOf('=');return [s.slice(0,i),s.slice(i+1)]}));
+          const r=spawnSync('npm',['run','whatsapp:sa2-validate'],{cwd,env:{...env,PWD:cwd},stdio:'inherit'});
+          if(r.status!==0) throw new Error('static_sa2_validate_failed_'+r.status);
+          console.log('PRE_SA2_STATIC_VALIDATE=PASS');
+          NODE
+
+          echo '--- BUILD PROVEN PM2 ECOSYSTEM CONTRACTS ---'
+          pm2 jlist | node -e '
+            const fs=require("fs");
+            const [name,oldCwd,newCwd,oldOut,newOut]=process.argv.slice(1);
+            let b="";
+            process.stdin.on("data",d=>b+=d);
+            process.stdin.on("end",()=>{
+              const p=JSON.parse(b).find(x=>x.name===name);
+              if(!p) throw new Error("app_missing");
+              const base={...(p.pm2_env||{})};
+              const enabled=v=>String(v||"").trim().toLowerCase()==="true";
+              const bad=["SALES_AI_ENABLED","WHATSAPP_SA2_DOMAIN_PROCESSING_ENABLED","WHATSAPP_SA2_PRIVACY_ACTIONS_ENABLED","WHATSAPP_OUTBOUND_ENABLED","WHATSAPP_AI_REPLY_ENABLED","WHATSAPP_FOLLOWUP_ENABLED","WHATSAPP_PAYMENT_LINK_ACTION_ENABLED"];
+              if(!enabled(base.WHATSAPP_INGEST_ENABLED)||bad.some(k=>enabled(base[k]))) throw new Error("unsafe_env");
+              const drop=["pm_id","status","pm_uptime","restart_time","unstable_restarts","created_at","pm_cwd","pm_exec_path","exec_interpreter","exec_mode","instances","name","namespace","args","node_args","watch","vizion","autorestart","autostart","merge_logs","max_memory_restart","env"];
+              for(const k of drop) delete base[k];
+              for(const k of Object.keys(base)) if(k.startsWith("axm_")||k.startsWith("pm2_")) delete base[k];
+              const make=cwd=>({apps:[{name,script:"/usr/bin/npm",cwd,args:["start","--","-p","3400"],exec_mode:"fork",instances:1,autorestart:true,env:{...base,PWD:cwd,NODE_ENV:"production"}}]});
+              fs.writeFileSync(oldOut,JSON.stringify(make(oldCwd)),{mode:0o600});
+              fs.writeFileSync(newOut,JSON.stringify(make(newCwd)),{mode:0o600});
+              console.log("PM2_ECOSYSTEM_CONFIGS=PASS");
+            });' "$APP" "$OLD" "$NEW" "$OLD_CFG" "$NEW_CFG"
+
+          echo '--- CONTROLLED SA2 SWITCH ---'
+          SWITCHED=1
+          start_cfg "$NEW_CFG"
+          NEW_ROOT="$(wait_http 3400 /)"
+          echo "NEW_ROOT_HTTP=$NEW_ROOT"
+          case "$NEW_ROOT" in 2*|3*) ;; *) exit 20;; esac
+          NEW_STATE="$(read_pm2 "$APP")"
+          IFS='|' read -r NEW_PID NEW_STATUS NEW_CWD NEW_RESTART NEW_UNSTABLE <<< "$NEW_STATE"
+          echo "NEW_DASHBOARD_STATE=$NEW_STATE"
+          test "$NEW_STATUS" = online
+          test "$NEW_CWD" = "$NEW"
+          test "$NEW_UNSTABLE" = 0
+
+          echo '--- VERIFIED TWO-LAYER AUTH CONTRACT ---'
+          : > "$HDR"
+          ANON_HTTP="$(curl --max-time 5 -sS -D "$HDR" -o /dev/null -w '%{http_code}' "http://127.0.0.1:3400${ROUTE_PATH}")"
+          ANON_LOCATION="$(awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/^[^:]*:[[:space:]]*/,""); sub(/\r$/,""); print; exit}' "$HDR")"
+          echo "SA2_ROUTE_ANON_HTTP=$ANON_HTTP"
+          echo "SA2_ROUTE_ANON_LOCATION=$ANON_LOCATION"
+          test "$ANON_HTTP" = 307
+          node - "$ANON_LOCATION" "$ROUTE_PATH" <<'NODE'
+          const [location,expectedNext]=process.argv.slice(2);
+          if(!location) throw new Error('missing_redirect_location');
+          const u=new URL(location,'http://127.0.0.1:3400');
+          if(u.pathname!=='/auth/dashboard-login') throw new Error('wrong_redirect_path_'+u.pathname);
+          if(u.searchParams.get('next')!==expectedNext) throw new Error('wrong_redirect_next_'+u.searchParams.get('next'));
+          console.log('SA2_MIDDLEWARE_AUTH_REDIRECT=PASS');
+          NODE
+
+          : > "$BODY"
+          INVALID_HTTP="$(curl --max-time 5 -sS -H 'Cookie: sd_session=sa2-runtime-probe-invalid' -o "$BODY" -w '%{http_code}' "http://127.0.0.1:3400${ROUTE_PATH}")"
+          echo "SA2_ROUTE_INVALID_SESSION_HTTP=$INVALID_HTTP"
+          test "$INVALID_HTTP" = 401
+          node - "$BODY" <<'NODE'
+          const fs=require('fs');
+          const body=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          if(body?.ok!==false||body?.error!=='Unauthorized') throw new Error('unexpected_unauthorized_body');
+          console.log('SA2_ROUTE_LEVEL_UNAUTHORIZED=PASS');
+          NODE
+
+          echo '--- POST-SWITCH FLAGS / PREFLIGHT / READ-ONLY DB GATE ---'
+          node - "$NEW_PID" "$NEW" "$EXPECTED_MIGRATION" <<'NODE'
+          const fs=require('fs');
+          const {spawnSync}=require('child_process');
+          const {createRequire}=require('module');
+          const [pid,cwd,migration]=process.argv.slice(2);
+          const env=Object.fromEntries(fs.readFileSync(`/proc/${pid}/environ`).toString().split('\0').filter(Boolean).map(s=>{const i=s.indexOf('=');return [s.slice(0,i),s.slice(i+1)]}));
+          const enabled=v=>String(v||'').trim().toLowerCase()==='true';
+          const bad=['SALES_AI_ENABLED','WHATSAPP_SA2_DOMAIN_PROCESSING_ENABLED','WHATSAPP_SA2_PRIVACY_ACTIONS_ENABLED','WHATSAPP_OUTBOUND_ENABLED','WHATSAPP_AI_REPLY_ENABLED','WHATSAPP_FOLLOWUP_ENABLED','WHATSAPP_PAYMENT_LINK_ACTION_ENABLED'];
+          if(!enabled(env.WHATSAPP_INGEST_ENABLED)||bad.some(k=>enabled(env[k]))) throw new Error('unsafe_new_flags');
+          console.log('POST_FLAGS_SAFE=YES');
+          const r=spawnSync('npm',['run','whatsapp:runtime-preflight'],{cwd,env:{...env,PWD:cwd},stdio:'inherit'});
+          if(r.status!==0) throw new Error('post_preflight_failed_'+r.status);
+          console.log('POST_RUNTIME_PREFLIGHT=PASS');
+          Object.assign(process.env,env);
+          const req=createRequire(cwd+'/package.json');
+          const {PrismaClient}=req('@prisma/client');
+          const p=new PrismaClient();
+          (async()=>{
+            const t=await p.$queryRawUnsafe("SELECT count(*)::int AS count FROM pg_tables WHERE schemaname='public'");
+            const s=await p.$queryRawUnsafe("SELECT count(*)::int AS count FROM pg_tables WHERE schemaname='public' AND tablename IN ('WhatsAppParticipant','WhatsAppConversation','WhatsAppConversationMessage','IdentityLinkDecision','WhatsAppConsent','WhatsAppSuppression','WhatsAppPrivacyEvent')");
+            const i=await p.$queryRawUnsafe('SELECT count(*)::int AS count FROM "_prisma_migrations" WHERE finished_at IS NULL AND rolled_back_at IS NULL');
+            const g=await p.$queryRawUnsafe('SELECT finished_at, rolled_back_at FROM "_prisma_migrations" WHERE migration_name=$1',migration);
+            const x=await p.$queryRawUnsafe("SELECT count(*)::int AS count FROM pg_stat_activity WHERE pid<>pg_backend_pid() AND xact_start IS NOT NULL AND now()-xact_start > interval '5 minutes'");
+            const ok=t[0].count===139&&s[0].count===7&&i[0].count===0&&x[0].count===0&&g.length===1&&g[0].finished_at&&!g[0].rolled_back_at;
+            console.log(`POST_DB_GATE=${ok?'PASS':'FAIL'}|PUBLIC=${t[0].count}|SA2=${s[0].count}|INCOMPLETE=${i[0].count}|LONG_TX=${x[0].count}`);
+            if(!ok) process.exitCode=2;
+          })().finally(()=>p.$disconnect());
+          NODE
+
+          POST_WA_STATE="$(read_pm2 "$WA")"
+          POST_WA_HTTP="$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/)"
+          echo "POST_WA_STATE=$POST_WA_STATE"
+          echo "POST_WA_HTTP=$POST_WA_HTTP"
+          test "$POST_WA_STATE" = "$PRE_WA_STATE"
+          case "$POST_WA_HTTP" in 2*|3*) ;; *) exit 21;; esac
+
+          SOURCE_HEAD_FINAL="$(git -C "$SRC" rev-parse HEAD)"
+          SOURCE_STATUS_FINAL="$(git -C "$SRC" status --porcelain=v1 --untracked-files=no | sha256sum | awk '{print $1}')"
+          test "$SOURCE_HEAD_FINAL" = "$SOURCE_HEAD_BEFORE"
+          test "$SOURCE_STATUS_FINAL" = "$SOURCE_STATUS_BEFORE"
+          test -d "$OLD"
+          test "$(cat "$NEW/.release-sha")" = "$EXPECTED_SHA"
+          pm2 save >/dev/null
+
+          echo 'PM2_SAVE=PASS'
+          echo 'OLD_RELEASE_PRESERVED=YES'
+          echo 'SOURCE_WORKTREE_UNCHANGED=YES'
+          echo 'DANGEROUS_AUTOMATION_ENABLED=NO'
+          echo 'WHATSAPP_PORT3100_RUNTIME_CHANGED=NO'
+          echo 'DATABASE_SCHEMA_MUTATION_DURING_RUNTIME_SWITCH=NO'
+          echo "SA2_ACTIVE_RELEASE=$NEW"
+          echo 'SA2_PRODUCTION_RUNTIME_DEPLOYMENT=PASS'
+          REMOTE
