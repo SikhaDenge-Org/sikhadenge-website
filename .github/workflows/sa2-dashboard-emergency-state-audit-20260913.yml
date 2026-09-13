@@ -1,4 +1,4 @@
-name: SA2 Dashboard Emergency State Audit 20260913
+name: SA2 Dashboard Emergency Recover SA1 20260913
 
 on:
   push:
@@ -18,7 +18,7 @@ env:
   SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
 
 jobs:
-  audit:
+  recover:
     runs-on: ubuntu-latest
     environment: whatsapp-agent-production
     timeout-minutes: 10
@@ -27,80 +27,94 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          SSH_PORT="${SSH_PORT:-22}"
-          echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
-          install -d -m 700 "$HOME/.ssh"
-          KEY="$HOME/.ssh/prod"
-          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
-            printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"
-          else
-            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"
-          fi
-          chmod 600 "$KEY"
-          read -r _ kt km _ <<< "$SSH_HOST_KEY"
-          test "$kt" = ssh-ed25519
-          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"
-          chmod 600 "$HOME/.ssh/known_hosts"
+          SSH_PORT="${SSH_PORT:-22}"; echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
+          install -d -m 700 "$HOME/.ssh"; KEY="$HOME/.ssh/prod"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"; fi
+          chmod 600 "$KEY"; read -r _ kt km _ <<< "$SSH_HOST_KEY"; test "$kt" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"; chmod 600 "$HOME/.ssh/known_hosts"
 
-      - name: Read-only production dashboard emergency audit
+      - name: Recover only dashboard to known-good SA1 immutable release
         shell: bash
         run: |
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
-          set -u
+          set -Eeuo pipefail
           APP='sikhadenge-dashboard-revenue'
           WA='sikhadenge-whatsapp-agent'
           OLD='/opt/sikhadenge-dashboard-releases/sa1-20260911-221949-d60ab5a4'
-          RELEASES='/opt/sikhadenge-dashboard-releases'
+          TMP="/tmp/${APP}-recover-$$.json"
+          trap 'rm -f "$TMP"' EXIT
 
-          echo '=== READ ONLY EMERGENCY AUDIT ==='
-          date -u '+UTC=%Y-%m-%dT%H:%M:%SZ'
-          echo 'MUTATION=NONE'
+          echo '=== DASHBOARD EMERGENCY RECOVERY ==='
+          echo 'TARGET=KNOWN_GOOD_SA1_RELEASE'
+          echo 'DATABASE_MUTATION=NONE'
+          echo 'WA_PROCESS_MUTATION=PROHIBITED'
+          test -d "$OLD"
+          test -f "$OLD/package.json"
+          test -d "$OLD/.next"
+          test "$(node -e 'const p=require(process.argv[1]);process.stdout.write(p.scripts?.start||"")' "$OLD/package.json")" = 'next start'
 
-          echo '--- PM2 TARGET SNAPSHOT ---'
-          pm2 jlist | node -e '
-            let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{
-              for(const p of JSON.parse(b)) if(["sikhadenge-dashboard-revenue","sikhadenge-whatsapp-agent"].includes(p.name)) {
-                const e=p.pm2_env||{};
-                console.log(JSON.stringify({name:p.name,pid:p.pid,status:e.status,cwd:e.pm_cwd,restart:e.restart_time,unstable:e.unstable_restarts,args:e.args,node_env:e.NODE_ENV,pm_exec_path:e.pm_exec_path,exec_interpreter:e.exec_interpreter,exec_mode:e.exec_mode}));
-              }
-            });'
+          read_pm2(){ pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const p=JSON.parse(b).find(x=>x.name===process.argv[1]);if(!p)process.exit(3);const e=p.pm2_env||{};console.log([p.pid,e.status,e.pm_cwd,e.restart_time,e.unstable_restarts].join("|"))})' "$1"; }
+          WA_BEFORE="$(read_pm2 "$WA")"
+          IFS='|' read -r WA_PID WA_STATUS WA_CWD WA_RESTART WA_UNSTABLE <<< "$WA_BEFORE"
+          echo "WA_BEFORE=${WA_PID}|${WA_STATUS}|${WA_RESTART}|${WA_UNSTABLE}"
+          test "$WA_STATUS" = online
+          test "$WA_RESTART" = 47
+          test "$WA_UNSTABLE" = 0
+          test "$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/ || true)" = 307
 
-          echo '--- SAVED PM2 DUMP CONTRACT ---'
-          DUMP="$HOME/.pm2/dump.pm2"
-          if [ -f "$DUMP" ]; then
-            node - "$DUMP" "$APP" <<'NODE'
-          const fs=require('fs');
-          const [f,n]=process.argv.slice(2);
-          const p=JSON.parse(fs.readFileSync(f,'utf8')).find(x=>x.name===n);
-          if(!p){console.log('DUMP_ENTRY=NOT_FOUND');process.exit(0)}
-          console.log(JSON.stringify({name:p.name,cwd:p.pm_cwd,pm_exec_path:p.pm_exec_path,exec_interpreter:p.exec_interpreter,args:p.args,script:p.script,exec_mode:p.exec_mode,node_args:p.node_args,namespace:p.namespace},null,2));
+          CURRENT_ROOT="$(curl --max-time 4 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3400/ 2>/dev/null || true)"
+          echo "DASHBOARD_HTTP_BEFORE=$CURRENT_ROOT"
+
+          pm2 jlist | node - "$APP" "$OLD" "$TMP" <<'NODE'
+          let b='';process.stdin.on('data',d=>b+=d);process.stdin.on('end',()=>{
+            const fs=require('fs'); const [name,cwd,out]=process.argv.slice(2); const p=JSON.parse(b).find(x=>x.name===name); if(!p) throw new Error('dashboard_pm2_entry_missing');
+            const env={...(p.pm2_env||{})};
+            const enabled=v=>String(v||'').trim().toLowerCase()==='true';
+            const bad=['SALES_AI_ENABLED','WHATSAPP_SA2_DOMAIN_PROCESSING_ENABLED','WHATSAPP_SA2_PRIVACY_ACTIONS_ENABLED','WHATSAPP_OUTBOUND_ENABLED','WHATSAPP_AI_REPLY_ENABLED','WHATSAPP_FOLLOWUP_ENABLED','WHATSAPP_PAYMENT_LINK_ACTION_ENABLED'];
+            if(!enabled(env.WHATSAPP_INGEST_ENABLED)||bad.some(k=>enabled(env[k]))) throw new Error('unsafe_dashboard_env');
+            const drop=['pm_id','status','pm_uptime','restart_time','unstable_restarts','created_at','pm_cwd','pm_exec_path','exec_interpreter','exec_mode','instances','name','namespace','args','node_args','watch','vizion','autorestart','autostart','merge_logs','max_memory_restart','env'];
+            for(const k of drop) delete env[k];
+            for(const k of Object.keys(env)) if(k.startsWith('axm_')||k.startsWith('pm2_')) delete env[k];
+            env.PWD=cwd; delete env.OLDPWD; env.NODE_ENV='production';
+            const cfg={apps:[{name,script:'/usr/bin/npm',cwd,args:['start','--','-p','3400'],exec_mode:'fork',instances:1,autorestart:true,env}]};
+            fs.writeFileSync(out,JSON.stringify(cfg),{mode:0o600});
+            console.log('RECOVERY_CONFIG=READY');
+          });
           NODE
-          else echo 'DUMP_FILE=MISSING'; fi
 
-          echo '--- SOCKETS ---'
-          ss -ltnp 2>/dev/null | grep -E ':(3400|3100)\b' || true
-          echo "HTTP_3400_ROOT=$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3400/ 2>/dev/null || true)"
-          echo "HTTP_3100_ROOT=$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/ 2>/dev/null || true)"
+          pm2 delete "$APP" >/dev/null 2>&1 || true
+          pm2 start "$TMP" --only "$APP" >/dev/null
 
-          echo '--- RELEASES ---'
-          test -d "$OLD" && echo "OLD_RELEASE_EXISTS=YES" || echo "OLD_RELEASE_EXISTS=NO"
-          node -e 'const p=require(process.argv[1]); console.log("START_SCRIPT="+(p.scripts?.start||""))' "$OLD/package.json" 2>/dev/null || true
-          find "$RELEASES" -maxdepth 1 -mindepth 1 -type d -name 'sa2-*' -printf '%f\n' 2>/dev/null | sort | tail -n 5 | sed 's/^/SA2_RELEASE=/' || true
-          for d in "$RELEASES"/sa2-*; do
-            [ -d "$d" ] || continue
-            if [ -f "$d/.release-sha" ]; then printf 'SA2_RELEASE_SHA=%s|' "$(basename "$d")"; cat "$d/.release-sha"; fi
+          HTTP=000
+          for i in $(seq 1 35); do
+            HTTP="$(curl --max-time 3 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3400/ 2>/dev/null || true)"
+            case "$HTTP" in 2*|3*) break;; esac
+            sleep 1
           done
+          echo "DASHBOARD_HTTP_AFTER=$HTTP"
+          case "$HTTP" in 2*|3*) ;; *) echo 'RECOVERY_HEALTH=FAIL'; pm2 logs "$APP" --lines 40 --nostream || true; exit 20;; esac
 
-          echo '--- DASHBOARD PM2 LOG TAIL ---'
-          for f in "$HOME/.pm2/logs/${APP}-error.log" "$HOME/.pm2/logs/${APP}-out.log"; do
-            echo "LOG_FILE=$(basename "$f")"
-            if [ -f "$f" ]; then tail -n 80 "$f" | sed -E 's#(postgres(ql)?://)[^[:space:]]+#\1[REDACTED]#g; s#(DATABASE_URL=)[^[:space:]]+#\1[REDACTED]#g; s#(TOKEN|SECRET|PASSWORD|KEY)=([^[:space:]]+)#\1=[REDACTED]#g'; else echo 'MISSING'; fi
-          done
+          APP_AFTER="$(read_pm2 "$APP")"
+          IFS='|' read -r APP_PID APP_STATUS APP_CWD APP_RESTART APP_UNSTABLE <<< "$APP_AFTER"
+          echo "DASHBOARD_AFTER=${APP_PID}|${APP_STATUS}|${APP_CWD}|${APP_RESTART}|${APP_UNSTABLE}"
+          test "$APP_STATUS" = online
+          test "$APP_CWD" = "$OLD"
+          test "$APP_UNSTABLE" = 0
 
-          echo '--- SOURCE REPO READ ONLY ---'
-          git -C /opt/sikhadenge-dashboard rev-parse HEAD 2>/dev/null | sed 's/^/SOURCE_HEAD=/' || true
-          git -C /opt/sikhadenge-dashboard ls-remote origin refs/heads/main 2>/dev/null | awk '{print "REMOTE_MAIN=" $1}' || true
-          git -C /opt/sikhadenge-dashboard status --porcelain=v1 --untracked-files=no 2>/dev/null | sha256sum | awk '{print "SOURCE_TRACKED_STATUS_HASH=" $1}' || true
-          echo 'AUDIT_COMPLETE=YES'
+          node - "$APP_PID" <<'NODE'
+          const fs=require('fs');const pid=process.argv[2];const env=Object.fromEntries(fs.readFileSync(`/proc/${pid}/environ`).toString().split('\0').filter(Boolean).map(s=>{const i=s.indexOf('=');return [s.slice(0,i),s.slice(i+1)]}));
+          const enabled=v=>String(v||'').trim().toLowerCase()==='true';const bad=['SALES_AI_ENABLED','WHATSAPP_SA2_DOMAIN_PROCESSING_ENABLED','WHATSAPP_SA2_PRIVACY_ACTIONS_ENABLED','WHATSAPP_OUTBOUND_ENABLED','WHATSAPP_AI_REPLY_ENABLED','WHATSAPP_FOLLOWUP_ENABLED','WHATSAPP_PAYMENT_LINK_ACTION_ENABLED'];
+          if(!enabled(env.WHATSAPP_INGEST_ENABLED)||bad.some(k=>enabled(env[k]))) throw new Error('unsafe_recovered_env');console.log('RECOVERED_FLAGS_SAFE=YES');
+          NODE
+
+          WA_AFTER="$(read_pm2 "$WA")"
+          echo "WA_AFTER=$WA_AFTER"
+          test "$WA_AFTER" = "$WA_BEFORE"
+          test "$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/ || true)" = 307
+
+          (cd "$OLD" && npm run whatsapp:runtime-preflight)
+          pm2 save >/dev/null
+          echo 'DASHBOARD_SA1_RECOVERY=PASS'
+          echo 'WA_UNCHANGED=PASS'
           REMOTE
