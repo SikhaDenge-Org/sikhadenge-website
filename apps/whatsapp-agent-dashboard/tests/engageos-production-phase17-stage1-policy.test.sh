@@ -101,4 +101,7 @@ test "$readiness_worktree_line" -lt "$live_cd_line"
 test "$live_cd_line" -lt "$readiness_line"
 test "$readiness_line" -lt "$state_verify_line"
 
+# Stage2 operator is part of the Phase17 production safety contract and must remain fail-closed.
+bash tests/engageos-phase17-stage2-operator-policy.test.sh
+
 printf 'EngageOS Phase17 Stage1 production activation policy: PASS\n'
