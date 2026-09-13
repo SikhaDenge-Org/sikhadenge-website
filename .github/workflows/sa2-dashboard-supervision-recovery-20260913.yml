@@ -1,0 +1,184 @@
+name: SA2 Dashboard Supervision Recovery 20260913
+
+on:
+  push:
+    branches:
+      - ops/sa2-dashboard-runtime-preflight-20260913
+    paths:
+      - '.github/workflows/sa2-dashboard-supervision-recovery-20260913.yml'
+
+permissions:
+  contents: read
+
+env:
+  SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+  SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+  SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+  SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+  SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    environment: whatsapp-agent-production
+    timeout-minutes: 10
+    steps:
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SSH_PORT="${SSH_PORT:-22}"
+          echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
+          install -d -m 700 "$HOME/.ssh"
+          KEY="$HOME/.ssh/prod"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"
+          fi
+          chmod 600 "$KEY"
+          read -r _ kt km _ <<< "$SSH_HOST_KEY"
+          test "$kt" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Restore SA1 under direct Next PM2 supervision
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          APP='sikhadenge-dashboard-revenue'
+          WA='sikhadenge-whatsapp-agent'
+          OLD='/opt/sikhadenge-dashboard-releases/sa1-20260911-221949-d60ab5a4'
+          CFG="/tmp/${APP}-direct-next-recovery-$$.json"
+          PRE_WA=''
+          CLEANED=0
+          trap 'rm -f "$CFG"' EXIT
+
+          read_pm2(){
+            pm2 jlist | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{const p=JSON.parse(b).find(x=>x.name===process.argv[1]);if(!p)process.exit(3);const e=p.pm2_env||{};console.log([p.pid,e.status,e.pm_cwd,e.restart_time,e.unstable_restarts,e.pm_exec_path].join("|"))})' "$1"
+          }
+          listener_pid(){
+            ss -H -ltnp 'sport = :3400' 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -n1
+          }
+          wait_http(){
+            local h=000
+            for _ in $(seq 1 40); do
+              h="$(curl --max-time 3 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3400/ 2>/dev/null || true)"
+              case "$h" in 2*|3*) echo "$h"; return 0;; esac
+              sleep 1
+            done
+            echo "$h"; return 1
+          }
+
+          echo '=== SA1 DIRECT-PM2 SUPERVISION RECOVERY ==='
+          echo 'DATABASE_MIGRATION=PROHIBITED_NOT_RUN'
+          echo 'WHATSAPP_PORT3100_RUNTIME_CHANGED=NO'
+          test -d "$OLD"
+          test -x "$OLD/node_modules/next/dist/bin/next"
+          test -f "$OLD/.next/BUILD_ID"
+
+          PRE_APP="$(read_pm2 "$APP")"
+          PRE_WA="$(read_pm2 "$WA")"
+          echo "PRE_DASHBOARD=$PRE_APP"
+          echo "PRE_WA=$PRE_WA"
+          IFS='|' read -r P_PID P_STATUS P_CWD P_RESTART P_UNSTABLE P_EXEC <<< "$PRE_APP"
+          test "$P_CWD" = "$OLD"
+          test "$P_STATUS" = errored
+          test "$P_PID" = 0
+          IFS='|' read -r W_PID W_STATUS W_CWD W_RESTART W_UNSTABLE W_EXEC <<< "$PRE_WA"
+          test "$W_STATUS" = online
+          test "$W_UNSTABLE" = 0
+
+          OWNER="$(listener_pid)"
+          test -n "$OWNER"
+          OWNER_CWD="$(readlink "/proc/$OWNER/cwd")"
+          OWNER_COMM="$(cat "/proc/$OWNER/comm")"
+          OWNER_PARENT="$(awk '/^PPid:/{print $2}' "/proc/$OWNER/status")"
+          PARENT_CWD="$(readlink "/proc/$OWNER_PARENT/cwd" 2>/dev/null || true)"
+          echo "CURRENT_3400_OWNER=$OWNER|COMM=$OWNER_COMM|CWD=$OWNER_CWD|PPID=$OWNER_PARENT|PARENT_CWD=$PARENT_CWD"
+          test "$OWNER_CWD" = "$OLD"
+          case "$OWNER_COMM" in next-server*) ;; *) exit 31;; esac
+          test "$PARENT_CWD" = "$OLD"
+
+          pm2 jlist | node -e '
+            const fs=require("fs"); let b="";
+            process.stdin.on("data",d=>b+=d); process.stdin.on("end",()=>{
+              const [name,cwd,out]=process.argv.slice(1);
+              const p=JSON.parse(b).find(x=>x.name===name); if(!p) throw new Error("pm2_app_missing");
+              const base={...(p.pm2_env||{})};
+              const enabled=v=>String(v||"").trim().toLowerCase()==="true";
+              const bad=["SALES_AI_ENABLED","WHATSAPP_SA2_DOMAIN_PROCESSING_ENABLED","WHATSAPP_SA2_PRIVACY_ACTIONS_ENABLED","WHATSAPP_OUTBOUND_ENABLED","WHATSAPP_AI_REPLY_ENABLED","WHATSAPP_FOLLOWUP_ENABLED","WHATSAPP_PAYMENT_LINK_ACTION_ENABLED"];
+              if(!enabled(base.WHATSAPP_INGEST_ENABLED)||bad.some(k=>enabled(base[k]))) throw new Error("unsafe_runtime_env");
+              const drop=["pm_id","status","pm_uptime","restart_time","unstable_restarts","created_at","pm_cwd","pm_exec_path","exec_interpreter","exec_mode","instances","name","namespace","args","node_args","watch","vizion","autorestart","autostart","merge_logs","max_memory_restart","env"];
+              for(const k of drop) delete base[k];
+              for(const k of Object.keys(base)) if(k.startsWith("axm_")||k.startsWith("pm2_")) delete base[k];
+              const cfg={apps:[{name,script:`${cwd}/node_modules/next/dist/bin/next`,cwd,args:["start","-p","3400"],exec_mode:"fork",instances:1,autorestart:true,kill_timeout:5000,env:{...base,PWD:cwd,NODE_ENV:"production"}}]};
+              fs.writeFileSync(out,JSON.stringify(cfg),{mode:0o600});
+              console.log("DIRECT_NEXT_CONFIG=PASS");
+            });' "$APP" "$OLD" "$CFG"
+
+          echo '--- REMOVE VERIFIED ORPHAN ONLY ---'
+          kill -TERM "$OWNER" 2>/dev/null || true
+          for _ in $(seq 1 20); do [ ! -d "/proc/$OWNER" ] && break; sleep 0.25; done
+          if [ -d "/proc/$OWNER" ]; then kill -KILL "$OWNER"; fi
+          if [ -d "/proc/$OWNER_PARENT" ] && [ "$(readlink "/proc/$OWNER_PARENT/cwd" 2>/dev/null || true)" = "$OLD" ]; then
+            kill -TERM "$OWNER_PARENT" 2>/dev/null || true
+          fi
+          for _ in $(seq 1 20); do [ -z "$(listener_pid)" ] && break; sleep 0.25; done
+          test -z "$(listener_pid)"
+          CLEANED=1
+          echo 'VERIFIED_ORPHAN_REMOVED=YES'
+
+          pm2 delete "$APP" >/dev/null 2>&1 || true
+          pm2 start "$CFG" --only "$APP" >/dev/null
+          ROOT_HTTP="$(wait_http)"
+          POST_APP="$(read_pm2 "$APP")"
+          POST_WA="$(read_pm2 "$WA")"
+          OWNER2="$(listener_pid)"
+          echo "POST_ROOT_HTTP=$ROOT_HTTP"
+          echo "POST_DASHBOARD=$POST_APP"
+          echo "POST_WA=$POST_WA"
+          echo "POST_3400_OWNER=$OWNER2"
+
+          IFS='|' read -r N_PID N_STATUS N_CWD N_RESTART N_UNSTABLE N_EXEC <<< "$POST_APP"
+          test "$N_STATUS" = online
+          test "$N_CWD" = "$OLD"
+          test "$N_UNSTABLE" = 0
+          test "$N_PID" = "$OWNER2"
+          test "$N_EXEC" = "$OLD/node_modules/next/dist/bin/next"
+          test "$POST_WA" = "$PRE_WA"
+          case "$ROOT_HTTP" in 2*|3*) ;; *) exit 40;; esac
+
+          node - "$N_PID" "$OLD" <<'NODE'
+          const fs=require('fs'); const {spawnSync}=require('child_process');
+          const [pid,cwd]=process.argv.slice(2);
+          const env=Object.fromEntries(fs.readFileSync(`/proc/${pid}/environ`).toString().split('\0').filter(Boolean).map(s=>{const i=s.indexOf('=');return [s.slice(0,i),s.slice(i+1)]}));
+          const enabled=v=>String(v||'').trim().toLowerCase()==='true';
+          const bad=['SALES_AI_ENABLED','WHATSAPP_SA2_DOMAIN_PROCESSING_ENABLED','WHATSAPP_SA2_PRIVACY_ACTIONS_ENABLED','WHATSAPP_OUTBOUND_ENABLED','WHATSAPP_AI_REPLY_ENABLED','WHATSAPP_FOLLOWUP_ENABLED','WHATSAPP_PAYMENT_LINK_ACTION_ENABLED'];
+          if(!enabled(env.WHATSAPP_INGEST_ENABLED)||bad.some(k=>enabled(env[k]))) throw new Error('unsafe_flags');
+          const r=spawnSync('npm',['run','whatsapp:runtime-preflight'],{cwd,env:{...env,PWD:cwd},stdio:'inherit'});
+          if(r.status!==0) throw new Error('runtime_preflight_failed_'+r.status);
+          console.log('RECOVERY_RUNTIME_PREFLIGHT=PASS');
+          NODE
+
+          pm2 save >/dev/null
+          sleep 2
+          FINAL_APP="$(read_pm2 "$APP")"
+          FINAL_OWNER="$(listener_pid)"
+          FINAL_HTTP="$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3400/)"
+          echo "FINAL_DASHBOARD=$FINAL_APP"
+          echo "FINAL_3400_OWNER=$FINAL_OWNER"
+          echo "FINAL_HTTP=$FINAL_HTTP"
+          IFS='|' read -r F_PID F_STATUS F_CWD F_RESTART F_UNSTABLE F_EXEC <<< "$FINAL_APP"
+          test "$F_PID" = "$FINAL_OWNER"
+          test "$F_STATUS" = online
+          test "$F_CWD" = "$OLD"
+          test "$F_UNSTABLE" = 0
+          test "$(read_pm2 "$WA")" = "$PRE_WA"
+          case "$FINAL_HTTP" in 2*|3*) ;; *) exit 41;; esac
+          echo 'DASHBOARD_PM2_SUPERVISION_RECOVERY=PASS'
+          echo 'WHATSAPP_UNCHANGED=YES'
+          echo 'DATABASE_MUTATION=NO'
+          REMOTE
