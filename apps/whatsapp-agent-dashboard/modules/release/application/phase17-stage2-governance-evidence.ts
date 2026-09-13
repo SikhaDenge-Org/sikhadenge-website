@@ -122,15 +122,16 @@ function policyEvidence(
   liveSha: string,
 ): AuditEvent | undefined {
   return machineVerifiedForSha(events, STAGE2_GOVERNANCE_ACTIONS.policyVerified, liveSha, (metadata) => {
+    const checks = metadata.checks;
     if (
       metadata.source !== "github-actions-phase17-stage2-machine-evidence" ||
       !nonEmptyString(metadata.policyRunId) ||
       metadata.policyCommitSha !== liveSha ||
-      !Array.isArray(metadata.checks)
+      !Array.isArray(checks)
     ) {
       return false;
     }
-    return REQUIRED_POLICY_CHECKS.every((check) => metadata.checks.includes(check));
+    return REQUIRED_POLICY_CHECKS.every((check) => checks.includes(check));
   });
 }
 
