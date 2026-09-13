@@ -1,0 +1,136 @@
+name: Phase17 V17 Git Reconcile Capture
+
+on:
+  push:
+    branches: [phase17-stage2-governance-v15-20260913]
+    paths:
+      - ".github/workflows/phase17-v17-git-reconcile-capture.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_LIVE_SHA: f651d0182861c191c041b36e96902f20d5a6da2b
+      TARGET_BRANCH: reconcile/whatsapp-login-v17-live-20260913
+    steps:
+      - name: Checkout isolated reconciliation branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then SSH_PORT=22; echo SSH_PORT=22 >> "$GITHUB_ENV"; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Verify exact live source identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          A=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          root="$(git -C "$A" rev-parse --show-toplevel)"
+          test "$(git -C "$root" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
+          expected_paths="$(printf '%s\n' \
+            apps/whatsapp-agent-dashboard/app/layout.tsx \
+            apps/whatsapp-agent-dashboard/app/login-page01-left-image.css \
+            apps/whatsapp-agent-dashboard/app/login/page.tsx \
+            apps/whatsapp-agent-dashboard/next-env.d.ts | LC_ALL=C sort)"
+          actual_paths="$(git -C "$root" diff HEAD --name-only --no-renames | LC_ALL=C sort)"
+          test "$actual_paths" = "$expected_paths"
+          test "$(sha256sum "$root/apps/whatsapp-agent-dashboard/app/layout.tsx" | awk '{print $1}')" = de80dd8b1219981094c1f9475075a2b034444482717b4e864c8a175e214c5f13
+          test "$(sha256sum "$root/apps/whatsapp-agent-dashboard/app/login-page01-left-image.css" | awk '{print $1}')" = 0c3704c646a8ef2559541e5891504e3daa94fc8b4f3a3e11712fa99e34511a36
+          test "$(sha256sum "$root/apps/whatsapp-agent-dashboard/app/login/page.tsx" | awk '{print $1}')" = 84ce2a42cbeb793ccf739df15179149c1f827ba4aacf9e34d8f8121c28a74412
+          test "$(sha256sum "$root/apps/whatsapp-agent-dashboard/next-env.d.ts" | awk '{print $1}')" = 9dd9d642cdb87d4d5b3173217e0c45429b3e47a6f5cf5fb0ead6c644ec5fed01
+          test "$(sha256sum "$root/apps/whatsapp-agent-dashboard/app/login-right-panel-v16.css" | awk '{print $1}')" = 7d5eef67d8c52159d20b03fc907f7922abe785880c1eb7c0540ac86413571f75
+          test "$(sha256sum "$root/apps/whatsapp-agent-dashboard/public/page01-hero-desktop-v17.png" | awk '{print $1}')" = c437b7daf7b131edefb95e231f9e320e861547751cab3c7dbd206597f49fb67e
+          test "$(sha256sum "$root/apps/whatsapp-agent-dashboard/public/page01-hero-tablet-v17.png" | awk '{print $1}')" = 03ded29b62af9c8b0e6462e681b84ec84f07a06d05cddac4ef7140df895c8d57
+          test "$(sha256sum "$root/apps/whatsapp-agent-dashboard/public/page01-hero-ultrawide-v17.png" | awk '{print $1}')" = 75195f2c219589eb87a72b3c720530ac3d963e440a58243c55d5187140346c96
+          printf 'PASS: EXACT_LIVE_V17_SOURCE_IDENTITY\n'
+          REMOTE
+
+      - name: Copy exact V17 files into reconciliation checkout
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "cd /var/www/sikhadenge-whatsapp-agent/source && tar -cf - \
+            apps/whatsapp-agent-dashboard/app/layout.tsx \
+            apps/whatsapp-agent-dashboard/app/login-page01-left-image.css \
+            apps/whatsapp-agent-dashboard/app/login/page.tsx \
+            apps/whatsapp-agent-dashboard/next-env.d.ts \
+            apps/whatsapp-agent-dashboard/app/login-right-panel-v16.css \
+            apps/whatsapp-agent-dashboard/public/page01-hero-desktop-v17.png \
+            apps/whatsapp-agent-dashboard/public/page01-hero-tablet-v17.png \
+            apps/whatsapp-agent-dashboard/public/page01-hero-ultrawide-v17.png" | tar -xf -
+          cat > /tmp/v17-sha256 <<'SHA'
+          de80dd8b1219981094c1f9475075a2b034444482717b4e864c8a175e214c5f13  apps/whatsapp-agent-dashboard/app/layout.tsx
+          0c3704c646a8ef2559541e5891504e3daa94fc8b4f3a3e11712fa99e34511a36  apps/whatsapp-agent-dashboard/app/login-page01-left-image.css
+          84ce2a42cbeb793ccf739df15179149c1f827ba4aacf9e34d8f8121c28a74412  apps/whatsapp-agent-dashboard/app/login/page.tsx
+          9dd9d642cdb87d4d5b3173217e0c45429b3e47a6f5cf5fb0ead6c644ec5fed01  apps/whatsapp-agent-dashboard/next-env.d.ts
+          7d5eef67d8c52159d20b03fc907f7922abe785880c1eb7c0540ac86413571f75  apps/whatsapp-agent-dashboard/app/login-right-panel-v16.css
+          c437b7daf7b131edefb95e231f9e320e861547751cab3c7dbd206597f49fb67e  apps/whatsapp-agent-dashboard/public/page01-hero-desktop-v17.png
+          03ded29b62af9c8b0e6462e681b84ec84f07a06d05cddac4ef7140df895c8d57  apps/whatsapp-agent-dashboard/public/page01-hero-tablet-v17.png
+          75195f2c219589eb87a72b3c720530ac3d963e440a58243c55d5187140346c96  apps/whatsapp-agent-dashboard/public/page01-hero-ultrawide-v17.png
+          SHA
+          sed -i 's/^          //' /tmp/v17-sha256
+          sha256sum -c /tmp/v17-sha256
+
+      - name: Enforce exact reconciliation diff
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
+          expected="$(printf '%s\n' \
+            apps/whatsapp-agent-dashboard/app/layout.tsx \
+            apps/whatsapp-agent-dashboard/app/login-page01-left-image.css \
+            apps/whatsapp-agent-dashboard/app/login-right-panel-v16.css \
+            apps/whatsapp-agent-dashboard/app/login/page.tsx \
+            apps/whatsapp-agent-dashboard/next-env.d.ts \
+            apps/whatsapp-agent-dashboard/public/page01-hero-desktop-v17.png \
+            apps/whatsapp-agent-dashboard/public/page01-hero-tablet-v17.png \
+            apps/whatsapp-agent-dashboard/public/page01-hero-ultrawide-v17.png | LC_ALL=C sort)"
+          actual="$(git status --porcelain --untracked-files=all | sed -E 's/^...//' | LC_ALL=C sort)"
+          test "$actual" = "$expected"
+          git diff --check -- apps/whatsapp-agent-dashboard/app/layout.tsx apps/whatsapp-agent-dashboard/app/login-page01-left-image.css apps/whatsapp-agent-dashboard/app/login/page.tsx apps/whatsapp-agent-dashboard/next-env.d.ts
+          printf 'PASS: EXACT_EIGHT_FILE_RECONCILIATION_DIFF\n'
+
+      - name: Commit exact production V17 capture to isolated branch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name "SikhaDenge Release Reconciliation"
+          git config user.email "251703707+maihoonankitsingh@users.noreply.github.com"
+          git add -- \
+            apps/whatsapp-agent-dashboard/app/layout.tsx \
+            apps/whatsapp-agent-dashboard/app/login-page01-left-image.css \
+            apps/whatsapp-agent-dashboard/app/login-right-panel-v16.css \
+            apps/whatsapp-agent-dashboard/app/login/page.tsx \
+            apps/whatsapp-agent-dashboard/next-env.d.ts \
+            apps/whatsapp-agent-dashboard/public/page01-hero-desktop-v17.png \
+            apps/whatsapp-agent-dashboard/public/page01-hero-tablet-v17.png \
+            apps/whatsapp-agent-dashboard/public/page01-hero-ultrawide-v17.png
+          git commit -m "reconcile(page01): capture exact live V17 source"
+          git push origin "HEAD:$TARGET_BRANCH"
+          printf 'RECONCILIATION_COMMIT_SHA=%s\n' "$(git rev-parse HEAD)"
