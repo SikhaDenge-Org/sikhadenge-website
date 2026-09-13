@@ -26,7 +26,7 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
-      EXPECTED_LIVE_SHA: 37ef3b22e10c5684722d699fd3d92aa7e1d0128e
+      EXPECTED_LIVE_SHA: 48e1caccea98fe616891aabf50da28040f38b992
       EVIDENCE_RUN_ID: stage2-whatsapp-evidence-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
