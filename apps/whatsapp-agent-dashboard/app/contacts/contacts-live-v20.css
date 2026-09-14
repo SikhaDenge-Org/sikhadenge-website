@@ -1,0 +1,396 @@
+/* Contacts V20 live hardening.
+ * Route scoped only. The shared V19 sidebar is intentionally untouched and remains the locked source of truth.
+ */
+
+body .sx-module > .sx-workspace {
+  min-width: 0 !important;
+  width: auto !important;
+  max-width: none !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+body .sx-module .sx-workspace-body {
+  min-width: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  overflow-x: hidden !important;
+}
+
+body .sx-module .contact-manager-v2 {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  isolation: isolate;
+  gap: 18px !important;
+}
+
+body .sx-module .contact-intelligence-head {
+  min-height: 148px !important;
+  padding: 24px 26px !important;
+  border-radius: 20px !important;
+  border-color: #e2e8f0 !important;
+  background:
+    radial-gradient(circle at 90% 15%, rgba(14, 165, 233, .11), transparent 23%),
+    radial-gradient(circle at 72% 85%, rgba(37, 99, 235, .10), transparent 28%),
+    linear-gradient(135deg, #ffffff 0%, #f8fbff 55%, #f4f8ff 100%) !important;
+  box-shadow: 0 18px 46px rgba(15, 23, 42, .055) !important;
+}
+
+body .sx-module .contact-intelligence-copy h2 {
+  max-width: 760px !important;
+  font-size: clamp(22px, 2.1vw, 30px) !important;
+  line-height: 1.08 !important;
+  letter-spacing: -.035em !important;
+}
+
+body .sx-module .contact-intelligence-copy p {
+  max-width: 760px !important;
+  font-size: 13px !important;
+  line-height: 1.65 !important;
+}
+
+body .sx-module .contact-intelligence-signal {
+  flex-basis: 216px !important;
+  min-height: 100px !important;
+  border-radius: 16px !important;
+  background: rgba(255, 255, 255, .82) !important;
+}
+
+body .sx-module .contact-metrics-v2 {
+  gap: 12px !important;
+}
+
+body .sx-module .contact-metrics-v2 > article {
+  min-height: 96px !important;
+  padding: 16px !important;
+  border-radius: 15px !important;
+  border-color: #e4eaf2 !important;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, .04) !important;
+}
+
+body .sx-module .contact-workspace {
+  grid-template-columns: minmax(0, 1fr) 340px !important;
+  gap: 14px !important;
+  min-width: 0 !important;
+}
+
+body .sx-module .contact-workspace-main,
+body .sx-module .contact-editor-v2 {
+  border-radius: 18px !important;
+  border-color: #e3e8ef !important;
+  box-shadow: 0 15px 38px rgba(15, 23, 42, .05) !important;
+}
+
+body .sx-module .contact-segments {
+  min-height: 50px !important;
+  padding: 8px 12px !important;
+  gap: 4px !important;
+  background: #fbfcfe !important;
+}
+
+body .sx-module .contact-segments button {
+  min-height: 33px !important;
+  border-radius: 9px !important;
+  padding-inline: 11px !important;
+}
+
+body .sx-module .contact-toolbar-v2 {
+  grid-template-columns: minmax(280px, 1fr) auto auto !important;
+  gap: 10px !important;
+  padding: 12px !important;
+}
+
+body .sx-module .contact-search-v2 {
+  height: 40px !important;
+  border-radius: 10px !important;
+  background: #fbfcfe !important;
+}
+
+body .sx-module .contact-search-v2 input {
+  font-size: 12px !important;
+}
+
+body .sx-module .contact-filter-row select,
+body .sx-module .contact-toolbar-actions-v2 button,
+body .sx-module .contact-toolbar-actions-v2 a,
+body .sx-module .contact-icon-button {
+  min-height: 38px !important;
+  font-size: 11px !important;
+}
+
+body .sx-module .contact-add-button {
+  padding-inline: 13px !important;
+  border: 1px solid #1d4ed8 !important;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+  color: #fff !important;
+  box-shadow: 0 7px 16px rgba(37, 99, 235, .16) !important;
+}
+
+body .sx-module .contact-directory-v2 > header {
+  min-height: 58px !important;
+  padding: 11px 14px !important;
+}
+
+body .sx-module .contact-table-wrap-v2 {
+  min-width: 0 !important;
+  overflow: auto !important;
+  scrollbar-width: thin !important;
+  scrollbar-color: #cbd5e1 transparent !important;
+}
+
+body .sx-module .contact-table-v2 {
+  width: 100% !important;
+  min-width: 1010px !important;
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+}
+
+body .sx-module .contact-table-v2 th {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 2 !important;
+  height: 42px !important;
+  padding: 0 11px !important;
+  background: #f8fafc !important;
+  color: #64748b !important;
+  font-size: 10px !important;
+  font-weight: 800 !important;
+  letter-spacing: .045em !important;
+  text-transform: uppercase !important;
+  border-bottom: 1px solid #e8edf3 !important;
+}
+
+body .sx-module .contact-table-v2 td {
+  padding: 12px 11px !important;
+  border-bottom: 1px solid #edf1f5 !important;
+  vertical-align: middle !important;
+}
+
+body .sx-module .contact-table-v2 tbody tr {
+  background: #fff !important;
+  transition: background .15s ease, box-shadow .15s ease !important;
+}
+
+body .sx-module .contact-table-v2 tbody tr:hover {
+  background: #f8fbff !important;
+}
+
+body .sx-module .contact-table-v2 tbody tr.selected {
+  background: #f2f7ff !important;
+  box-shadow: inset 3px 0 0 #2563eb !important;
+}
+
+body .sx-module .contact-person-cell {
+  min-width: 220px !important;
+}
+
+body .sx-module .contact-avatar {
+  flex: 0 0 38px !important;
+  width: 38px !important;
+  height: 38px !important;
+  border-radius: 12px !important;
+  background: linear-gradient(145deg, #eff6ff, #e0e7ff) !important;
+  border: 1px solid #dbe7ff !important;
+  color: #1d4ed8 !important;
+  box-shadow: none !important;
+}
+
+body .sx-module .contact-editor-v2 {
+  min-width: 0 !important;
+  background: #fff !important;
+  overflow: hidden !important;
+}
+
+body .sx-module .contact-editor-empty {
+  min-height: 420px !important;
+  padding: 30px 24px !important;
+}
+
+body .sx-module .contact-editor-head {
+  min-height: 64px !important;
+  padding: 13px 15px !important;
+  background: #fbfcfe !important;
+  border-bottom: 1px solid #edf1f5 !important;
+}
+
+body .sx-module .contact-profile-summary,
+body .sx-module .contact-smart-summary,
+body .sx-module .contact-editor-form {
+  margin-inline: 14px !important;
+}
+
+body .sx-module .contact-empty {
+  min-height: 340px !important;
+  display: grid !important;
+  place-items: center !important;
+  align-content: center !important;
+  gap: 8px !important;
+  padding: 28px !important;
+  color: #64748b !important;
+}
+
+body .sx-module .contact-loading {
+  min-height: 420px !important;
+}
+
+/* Large desktop: retain the exact shared sidebar width and let Contacts use the remaining canvas. */
+@media (min-width: 1280px) {
+  body .sx-module {
+    grid-template-columns: var(--sd-sidebar-width-v19, 264px) minmax(0, 1fr) !important;
+  }
+
+  body .sx-module .sx-workspace-body {
+    padding: 18px 20px 24px !important;
+  }
+}
+
+@media (max-width: 1439px) {
+  body .sx-module .contact-workspace {
+    grid-template-columns: minmax(0, 1fr) 310px !important;
+  }
+
+  body .sx-module .contact-toolbar-v2 {
+    grid-template-columns: minmax(230px, 1fr) auto !important;
+  }
+
+  body .sx-module .contact-toolbar-actions-v2 {
+    grid-column: 1 / -1 !important;
+    justify-content: flex-end !important;
+  }
+}
+
+@media (max-width: 1180px) {
+  body .sx-module .contact-metrics-v2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  body .sx-module .contact-workspace {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  body .sx-module .contact-editor-v2 {
+    display: none !important;
+  }
+
+  body .sx-module .contact-editor-v2.is-open {
+    position: fixed !important;
+    inset: 72px 18px 18px auto !important;
+    z-index: 80 !important;
+    display: block !important;
+    width: min(430px, calc(100vw - 36px)) !important;
+    max-height: calc(100vh - 90px) !important;
+    overflow-y: auto !important;
+    box-shadow: 0 24px 70px rgba(15, 23, 42, .22) !important;
+  }
+}
+
+@media (max-width: 1023px) {
+  body .sx-module .contact-manager-v2 {
+    display: grid !important;
+    width: 100% !important;
+  }
+
+  body .sx-module .contact-intelligence-head {
+    min-height: auto !important;
+    padding: 18px !important;
+  }
+
+  body .sx-module .contact-intelligence-signal {
+    flex-basis: 175px !important;
+  }
+}
+
+@media (max-width: 767px) {
+  body .sx-module .sx-workspace-body {
+    padding: 10px !important;
+  }
+
+  body .sx-module .contact-manager-v2 {
+    gap: 12px !important;
+  }
+
+  body .sx-module .contact-intelligence-head {
+    display: grid !important;
+    gap: 14px !important;
+    border-radius: 16px !important;
+  }
+
+  body .sx-module .contact-intelligence-signal {
+    min-height: 82px !important;
+    width: 100% !important;
+  }
+
+  body .sx-module .contact-metrics-v2 {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+  }
+
+  body .sx-module .contact-metrics-v2 > article {
+    min-height: 84px !important;
+    padding: 12px !important;
+  }
+
+  body .sx-module .contact-toolbar-v2 {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+
+  body .sx-module .contact-filter-row,
+  body .sx-module .contact-toolbar-actions-v2 {
+    width: 100% !important;
+    flex-wrap: wrap !important;
+  }
+
+  body .sx-module .contact-filter-row select {
+    flex: 1 1 150px !important;
+    max-width: none !important;
+  }
+
+  body .sx-module .contact-toolbar-actions-v2 {
+    grid-column: auto !important;
+    justify-content: stretch !important;
+  }
+
+  body .sx-module .contact-toolbar-actions-v2 > * {
+    flex: 1 1 auto !important;
+  }
+
+  body .sx-module .contact-directory-v2 > header {
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+
+  body .sx-module .contact-editor-v2.is-open {
+    inset: 56px 8px 8px !important;
+    width: auto !important;
+    max-height: calc(100vh - 64px) !important;
+    border-radius: 16px !important;
+  }
+}
+
+@media (max-width: 520px) {
+  body .sx-module .contact-metrics-v2 {
+    grid-template-columns: 1fr !important;
+  }
+
+  body .sx-module .contact-intelligence-copy h2 {
+    font-size: 21px !important;
+  }
+
+  body .sx-module .contact-table-v2 {
+    min-width: 920px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body .sx-module .contact-table-v2 tbody tr,
+  body .sx-module .contact-metrics-v2 > article {
+    transition: none !important;
+  }
+}
