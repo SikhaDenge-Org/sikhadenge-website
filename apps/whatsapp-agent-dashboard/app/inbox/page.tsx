@@ -10,6 +10,7 @@ import "../core-workflows-refinement.css";
 import "../inbox-enterprise-final.css";
 import "../page02-inbox-standard-v16.css";
 import "../page02-inbox-future-v17.css";
+import "../page02-right-intelligence-v18.css";
 
 export const dynamic = "force-dynamic";
 
