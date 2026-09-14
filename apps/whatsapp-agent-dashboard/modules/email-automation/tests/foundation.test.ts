@@ -1,8 +1,18 @@
 import assert from "node:assert/strict";
 
+import { isChannelType } from "@/modules/channels/core/contracts/channel";
+
 import { missingEmailPhaseDependencies } from "../application/phase-manifest";
 import { resolveEmailSender } from "../domain/sender-resolution";
 import type { EmailSenderIdentity } from "../domain/contracts";
+import {
+  decryptEmailCredential,
+  encryptEmailCredential,
+} from "../infrastructure/credential-crypto";
+import {
+  createGmailOAuthState,
+  verifyGmailOAuthState,
+} from "../providers/gmail/oauth-state";
 import { gmailSendAsToSenderIdentity } from "../providers/gmail/sender-mapping";
 import { assertEmailTemplateTransition } from "../templates/contracts";
 
@@ -106,10 +116,81 @@ function testGmailAliasNormalization() {
   assert.equal(mapped.isDefault, true);
 }
 
+function testEmailIsFirstClassChannel() {
+  assert.equal(isChannelType("EMAIL"), true);
+}
+
+function testCredentialEncryption() {
+  const key = Buffer.alloc(32, 7);
+  const encrypted = encryptEmailCredential({
+    plaintext: "oauth-secret-token",
+    key,
+    keyVersion: "email-v1",
+  });
+  assert.notEqual(encrypted.ciphertext, "oauth-secret-token");
+  assert.equal(
+    decryptEmailCredential({ encrypted, key, expectedKeyVersion: "email-v1" }),
+    "oauth-secret-token",
+  );
+
+  assert.throws(
+    () =>
+      decryptEmailCredential({
+        encrypted: {
+          ...encrypted,
+          authenticationTag: Buffer.alloc(16, 1).toString("base64"),
+        },
+        key,
+      }),
+  );
+}
+
+function testOAuthStateSecurity() {
+  const secret = "email-oauth-state-secret-at-least-32-characters";
+  const issuedAt = Date.UTC(2026, 8, 14, 17, 0, 0);
+  const state = createGmailOAuthState({
+    workspaceId: "workspace-1",
+    secret,
+    now: issuedAt,
+  });
+  const verified = verifyGmailOAuthState({
+    state,
+    secret,
+    expectedWorkspaceId: "workspace-1",
+    now: issuedAt + 60_000,
+  });
+  assert.equal(verified.workspaceId, "workspace-1");
+
+  assert.throws(
+    () =>
+      verifyGmailOAuthState({
+        state,
+        secret,
+        expectedWorkspaceId: "workspace-2",
+        now: issuedAt + 60_000,
+      }),
+    /workspace does not match/i,
+  );
+
+  assert.throws(
+    () =>
+      verifyGmailOAuthState({
+        state,
+        secret,
+        expectedWorkspaceId: "workspace-1",
+        now: issuedAt + 11 * 60_000,
+      }),
+    /expired/i,
+  );
+}
+
 testSenderPrecedence();
 testUnverifiedOverrideFailsClosed();
 testPhaseDependencies();
 testTemplateApprovalLifecycle();
 testGmailAliasNormalization();
+testEmailIsFirstClassChannel();
+testCredentialEncryption();
+testOAuthStateSecurity();
 
 console.log("Email automation E0/E1 foundation contracts: PASS");
