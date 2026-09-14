@@ -11,6 +11,7 @@ import "../inbox-enterprise-final.css";
 import "../page02-inbox-standard-v16.css";
 import "../page02-inbox-future-v17.css";
 import "../page02-right-intelligence-v18.css";
+import "../page02-right-intelligence-v19.css";
 
 export const dynamic = "force-dynamic";
 
