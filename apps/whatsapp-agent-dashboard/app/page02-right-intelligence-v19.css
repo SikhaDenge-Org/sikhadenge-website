@@ -1,0 +1,384 @@
+/*
+ * Page 02 — Lead Intelligence Rail V19
+ * Scope: ONLY the three right-rail cards requested by the user:
+ *   1) contact identity, 2) qualification score, 3) lead profile.
+ * No layout/nav/chat/API/AI/lead logic changes.
+ */
+
+.sx-inbox > .sx-details {
+  --ri19-ink: #0b1739;
+  --ri19-text: #30486c;
+  --ri19-muted: #8291aa;
+  --ri19-line: #dce6f2;
+  --ri19-blue: #1768ff;
+  --ri19-cyan: #13bff5;
+  --ri19-violet: #7357f6;
+  --ri19-soft-blue: #eef6ff;
+  --ri19-shadow: 0 18px 42px rgba(25, 61, 112, .085), 0 2px 8px rgba(25, 61, 112, .035);
+}
+
+/* --------------------------------------------------------------------------
+   1. Contact / Lead identity
+   -------------------------------------------------------------------------- */
+.sx-inbox > .sx-details > .sx-profile {
+  isolation: isolate;
+  position: relative;
+  overflow: hidden;
+  gap: 7px !important;
+  margin-bottom: 14px !important;
+  padding: 20px 18px 18px !important;
+  border: 1px solid transparent !important;
+  border-radius: 22px !important;
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(135deg, rgba(19,191,245,.40), rgba(23,104,255,.18) 48%, rgba(115,87,246,.26)) border-box !important;
+  box-shadow: var(--ri19-shadow) !important;
+}
+
+.sx-inbox > .sx-details > .sx-profile::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  width: 170px;
+  height: 170px;
+  right: -72px;
+  top: -86px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(19,191,245,.12) 0%, rgba(23,104,255,.06) 43%, transparent 72%);
+  pointer-events: none;
+}
+
+.sx-inbox > .sx-details > .sx-profile::before {
+  content: "Lead intelligence" !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px !important;
+  margin: 0 auto 9px !important;
+  padding: 0 10px !important;
+  border: 1px solid #cfe2ff !important;
+  border-radius: 999px !important;
+  background: linear-gradient(180deg, #f7fbff 0%, #edf6ff 100%) !important;
+  color: #1d63c9 !important;
+  font-size: 9.5px !important;
+  font-weight: 850 !important;
+  line-height: 1 !important;
+  letter-spacing: .095em !important;
+  text-transform: uppercase !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 4px 12px rgba(23,104,255,.07);
+}
+
+.sx-inbox > .sx-details > .sx-profile .sx-avatar-xl {
+  width: 82px !important;
+  height: 82px !important;
+  flex: 0 0 82px !important;
+  margin: 2px auto 10px !important;
+  border: 5px solid #fff !important;
+  outline: 1px solid #cddcf0 !important;
+  background:
+    radial-gradient(circle at 32% 26%, rgba(255,255,255,.95), transparent 32%),
+    linear-gradient(145deg, #eaf3ff 0%, #f2f5ff 52%, #eef8ff 100%) !important;
+  color: #3a5cad !important;
+  font-size: 20px !important;
+  font-weight: 820 !important;
+  box-shadow:
+    0 0 0 5px rgba(23,104,255,.035),
+    0 12px 28px rgba(26,67,125,.14) !important;
+}
+
+.sx-inbox > .sx-details > .sx-profile .sx-avatar-xl .sx-chanbadge {
+  right: -2px !important;
+  bottom: 1px !important;
+  min-width: 25px !important;
+  min-height: 25px !important;
+  padding: 3px !important;
+  border: 3px solid #fff !important;
+  border-radius: 9px !important;
+  box-shadow: 0 5px 12px rgba(20,55,100,.12) !important;
+}
+
+.sx-inbox > .sx-details > .sx-profile h2 {
+  max-width: 100%;
+  margin: 0 !important;
+  overflow-wrap: anywhere;
+  color: var(--ri19-ink) !important;
+  font-size: 17px !important;
+  line-height: 23px !important;
+  font-weight: 840 !important;
+  letter-spacing: -.025em !important;
+}
+
+.sx-inbox > .sx-details > .sx-profile .sx-profile-handle {
+  margin: 1px 0 8px !important;
+  color: #7e8da6 !important;
+  font-size: 11.5px !important;
+  line-height: 18px !important;
+  font-weight: 520 !important;
+  letter-spacing: .005em;
+}
+
+.sx-inbox > .sx-details > .sx-profile .sx-temp {
+  min-height: 25px !important;
+  padding: 4px 10px !important;
+  border: 1px solid #dfe6ef !important;
+  border-radius: 999px !important;
+  background: #f1f4f8 !important;
+  color: #6f7c91 !important;
+  font-size: 9.5px !important;
+  font-weight: 850 !important;
+  line-height: 1 !important;
+  letter-spacing: .07em !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.85) !important;
+}
+
+.sx-inbox > .sx-details > .sx-profile .sx-temp-hot {
+  border-color: #ffd7df !important;
+  background: #fff1f3 !important;
+  color: #d9425f !important;
+}
+
+.sx-inbox > .sx-details > .sx-profile .sx-temp-warm {
+  border-color: #ffe4bf !important;
+  background: #fff8eb !important;
+  color: #b76a10 !important;
+}
+
+/* --------------------------------------------------------------------------
+   2. Qualification score
+   -------------------------------------------------------------------------- */
+.sx-inbox > .sx-details > .sx-score {
+  position: relative;
+  overflow: hidden;
+  display: grid !important;
+  grid-template-columns: 88px minmax(0, 1fr) !important;
+  align-items: center !important;
+  gap: 14px !important;
+  min-height: 116px;
+  margin-bottom: 14px !important;
+  padding: 14px 16px !important;
+  border: 1px solid transparent !important;
+  border-radius: 20px !important;
+  background:
+    linear-gradient(180deg, #ffffff 0%, #fbfdff 100%) padding-box,
+    linear-gradient(135deg, rgba(23,104,255,.20), rgba(19,191,245,.12), rgba(115,87,246,.16)) border-box !important;
+  box-shadow: 0 14px 34px rgba(25,61,112,.07), 0 2px 6px rgba(25,61,112,.025) !important;
+}
+
+.sx-inbox > .sx-details > .sx-score::after {
+  content: "";
+  position: absolute;
+  right: -34px;
+  bottom: -48px;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(115,87,246,.07), transparent 68%);
+  pointer-events: none;
+}
+
+.sx-inbox > .sx-details > .sx-score .sx-score-ring {
+  width: 84px !important;
+  height: 84px !important;
+  border-radius: 50% !important;
+  background:
+    conic-gradient(from -90deg,
+      var(--ri19-blue) 0%,
+      var(--ri19-cyan) calc(var(--sx-score, 0) * 1%),
+      #e8eef6 0) !important;
+  filter: none !important;
+  box-shadow:
+    0 0 0 6px rgba(23,104,255,.035),
+    0 10px 24px rgba(23,104,255,.12) !important;
+}
+
+.sx-inbox > .sx-details > .sx-score .sx-score-ring::before {
+  inset: 7px !important;
+  background: linear-gradient(145deg, #ffffff 0%, #fbfdff 100%) !important;
+  box-shadow: inset 0 0 0 1px #edf2f7;
+}
+
+.sx-inbox > .sx-details > .sx-score .sx-score-ring strong {
+  color: #17243f !important;
+  font-size: 22px !important;
+  line-height: 22px !important;
+  font-weight: 880 !important;
+  letter-spacing: -.035em;
+}
+
+.sx-inbox > .sx-details > .sx-score .sx-score-ring span {
+  margin-top: 25px;
+  color: #98a5b8 !important;
+  font-size: 9.5px !important;
+  line-height: 12px !important;
+  font-weight: 760 !important;
+}
+
+.sx-inbox > .sx-details > .sx-score > div:last-child {
+  min-width: 0;
+}
+
+.sx-inbox > .sx-details > .sx-score > div:last-child > strong {
+  display: block;
+  margin: 0 0 5px !important;
+  color: #1d3152 !important;
+  font-size: 12.5px !important;
+  line-height: 18px !important;
+  font-weight: 840 !important;
+  letter-spacing: -.005em;
+}
+
+.sx-inbox > .sx-details > .sx-score p {
+  max-width: 190px;
+  margin: 0 !important;
+  color: #7888a2 !important;
+  font-size: 10.8px !important;
+  line-height: 1.5 !important;
+}
+
+/* --------------------------------------------------------------------------
+   3. Lead profile only — intentionally does NOT style Next Actions.
+   -------------------------------------------------------------------------- */
+.sx-inbox > .sx-details > .sx-score + .sx-detail-block {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 14px !important;
+  padding: 15px 16px 10px !important;
+  border: 1px solid transparent !important;
+  border-radius: 20px !important;
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(135deg, rgba(23,104,255,.18), rgba(219,228,241,.78) 42%, rgba(19,191,245,.18)) border-box !important;
+  box-shadow: 0 14px 34px rgba(25,61,112,.065), 0 2px 6px rgba(25,61,112,.025) !important;
+}
+
+.sx-inbox > .sx-details > .sx-score + .sx-detail-block::after {
+  content: "";
+  position: absolute;
+  top: -62px;
+  left: -54px;
+  width: 126px;
+  height: 126px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(19,191,245,.075), transparent 70%);
+  pointer-events: none;
+}
+
+.sx-inbox > .sx-details > .sx-score + .sx-detail-block > h3 {
+  position: relative;
+  z-index: 1;
+  display: flex !important;
+  align-items: center !important;
+  min-height: 31px !important;
+  margin: 0 0 4px !important;
+  padding: 0 0 11px !important;
+  border-bottom: 1px solid #e9eff6 !important;
+  color: #213755 !important;
+  font-size: 10.5px !important;
+  line-height: 16px !important;
+  font-weight: 900 !important;
+  letter-spacing: .09em !important;
+  text-transform: uppercase !important;
+}
+
+.sx-inbox > .sx-details > .sx-score + .sx-detail-block > h3::before {
+  width: 7px !important;
+  height: 7px !important;
+  margin-right: 8px !important;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--ri19-cyan), var(--ri19-blue)) !important;
+  box-shadow: 0 0 0 5px rgba(23,104,255,.07) !important;
+}
+
+.sx-inbox > .sx-details > .sx-score + .sx-detail-block .sx-detail-list {
+  display: grid !important;
+  gap: 0 !important;
+  margin: 0 !important;
+}
+
+.sx-inbox > .sx-details > .sx-score + .sx-detail-block .sx-detail-list > div {
+  display: grid !important;
+  grid-template-columns: minmax(76px, .78fr) minmax(0, 1.22fr) !important;
+  align-items: center !important;
+  gap: 12px !important;
+  min-height: 41px;
+  padding: 9px 1px !important;
+  border-bottom: 1px solid #edf2f7 !important;
+  transition: background-color 120ms ease, padding 120ms ease;
+}
+
+.sx-inbox > .sx-details > .sx-score + .sx-detail-block .sx-detail-list > div:last-child {
+  border-bottom: 0 !important;
+}
+
+@media (hover: hover) {
+  .sx-inbox > .sx-details > .sx-score + .sx-detail-block .sx-detail-list > div:hover {
+    margin-inline: -7px;
+    padding-inline: 8px !important;
+    border-radius: 9px;
+    background: #f8fbff;
+  }
+}
+
+.sx-inbox > .sx-details > .sx-score + .sx-detail-block .sx-detail-list dt {
+  color: #8796ad !important;
+  font-size: 10.8px !important;
+  line-height: 16px !important;
+  font-weight: 560 !important;
+}
+
+.sx-inbox > .sx-details > .sx-score + .sx-detail-block .sx-detail-list dd {
+  min-width: 0;
+  margin: 0 !important;
+  overflow-wrap: anywhere;
+  color: #2f486b !important;
+  font-size: 11.2px !important;
+  line-height: 17px !important;
+  font-weight: 740 !important;
+  text-align: right !important;
+  text-transform: none !important;
+}
+
+/* Keep the same refined hierarchy when the right rail becomes a tablet/mobile slide-over. */
+@media (max-width: 1279px) {
+  .sx-inbox > .sx-details > .sx-profile,
+  .sx-inbox > .sx-details > .sx-score,
+  .sx-inbox > .sx-details > .sx-score + .sx-detail-block {
+    box-shadow: 0 12px 28px rgba(25,61,112,.07) !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .sx-inbox > .sx-details > .sx-profile {
+    padding: 18px 15px 16px !important;
+    border-radius: 18px !important;
+  }
+
+  .sx-inbox > .sx-details > .sx-score {
+    grid-template-columns: 80px minmax(0, 1fr) !important;
+    min-height: 108px;
+    padding: 13px 14px !important;
+    border-radius: 18px !important;
+  }
+
+  .sx-inbox > .sx-details > .sx-score .sx-score-ring {
+    width: 76px !important;
+    height: 76px !important;
+  }
+
+  .sx-inbox > .sx-details > .sx-score + .sx-detail-block {
+    padding: 14px 14px 9px !important;
+    border-radius: 18px !important;
+  }
+
+  .sx-inbox > .sx-details > .sx-score + .sx-detail-block .sx-detail-list > div {
+    min-height: 40px;
+    gap: 10px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sx-inbox > .sx-details > .sx-score + .sx-detail-block .sx-detail-list > div {
+    transition: none !important;
+  }
+}
