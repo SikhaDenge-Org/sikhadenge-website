@@ -53,7 +53,7 @@ jobs:
           access=/var/log/nginx/access.log
           if [[ -f "$access" ]]; then
             awk '
-              $4 ~ /14\/Sep\/2026:18:08:(2[0-9]|3[0-4])/ {
+              ($4 ~ /14\/Sep\/2026:18:08:(2[0-9]|3[0-4])/ || $4 ~ /14\/Sep\/2026:23:38:(2[0-9]|3[0-4])/) {
                 req=$7; sub(/\?.*/,"",req);
                 if (req=="/login" || req=="/inbox" || req=="/contacts" || req=="/analytics" || req=="/api/webhooks/whatsapp") {
                   key=req "|" $9; count[key]++
