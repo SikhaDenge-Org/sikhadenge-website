@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: whatsapp-agent-production
+  group: whatsapp-agent-operator-evidence-e71d1ee
   cancel-in-progress: false
 
 jobs:
