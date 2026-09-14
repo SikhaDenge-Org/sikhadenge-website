@@ -1,0 +1,1040 @@
+/*
+ * Page 02 — SikhaDenge EngageOS Unified Inbox
+ * Visual-only enterprise layer. No API/data/business logic is changed here.
+ *
+ * Design contract
+ * - Sidebar is the persistent product shell and is visually independent from page content.
+ * - Main inbox remains light for long-session readability.
+ * - Uses Page 01 brand tokens and the canonical SikhaDenge logo asset.
+ * - 8px spacing rhythm, 12–14px controls/cards, WCAG-friendly focus states.
+ */
+
+.sx-inbox {
+  --p02-navy-950: #020b26;
+  --p02-navy-900: #061334;
+  --p02-navy-850: #071a45;
+  --p02-blue: #0ea5ff;
+  --p02-blue-2: #1768ff;
+  --p02-cyan: #16d7ff;
+  --p02-violet: #7a35ff;
+  --p02-text: #071338;
+  --p02-text-2: #24395f;
+  --p02-muted: #6577ad;
+  --p02-line: #d9e3f6;
+  --p02-line-soft: #e8eef8;
+  --p02-canvas: #f6f9fe;
+  --p02-surface: #ffffff;
+  --p02-soft-blue: #f1f6ff;
+  --p02-success: #16b977;
+  --p02-warning: #e79b23;
+  --p02-danger: #ef5261;
+  --p02-radius-sm: 9px;
+  --p02-radius: 12px;
+  --p02-radius-lg: 16px;
+  --p02-shadow-sm: 0 1px 2px rgba(7, 19, 56, 0.04), 0 4px 14px rgba(7, 19, 56, 0.025);
+  --p02-shadow: 0 8px 30px rgba(7, 19, 56, 0.075);
+
+  height: 100dvh;
+  min-height: 720px;
+  overflow: hidden;
+  background: var(--p02-canvas);
+  color: var(--p02-text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  grid-template-columns: 232px minmax(314px, 350px) minmax(480px, 1fr) minmax(300px, 330px) !important;
+}
+
+/* --------------------------------------------------------------------------
+   Persistent product shell — separate from Page 02 content
+   -------------------------------------------------------------------------- */
+.sx-inbox > .sx-side {
+  position: relative;
+  z-index: 60;
+  min-width: 0;
+  padding: 18px 12px 14px;
+  background:
+    radial-gradient(circle at 28% 7%, rgba(14, 165, 255, 0.16), transparent 26%),
+    linear-gradient(180deg, var(--p02-navy-900) 0%, var(--p02-navy-950) 100%);
+  border-right: 1px solid rgba(126, 170, 255, 0.18);
+  box-shadow: 12px 0 32px rgba(2, 11, 38, 0.14);
+  color: #eaf3ff;
+}
+
+/* Use the repository's canonical full logo asset instead of a redrawn wordmark. */
+.sx-inbox .sx-brand {
+  display: flex;
+  width: 100%;
+  min-height: 58px;
+  align-items: center;
+  justify-content: flex-start;
+  margin: 0 0 12px;
+  padding: 5px 8px;
+  border-radius: 12px;
+  text-decoration: none;
+}
+
+.sx-inbox .sx-brand-logo {
+  display: block;
+  width: 174px;
+  height: 46px;
+  flex: 0 0 174px;
+  background: url('/sikhadenge-official-logo.png') left center / contain no-repeat;
+}
+
+.sx-inbox .sx-brand-logo img,
+.sx-inbox .sx-brand-name {
+  display: none !important;
+}
+
+.sx-inbox .sx-side-scroll {
+  padding: 2px 0 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(141, 178, 255, 0.28) transparent;
+}
+
+.sx-inbox .sx-nav {
+  gap: 3px;
+}
+
+.sx-inbox .sx-navitem {
+  min-height: 40px;
+  gap: 11px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #d9e7ff;
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 570;
+  letter-spacing: -0.005em;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
+}
+
+.sx-inbox .sx-navitem:hover {
+  color: #ffffff;
+  background: rgba(77, 142, 255, 0.09);
+  border-color: rgba(113, 168, 255, 0.12);
+}
+
+.sx-inbox .sx-navitem.is-active,
+.sx-inbox .sx-navitem.active {
+  color: #ffffff;
+  background: linear-gradient(90deg, rgba(14, 165, 255, 0.25), rgba(23, 104, 255, 0.18));
+  border-color: rgba(55, 164, 255, 0.46);
+  box-shadow: inset 3px 0 0 var(--p02-cyan), 0 6px 18px rgba(0, 74, 255, 0.12);
+}
+
+.sx-inbox .sx-navic {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  color: #bcd5ff;
+}
+
+.sx-inbox .sx-navitem.is-active .sx-navic,
+.sx-inbox .sx-navitem.active .sx-navic {
+  color: #55ddff;
+}
+
+.sx-inbox .sx-navic svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.75;
+}
+
+.sx-inbox .sx-navbadge {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  display: inline-grid;
+  place-items: center;
+  margin-left: auto;
+  border-radius: 999px;
+  background: #1478ff;
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 750;
+}
+
+.sx-inbox .sx-side-label {
+  margin: 17px 10px 7px;
+  color: #62cfff;
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.105em;
+  text-transform: uppercase;
+}
+
+.sx-inbox .sx-side .sx-channels-list {
+  gap: 3px;
+}
+
+.sx-inbox .sx-side .sx-chan {
+  min-height: 34px;
+  gap: 8px;
+  padding: 0 10px;
+  border-radius: 9px;
+  color: #cbdcf8;
+  font-size: 11.5px;
+}
+
+.sx-inbox .sx-side .sx-chan:hover {
+  background: rgba(77, 142, 255, 0.08);
+}
+
+.sx-inbox .sx-side .sx-chan-ic {
+  width: 17px;
+  height: 17px;
+}
+
+.sx-inbox .sx-side .sx-chan-ic svg {
+  width: 17px;
+  height: 17px;
+}
+
+.sx-inbox .sx-side .sx-chan-tag {
+  margin-left: auto;
+  color: #57cfff;
+  font-size: 9.5px;
+  font-weight: 650;
+}
+
+.sx-inbox .sx-side-foot {
+  padding-top: 10px;
+  border-top: 1px solid rgba(145, 181, 255, 0.12);
+}
+
+.sx-inbox .sx-account {
+  min-height: 51px;
+  margin-top: 7px;
+  padding: 7px 8px;
+  border: 1px solid rgba(145, 181, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.sx-inbox .sx-acc-avatar {
+  width: 34px;
+  height: 34px;
+  font-size: 11px;
+}
+
+.sx-inbox .sx-acc-copy strong {
+  color: #f6f9ff;
+  font-size: 11.5px;
+  font-weight: 680;
+}
+
+.sx-inbox .sx-acc-copy small {
+  color: #8fa6ca;
+  font-size: 9.5px;
+}
+
+/* --------------------------------------------------------------------------
+   Conversation list — Page 02 starts here visually
+   -------------------------------------------------------------------------- */
+.sx-inbox > .sx-list {
+  min-width: 0;
+  background: #ffffff;
+  border-right: 1px solid var(--p02-line-soft);
+  box-shadow: 4px 0 18px rgba(7, 19, 56, 0.025);
+}
+
+.sx-inbox .sx-list-head {
+  padding: 19px 16px 12px;
+  background: rgba(255, 255, 255, 0.985);
+  border-bottom: 0;
+}
+
+.sx-inbox .sx-list-title {
+  margin: 0;
+  color: var(--p02-text);
+  font-size: 24px;
+  line-height: 1.12;
+  font-weight: 760;
+  letter-spacing: -0.035em;
+}
+
+.sx-inbox .sx-list-sub {
+  margin-top: 4px;
+  color: var(--p02-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.sx-inbox .sx-live {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid #caefe0;
+  border-radius: 999px;
+  background: #ecfbf5;
+  color: #15845a;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.sx-inbox .sx-live i {
+  background: #18bf78;
+  box-shadow: 0 0 0 3px rgba(24, 191, 120, 0.11);
+}
+
+.sx-inbox .sx-iconbtn,
+.sx-inbox .sx-btn-outline,
+.sx-inbox .sx-lead-btn {
+  min-width: 36px;
+  min-height: 36px;
+  border-color: var(--p02-line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--p02-text-2);
+  box-shadow: 0 1px 2px rgba(7, 19, 56, 0.02);
+}
+
+.sx-inbox .sx-channels-chips {
+  padding: 0 14px 10px;
+  background: #fff;
+}
+
+.sx-inbox .sx-channels-chips .sx-channels-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  overflow: visible;
+}
+
+.sx-inbox .sx-channels-chips .sx-chan {
+  min-width: 0;
+  min-height: 45px;
+  padding: 7px 8px;
+  border: 1px solid var(--p02-line-soft);
+  border-radius: 10px;
+  background: #fbfdff;
+  color: var(--p02-text-2);
+  box-shadow: 0 1px 2px rgba(7, 19, 56, 0.018);
+}
+
+.sx-inbox .sx-channels-chips .sx-chan.is-active {
+  border-color: #9fdcff;
+  background: #f4fbff;
+  box-shadow: inset 0 0 0 1px rgba(14, 165, 255, 0.08);
+}
+
+.sx-inbox .sx-channels-chips .sx-chan-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10.5px;
+  font-weight: 650;
+}
+
+.sx-inbox .sx-channels-chips .sx-chan-tag,
+.sx-inbox .sx-channels-chips .sx-chan-count {
+  font-size: 9px;
+}
+
+.sx-inbox .sx-search {
+  min-height: 38px;
+  margin: 0 14px 10px;
+  padding: 0 12px;
+  border: 1px solid var(--p02-line);
+  border-radius: 10px;
+  background: #fbfdff;
+  color: #8292b3;
+}
+
+.sx-inbox .sx-search:focus-within {
+  border-color: #7ccaff;
+  box-shadow: 0 0 0 3px rgba(14, 165, 255, 0.10);
+  background: #fff;
+}
+
+.sx-inbox .sx-search input {
+  color: var(--p02-text);
+  font-size: 12px;
+}
+
+.sx-inbox .sx-tabs {
+  margin: 0 14px 10px;
+  gap: 4px;
+  border-radius: 10px;
+}
+
+.sx-inbox .sx-tabs button {
+  min-height: 33px;
+  border-radius: 8px;
+  color: #65789d;
+  font-size: 10.5px;
+  font-weight: 650;
+}
+
+.sx-inbox .sx-tabs button.is-active {
+  color: #0b68e8;
+  background: #edf5ff;
+  box-shadow: inset 0 0 0 1px #cfe2ff;
+}
+
+.sx-inbox .sx-convos {
+  padding: 0 7px 10px;
+}
+
+.sx-inbox .sx-convo.conversation-item {
+  min-height: 72px;
+  margin: 2px 0;
+  padding: 9px 8px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+}
+
+.sx-inbox .sx-convo.conversation-item:hover {
+  border-color: #e1eaf8;
+  background: #f8fbff;
+}
+
+.sx-inbox .sx-convo.conversation-item.is-selected,
+.sx-inbox .sx-convo.conversation-item.selected {
+  border-color: #c6dcff;
+  background: linear-gradient(90deg, #edf5ff 0%, #f7fbff 100%);
+  box-shadow: inset 3px 0 0 #1768ff, 0 2px 10px rgba(23, 104, 255, 0.055);
+}
+
+.sx-inbox .sx-avatar {
+  width: 38px;
+  height: 38px;
+  border: 1px solid #dce7f6;
+  background: #e9f2ff;
+  color: #28527f;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.sx-inbox .sx-convo-top strong {
+  color: #0a1b3f;
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.sx-inbox .sx-convo-top time,
+.sx-inbox .sx-convo-prev,
+.sx-inbox .sx-convo-stage {
+  font-size: 10px;
+}
+
+.sx-inbox .sx-convo-prev {
+  color: #6c7e9f;
+  line-height: 1.35;
+}
+
+.sx-inbox .sx-temp {
+  min-height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 760;
+}
+
+.sx-inbox .sx-unread {
+  min-width: 20px;
+  height: 20px;
+  background: #1378ff;
+  font-size: 9px;
+}
+
+/* --------------------------------------------------------------------------
+   Conversation workspace
+   -------------------------------------------------------------------------- */
+.sx-inbox > .sx-chat {
+  min-width: 0;
+  background: #ffffff;
+}
+
+.sx-inbox .sx-chat-head {
+  min-height: 76px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--p02-line-soft);
+  background: rgba(255, 255, 255, 0.985);
+  backdrop-filter: blur(14px);
+}
+
+.sx-inbox .sx-avatar-lg {
+  width: 42px;
+  height: 42px;
+}
+
+.sx-inbox .sx-chat-ident h2 {
+  color: var(--p02-text);
+  font-size: 14px;
+  line-height: 1.2;
+  font-weight: 740;
+}
+
+.sx-inbox .sx-chat-ident p {
+  margin-top: 4px;
+  color: var(--p02-muted);
+  font-size: 10.5px;
+}
+
+.sx-inbox .sx-chat-chip {
+  min-height: 23px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #f5f8fd;
+}
+
+.sx-inbox .sx-switch {
+  min-height: 36px;
+  padding: 0 9px;
+  border: 1px solid var(--p02-line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--p02-text-2);
+  font-size: 10.5px;
+  font-weight: 680;
+}
+
+.sx-inbox .sx-btn-outline,
+.sx-inbox .sx-lead-btn {
+  padding: 0 11px;
+  color: #145fd5;
+  font-size: 10.5px;
+  font-weight: 690;
+}
+
+.sx-inbox .sx-context {
+  min-height: 43px;
+  gap: 7px;
+  padding: 7px 14px;
+  border-bottom: 1px solid #e7edf8;
+  background: #fbfdff;
+}
+
+.sx-inbox .sx-context span {
+  min-height: 27px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #e0e9f7;
+  border-radius: 8px;
+  background: #fff;
+  color: #53698e;
+  font-size: 10px;
+  font-weight: 570;
+}
+
+.sx-inbox .sx-context .sx-context-ok {
+  border-color: #d3e4ff;
+  background: #f2f7ff;
+  color: #245fc1;
+}
+
+.sx-inbox .sx-messages {
+  padding: 22px 20px 18px;
+  background:
+    radial-gradient(circle at 46% 0, rgba(14, 165, 255, 0.055), transparent 32%),
+    linear-gradient(180deg, #fbfdff 0%, #f4f8fd 100%);
+}
+
+.sx-inbox .sx-daydivider {
+  margin-bottom: 18px;
+}
+
+.sx-inbox .sx-daydivider span {
+  padding: 5px 11px;
+  border: 1px solid #e3eaf5;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #7a8aa7;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.sx-inbox .sx-bubble {
+  max-width: min(70%, 610px);
+  padding: 10px 12px;
+  border-radius: 13px;
+  box-shadow: var(--p02-shadow-sm);
+  color: #12284e;
+  font-size: 12px;
+  line-height: 1.48;
+}
+
+.sx-inbox .sx-msgrow.inbound .sx-bubble {
+  border: 1px solid #e3eaf4;
+  background: #fff;
+}
+
+.sx-inbox .sx-msgrow.outbound .sx-bubble {
+  border: 1px solid #cfe2ff;
+  background: linear-gradient(145deg, #f0f7ff, #e8f3ff);
+}
+
+.sx-inbox .sx-bubble small {
+  color: #1467df;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.sx-inbox .sx-bubble time {
+  color: #8091ae;
+  font-size: 8.5px;
+}
+
+.sx-inbox .sx-agentnote {
+  width: min(92%, 720px);
+  margin-top: 14px;
+  padding: 11px 13px;
+  border: 1px solid #d7e1ff;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #ffffff 0%, #f6f4ff 100%);
+  box-shadow: var(--p02-shadow-sm);
+}
+
+.sx-inbox .sx-agentnote strong {
+  color: #37258f;
+  font-size: 10.5px;
+}
+
+.sx-inbox .sx-agentnote p {
+  color: #5d6f91;
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.sx-inbox .sx-composer {
+  padding: 10px 13px 12px;
+  border-top: 1px solid var(--p02-line-soft);
+  background: rgba(255, 255, 255, 0.99);
+}
+
+.sx-inbox .sx-composer-row {
+  min-height: 49px;
+  padding: 4px 5px;
+  border: 1px solid #dbe5f4;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 3px 14px rgba(7, 19, 56, 0.045);
+}
+
+.sx-inbox .sx-composer-row:focus-within {
+  border-color: #8dccff;
+  box-shadow: 0 0 0 3px rgba(14, 165, 255, 0.09), 0 3px 14px rgba(7, 19, 56, 0.04);
+}
+
+.sx-inbox .sx-composer-row textarea {
+  min-height: 39px;
+  color: var(--p02-text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.sx-inbox .sx-composer-tool {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  border-radius: 9px;
+  color: #567096;
+}
+
+.sx-inbox .sx-send {
+  width: 42px;
+  height: 38px;
+  min-width: 42px;
+  min-height: 38px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #1676ff, #075eea);
+  box-shadow: 0 7px 16px rgba(23, 104, 255, 0.22);
+}
+
+.sx-inbox .sx-composer-channel-note,
+.sx-inbox .sx-composer-note {
+  color: #8191ac;
+  font-size: 9px;
+}
+
+/* --------------------------------------------------------------------------
+   Lead intelligence rail
+   -------------------------------------------------------------------------- */
+.sx-inbox > .sx-details {
+  min-width: 0;
+  padding: 13px 12px 15px;
+  border-left: 1px solid var(--p02-line-soft);
+  background: #fbfdff;
+}
+
+.sx-inbox .sx-profile {
+  padding: 4px 4px 12px;
+  border-bottom: 1px solid #e6edf7;
+}
+
+.sx-inbox .sx-avatar-xl {
+  width: 48px;
+  height: 48px;
+}
+
+.sx-inbox .sx-profile h2 {
+  margin-top: 8px;
+  color: var(--p02-text);
+  font-size: 14px;
+  font-weight: 740;
+}
+
+.sx-inbox .sx-profile-handle {
+  color: var(--p02-muted);
+  font-size: 10px;
+}
+
+.sx-inbox .sx-ai-summary,
+.sx-inbox .sx-score,
+.sx-inbox .sx-detail-block,
+.sx-inbox .sx-learning {
+  margin-top: 9px;
+  padding: 12px;
+  border: 1px solid #e1e9f5;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(7, 19, 56, 0.02);
+}
+
+.sx-inbox .sx-ai-summary {
+  border-color: #dce0ff;
+  background: linear-gradient(145deg, #ffffff, #f8f7ff);
+}
+
+.sx-inbox .sx-ai-summary-head,
+.sx-inbox .sx-detail-block h3 {
+  color: #172a4f;
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.sx-inbox .sx-ai-summary-head {
+  color: #4f2fc2;
+}
+
+.sx-inbox .sx-ai-summary p,
+.sx-inbox .sx-score p,
+.sx-inbox .sx-learning p {
+  color: #667a9d;
+  font-size: 10px;
+  line-height: 1.48;
+}
+
+.sx-inbox .sx-score-ring {
+  width: 70px;
+  height: 70px;
+}
+
+.sx-inbox .sx-score-ring strong {
+  font-size: 20px;
+}
+
+.sx-inbox .sx-score > div:last-child > strong,
+.sx-inbox .sx-learning > strong {
+  color: #15294e;
+  font-size: 10.5px;
+  font-weight: 720;
+}
+
+.sx-inbox .sx-detail-list {
+  margin-top: 9px;
+  gap: 7px;
+}
+
+.sx-inbox .sx-detail-list dt,
+.sx-inbox .sx-detail-list dd {
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.sx-inbox .sx-detail-list dt {
+  color: #7486a6;
+}
+
+.sx-inbox .sx-detail-list dd {
+  color: #1e355b;
+  font-weight: 600;
+}
+
+.sx-inbox .sx-action {
+  min-height: 27px;
+  color: #31486e;
+  font-size: 10px;
+}
+
+.sx-inbox .sx-action input {
+  width: 15px;
+  height: 15px;
+  accent-color: #1768ff;
+}
+
+.sx-inbox .sx-learning {
+  border-color: #ded8ff;
+  background: linear-gradient(150deg, #fbfaff, #f2f0ff);
+}
+
+.sx-inbox .sx-learning-tag {
+  color: #6743d5;
+  font-size: 9px;
+  font-weight: 760;
+  text-transform: uppercase;
+  letter-spacing: 0.055em;
+}
+
+/* --------------------------------------------------------------------------
+   Focus / interaction standards
+   -------------------------------------------------------------------------- */
+.sx-inbox :where(a, button, input, textarea):focus-visible {
+  outline: 2px solid #0ea5ff;
+  outline-offset: 2px;
+}
+
+.sx-inbox button:disabled,
+.sx-inbox input:disabled,
+.sx-inbox textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+/* --------------------------------------------------------------------------
+   Large desktop tuning
+   -------------------------------------------------------------------------- */
+@media (min-width: 1440px) {
+  .sx-inbox {
+    grid-template-columns: 238px minmax(330px, 365px) minmax(560px, 1fr) minmax(310px, 345px) !important;
+  }
+
+  .sx-inbox .sx-messages {
+    padding-left: 26px;
+    padding-right: 26px;
+  }
+}
+
+@media (min-width: 1800px) {
+  .sx-inbox {
+    grid-template-columns: 244px 380px minmax(660px, 1fr) 360px !important;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Tablet: icon rail + list + chat; intelligence becomes the existing slide-over.
+   -------------------------------------------------------------------------- */
+@media (min-width: 768px) and (max-width: 1179px) {
+  .sx-inbox {
+    min-height: 640px;
+    grid-template-columns: 72px minmax(286px, 318px) minmax(0, 1fr) !important;
+  }
+
+  .sx-inbox > .sx-side {
+    padding: 12px 8px;
+  }
+
+  .sx-inbox .sx-brand {
+    justify-content: center;
+    min-height: 48px;
+    padding: 3px;
+  }
+
+  .sx-inbox .sx-brand-logo {
+    width: 38px;
+    height: 38px;
+    flex-basis: 38px;
+    background-image: url('/sikhadenge-app-mark-v3.svg');
+    background-position: center;
+  }
+
+  .sx-inbox .sx-navitem {
+    width: 48px;
+    min-height: 42px;
+    justify-content: center;
+    margin-inline: auto;
+    padding: 0;
+  }
+
+  .sx-inbox .sx-navlabel,
+  .sx-inbox .sx-navbadge,
+  .sx-inbox .sx-side-label,
+  .sx-inbox .sx-side .sx-chan-name,
+  .sx-inbox .sx-side .sx-chan-tag,
+  .sx-inbox .sx-acc-copy {
+    display: none !important;
+  }
+
+  .sx-inbox .sx-side .sx-chan {
+    width: 42px;
+    min-height: 38px;
+    justify-content: center;
+    margin-inline: auto;
+    padding: 0;
+  }
+
+  .sx-inbox .sx-side-foot .sx-navitem {
+    margin-inline: auto;
+  }
+
+  .sx-inbox .sx-account {
+    justify-content: center;
+    padding: 6px 3px;
+  }
+
+  .sx-inbox .sx-chat-head {
+    min-height: 72px;
+    padding: 10px 12px;
+  }
+
+  .sx-inbox .sx-chat-actions {
+    padding-left: 47px;
+  }
+
+  .sx-inbox .sx-bubble {
+    max-width: 82%;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Mobile: product shell becomes a 5-destination bottom dock. Existing app state
+   still controls list/chat/detail navigation, while this layer standardizes size.
+   -------------------------------------------------------------------------- */
+@media (max-width: 767px) {
+  body .sx-inbox {
+    min-height: 100dvh !important;
+    height: 100dvh !important;
+    background: #fff;
+  }
+
+  body .sx-inbox > .sx-side {
+    padding: 4px 5px calc(4px + env(safe-area-inset-bottom)) !important;
+    border-right: 0;
+    border-top: 1px solid #dce5f2;
+    background: rgba(4, 17, 52, 0.985);
+    box-shadow: 0 -8px 28px rgba(2, 11, 38, 0.14);
+    backdrop-filter: blur(14px);
+  }
+
+  body .sx-inbox .sx-list-head {
+    padding: 14px 13px 9px;
+  }
+
+  body .sx-inbox .sx-list-title {
+    font-size: 21px;
+  }
+
+  body .sx-inbox .sx-channels-chips {
+    padding: 0 11px 8px;
+  }
+
+  body .sx-inbox .sx-channels-chips .sx-channels-list {
+    display: flex;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  body .sx-inbox .sx-channels-chips .sx-channels-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  body .sx-inbox .sx-channels-chips .sx-chan {
+    flex: 0 0 106px;
+    min-height: 42px;
+  }
+
+  body .sx-inbox .sx-search,
+  body .sx-inbox .sx-tabs {
+    margin-left: 11px;
+    margin-right: 11px;
+  }
+
+  body .sx-inbox .sx-convos {
+    padding-inline: 5px;
+  }
+
+  body .sx-inbox .sx-convo.conversation-item {
+    min-height: 70px;
+    border-radius: 10px;
+  }
+
+  body .sx-inbox .sx-chat-head {
+    min-height: 0;
+    padding: 9px 10px;
+  }
+
+  body .sx-inbox .sx-context {
+    min-height: 36px;
+    padding: 6px 10px;
+  }
+
+  body .sx-inbox .sx-context span {
+    min-height: 25px;
+  }
+
+  body .sx-inbox .sx-messages {
+    padding: 14px 11px 18px;
+  }
+
+  body .sx-inbox .sx-bubble {
+    max-width: 88%;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  body .sx-inbox.sx-mv-chat .sx-composer {
+    padding: 7px 9px 8px !important;
+  }
+
+  body .sx-inbox.sx-mv-chat .sx-composer-row {
+    min-height: 52px;
+    border-radius: 14px;
+  }
+
+  body .sx-inbox.sx-mv-chat .sx-composer-row textarea {
+    font-size: 16px !important; /* avoids iOS zoom */
+  }
+
+  body .sx-inbox.sx-mv-chat .sx-composer-tool {
+    width: 40px !important;
+    height: 40px !important;
+    min-width: 40px !important;
+    min-height: 40px !important;
+  }
+
+  body .sx-inbox.sx-mv-chat .sx-send {
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+
+  body .sx-inbox .sx-details {
+    padding: 12px 11px calc(76px + env(safe-area-inset-bottom));
+    background: #fbfdff;
+  }
+}
+
+/* Compact phones */
+@media (max-width: 390px) {
+  body .sx-inbox .sx-list-title {
+    font-size: 20px;
+  }
+
+  body .sx-inbox .sx-chat-ident .sx-chat-phone {
+    display: none;
+  }
+
+  body .sx-inbox .sx-btn-outline,
+  body .sx-inbox .sx-lead-btn {
+    padding-inline: 8px;
+  }
+}
+
+/* Reduced motion respects OS preference. */
+@media (prefers-reduced-motion: reduce) {
+  .sx-inbox *,
+  .sx-inbox *::before,
+  .sx-inbox *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
