@@ -16,4 +16,7 @@ export * from "./infrastructure/prisma-credential-vault";
 export * from "./infrastructure/prisma-email-connection-repository";
 export * from "./infrastructure/prisma-email-sender-repository";
 export * from "./templates/contracts";
+export * from "./templates/blocks";
+export * from "./templates/validation";
+export * from "./templates/render";
 export * from "./automation/contracts";
