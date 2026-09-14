@@ -1,0 +1,274 @@
+/* SIDEBAR STANDARD V19 — production hardening after V18.
+ * Loaded last. Fixes legacy cascade collisions that painted oversized blue
+ * icon blocks, and restores the intended module workspace on tablet/mobile.
+ */
+
+:root {
+  --sd-sidebar-width-v19: 264px;
+  --sd-sidebar-row-v19: 40px;
+  --sd-sidebar-icon-v19: 18px;
+  --sd-sidebar-text-v19: #344054;
+  --sd-sidebar-muted-v19: #667085;
+  --sd-sidebar-line-v19: #e6eaf0;
+  --sd-sidebar-soft-v19: #f7f9fc;
+  --sd-sidebar-active-v19: #eef4ff;
+  --sd-sidebar-active-border-v19: #d8e5ff;
+  --sd-sidebar-blue-v19: #2563eb;
+}
+
+@media (min-width: 1280px) {
+  body .sx-module {
+    grid-template-columns: var(--sd-sidebar-width-v19) minmax(0, 1fr) !important;
+  }
+
+  body .sx-inbox {
+    grid-template-columns:
+      var(--sd-sidebar-width-v19)
+      minmax(312px, 344px)
+      minmax(360px, 1fr)
+      minmax(296px, 324px) !important;
+  }
+}
+
+body :is(.sx-module, .sx-inbox) > .sx-side {
+  padding: 14px 12px 12px !important;
+  background: #ffffff !important;
+  border-right: 1px solid var(--sd-sidebar-line-v19) !important;
+  box-shadow: 8px 0 30px rgba(15, 23, 42, 0.025) !important;
+}
+
+body :is(.sx-module, .sx-inbox) .sx-side .brand-mark.sx-brand {
+  min-height: 58px !important;
+  height: 58px !important;
+  margin: 0 0 10px !important;
+  padding: 6px 10px !important;
+}
+
+body :is(.sx-module, .sx-inbox) .sx-brand-logo {
+  width: 178px !important;
+  flex-basis: 178px !important;
+  height: 42px !important;
+}
+
+/* The previous cascade let legacy pseudo/icon rules paint 50px blue tiles.
+ * V19 removes decorative pseudo icons entirely and uses the real inline SVGs.
+ */
+body :is(.sx-module, .sx-inbox) .sx-side .rail-button::before,
+body :is(.sx-module, .sx-inbox) .sx-side .rail-button::after {
+  content: none !important;
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  -webkit-mask-image: none !important;
+  mask-image: none !important;
+}
+
+body :is(.sx-module, .sx-inbox) .sx-side .rail-button {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 10px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: var(--sd-sidebar-row-v19) !important;
+  height: var(--sd-sidebar-row-v19) !important;
+  padding: 0 10px !important;
+  border: 1px solid transparent !important;
+  border-radius: 10px !important;
+  background: transparent !important;
+  color: var(--sd-sidebar-muted-v19) !important;
+  box-shadow: none !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  letter-spacing: -0.01em !important;
+  transform: none !important;
+}
+
+body :is(.sx-module, .sx-inbox) .sx-side .rail-button:hover {
+  background: var(--sd-sidebar-soft-v19) !important;
+  border-color: #eef1f5 !important;
+  color: var(--sd-sidebar-text-v19) !important;
+}
+
+body :is(.sx-module, .sx-inbox) .sx-side .rail-button:is(.active, .is-active) {
+  background: linear-gradient(135deg, #f4f7ff 0%, var(--sd-sidebar-active-v19) 100%) !important;
+  border-color: var(--sd-sidebar-active-border-v19) !important;
+  color: #1d4ed8 !important;
+  box-shadow: inset 3px 0 0 var(--sd-sidebar-blue-v19), 0 1px 2px rgba(37, 99, 235, 0.04) !important;
+  font-weight: 700 !important;
+}
+
+body :is(.sx-module, .sx-inbox) .sx-side .sx-navic,
+body :is(.sx-module, .sx-inbox) .sx-side .sidebar-menu-icon {
+  display: inline-grid !important;
+  place-items: center !important;
+  flex: 0 0 22px !important;
+  width: 22px !important;
+  min-width: 22px !important;
+  height: 22px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: currentColor !important;
+  box-shadow: none !important;
+  filter: none !important;
+  opacity: 1 !important;
+  overflow: visible !important;
+}
+
+body :is(.sx-module, .sx-inbox) .sx-side .sx-navic svg,
+body :is(.sx-module, .sx-inbox) .sx-side .sidebar-menu-icon svg {
+  display: block !important;
+  width: var(--sd-sidebar-icon-v19) !important;
+  min-width: var(--sd-sidebar-icon-v19) !important;
+  height: var(--sd-sidebar-icon-v19) !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+}
+
+body :is(.sx-module, .sx-inbox) .sx-side .sx-navlabel {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+body :is(.sx-module, .sx-inbox) .sx-side .sx-side-label {
+  margin: 16px 10px 7px !important;
+  color: #98a2b3 !important;
+  font-size: 10px !important;
+  font-weight: 800 !important;
+  line-height: 1.2 !important;
+  letter-spacing: 0.09em !important;
+}
+
+body :is(.sx-module, .sx-inbox) .sx-side .sx-channels-list {
+  gap: 2px !important;
+}
+
+body :is(.sx-module, .sx-inbox) .sx-side .sx-chan {
+  min-height: var(--sd-sidebar-row-v19) !important;
+  height: var(--sd-sidebar-row-v19) !important;
+  padding: 0 10px !important;
+  gap: 10px !important;
+  border-radius: 10px !important;
+  font-size: 14px !important;
+}
+
+body :is(.sx-module, .sx-inbox) .sx-side .sx-chan-ic {
+  flex: 0 0 22px !important;
+  width: 22px !important;
+  height: 22px !important;
+  filter: none !important;
+}
+
+body :is(.sx-module, .sx-inbox) .sx-side .sx-chan-ic svg {
+  width: 18px !important;
+  height: 18px !important;
+}
+
+body :is(.sx-module, .sx-inbox) .sx-side .sx-chan.is-active {
+  background: var(--sd-sidebar-active-v19) !important;
+  border-color: var(--sd-sidebar-active-border-v19) !important;
+  color: #1d4ed8 !important;
+  box-shadow: inset 3px 0 0 var(--sd-sidebar-blue-v19) !important;
+}
+
+body :is(.sx-module, .sx-inbox) .sx-side .sx-side-scroll {
+  padding: 2px 3px 8px 1px !important;
+  scrollbar-width: thin !important;
+  scrollbar-color: #cbd5e1 transparent !important;
+}
+
+body :is(.sx-module, .sx-inbox) .sx-side .sx-side-foot {
+  margin-top: 6px !important;
+  padding: 9px 1px 0 !important;
+  border-top: 1px solid var(--sd-sidebar-line-v19) !important;
+}
+
+body :is(.sx-module, .sx-inbox) .sx-side .sx-account {
+  min-height: 60px !important;
+  padding: 8px !important;
+  border: 1px solid #e5eaf1 !important;
+  border-radius: 14px !important;
+  background: linear-gradient(135deg, #fbfcff, #f7f9fc) !important;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.035) !important;
+}
+
+/* Critical regression fix: module pages were still showing the permanent
+ * desktop rail below 1024px because V18's display:flex!important loaded last.
+ * That consumed nearly the entire phone viewport and made Contacts appear blank.
+ */
+@media (max-width: 1023px) {
+  body .sx-module {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  body .sx-module > .sx-side {
+    display: none !important;
+  }
+
+  body .sx-module > .sx-workspace {
+    display: block !important;
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    overflow-x: hidden !important;
+  }
+
+  body .sx-module .sx-workspace-body {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+}
+
+@media (max-width: 767px) {
+  body .sx-module .sx-workspace-head {
+    min-width: 0 !important;
+    padding-inline: 12px !important;
+  }
+
+  body .sx-module .sx-workspace-body {
+    padding-inline: 10px !important;
+  }
+
+  body .sx-module .contact-manager,
+  body .sx-module .contact-manager-v2 {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body :is(.sx-module, .sx-inbox) .sx-side .rail-button,
+  body :is(.sx-module, .sx-inbox) .sx-side .sx-chan {
+    transition: none !important;
+  }
+}
