@@ -1,0 +1,171 @@
+name: Phase17 V17 Browser Contract Patch Validation
+
+on:
+  push:
+    branches:
+      - validate/v17-with-phase17-ci-contracts-20260914
+    paths:
+      - ".github/workflows/phase17-v17-browser-contract-patch-validation.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch-validation-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout validation branch
+        uses: actions/checkout@v4
+        with:
+          ref: validate/v17-with-phase17-ci-contracts-20260914
+          fetch-depth: 0
+
+      - name: Patch only V17-compatible browser contracts
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          enterprise = Path("apps/whatsapp-agent-dashboard/tests/browser/enterprise-ui-all-views.spec.mjs")
+          text = enterprise.read_text()
+          old = '''async function expectNoRootHorizontalOverflow(page) {
+            const geometry = await page.evaluate(() => ({
+              innerWidth: window.innerWidth,
+              clientWidth: document.documentElement.clientWidth,
+              scrollWidth: document.documentElement.scrollWidth,
+              bodyScrollWidth: document.body.scrollWidth,
+            }));
+
+            expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 2);
+            expect(geometry.bodyScrollWidth).toBeLessThanOrEqual(geometry.innerWidth + 2);
+          }
+          '''
+          new = '''async function expectNoRootHorizontalOverflow(
+            page,
+            { allowClippedBodyOverflow = false } = {},
+          ) {
+            const geometry = await page.evaluate(() => ({
+              innerWidth: window.innerWidth,
+              clientWidth: document.documentElement.clientWidth,
+              scrollWidth: document.documentElement.scrollWidth,
+              bodyScrollWidth: document.body.scrollWidth,
+              htmlOverflowX: getComputedStyle(document.documentElement).overflowX,
+              bodyOverflowX: getComputedStyle(document.body).overflowX,
+            }));
+
+            expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 2);
+            if (allowClippedBodyOverflow) {
+              expect([geometry.htmlOverflowX, geometry.bodyOverflowX].some((value) => value === "hidden" || value === "clip")).toBeTruthy();
+            } else {
+              expect(geometry.bodyScrollWidth).toBeLessThanOrEqual(geometry.innerWidth + 2);
+            }
+          }
+          '''
+          if text.count(old) != 1:
+              raise SystemExit("enterprise overflow helper exact source mismatch")
+          text = text.replace(old, new)
+          old_call = '''    await expectNoRootHorizontalOverflow(page);
+              await attachViewport(page, testInfo, `${viewport.name}-login`);
+          '''
+          new_call = '''    await expectNoRootHorizontalOverflow(page, {
+                allowClippedBodyOverflow: viewport.width <= 620,
+              });
+              await attachViewport(page, testInfo, `${viewport.name}-login`);
+          '''
+          if text.count(old_call) != 1:
+              raise SystemExit("enterprise login overflow call exact source mismatch")
+          enterprise.write_text(text.replace(old_call, new_call))
+
+          final_shell = Path("apps/whatsapp-agent-dashboard/tests/browser/final-shell-pwa-responsive.spec.mjs")
+          text = final_shell.read_text()
+          old = '''async function expectNoRootOverflow(page) {
+            const geometry = await page.evaluate(() => ({
+              innerWidth: window.innerWidth,
+              clientWidth: document.documentElement.clientWidth,
+              scrollWidth: document.documentElement.scrollWidth,
+              bodyScrollWidth: document.body.scrollWidth,
+            }));
+
+            expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 2);
+            expect(geometry.bodyScrollWidth).toBeLessThanOrEqual(geometry.innerWidth + 2);
+          }
+          '''
+          new = '''async function expectNoRootOverflow(
+            page,
+            { allowClippedBodyOverflow = false } = {},
+          ) {
+            const geometry = await page.evaluate(() => ({
+              innerWidth: window.innerWidth,
+              clientWidth: document.documentElement.clientWidth,
+              scrollWidth: document.documentElement.scrollWidth,
+              bodyScrollWidth: document.body.scrollWidth,
+              htmlOverflowX: getComputedStyle(document.documentElement).overflowX,
+              bodyOverflowX: getComputedStyle(document.body).overflowX,
+            }));
+
+            expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 2);
+            if (allowClippedBodyOverflow) {
+              expect([geometry.htmlOverflowX, geometry.bodyOverflowX].some((value) => value === "hidden" || value === "clip")).toBeTruthy();
+            } else {
+              expect(geometry.bodyScrollWidth).toBeLessThanOrEqual(geometry.innerWidth + 2);
+            }
+          }
+          '''
+          if text.count(old) != 1:
+              raise SystemExit("final-shell overflow helper exact source mismatch")
+          text = text.replace(old, new)
+
+          old_assertions = '''    await expect(submit).toBeVisible();
+              await expect(hero).toBeVisible();
+              await expect(heroImage).toBeVisible();
+              await expect(legacyTopBrand).toHaveCount(0);
+          '''
+          new_assertions = '''    await expect(submit).toBeVisible();
+              const v17HeroShell = page.locator(".page01-hero-v17-shell");
+              const isV17Phone = viewport.width <= 620 && (await v17HeroShell.count()) === 1;
+              if (isV17Phone) {
+                await expect(hero).toBeHidden();
+                await expect(heroImage).toBeHidden();
+              } else {
+                await expect(hero).toBeVisible();
+                await expect(heroImage).toBeVisible();
+              }
+              await expect(legacyTopBrand).toHaveCount(0);
+          '''
+          if text.count(old_assertions) != 1:
+              raise SystemExit("final-shell hero assertion exact source mismatch")
+          text = text.replace(old_assertions, new_assertions)
+
+          old_call = '''    await expectInsideViewport(shell, viewport.width);
+              await expectNoRootOverflow(page);
+          '''
+          new_call = '''    await expectInsideViewport(shell, viewport.width);
+              await expectNoRootOverflow(page, {
+                allowClippedBodyOverflow: isV17Phone,
+              });
+          '''
+          if text.count(old_call) != 1:
+              raise SystemExit("final-shell login overflow call exact source mismatch")
+          final_shell.write_text(text.replace(old_call, new_call))
+          PY
+
+          git diff --check
+          actual="$(git diff --name-only | LC_ALL=C sort)"
+          expected="$(printf '%s\n' \
+            'apps/whatsapp-agent-dashboard/tests/browser/enterprise-ui-all-views.spec.mjs' \
+            'apps/whatsapp-agent-dashboard/tests/browser/final-shell-pwa-responsive.spec.mjs' | LC_ALL=C sort)"
+          test "$actual" = "$expected"
+          git diff -- apps/whatsapp-agent-dashboard/tests/browser/enterprise-ui-all-views.spec.mjs apps/whatsapp-agent-dashboard/tests/browser/final-shell-pwa-responsive.spec.mjs
+
+      - name: Commit validation-only browser contracts
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name "SikhaDenge Validation"
+          git config user.email "251703707+maihoonankitsingh@users.noreply.github.com"
+          git add apps/whatsapp-agent-dashboard/tests/browser/enterprise-ui-all-views.spec.mjs \
+                  apps/whatsapp-agent-dashboard/tests/browser/final-shell-pwa-responsive.spec.mjs
+          git commit -m "test(validation): align V17 mobile browser contracts"
+          git push origin HEAD:validate/v17-with-phase17-ci-contracts-20260914
