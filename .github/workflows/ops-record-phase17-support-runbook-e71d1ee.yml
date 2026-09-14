@@ -1,0 +1,160 @@
+name: Ops Record Phase17 Support Runbook Active e71d1ee
+
+on:
+  push:
+    branches:
+      - ops/operator-evidence-support-runbook-e71d1ee-20260915
+    paths:
+      - ".github/workflows/ops-record-phase17-support-runbook-e71d1ee.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  record-support-runbook-active:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: whatsapp-agent-production
+    concurrency:
+      group: whatsapp-agent-production
+      cancel-in-progress: false
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_SHA: e71d1ee579c6f72020639230a341e4e008ae9af6
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+      WORKSPACE_ID: engagews_default
+      OPERATOR_DISPLAY_NAME: Ankit Singh
+      PROOF_COMMIT_SHA: 30e0ca962844c477a703e6627a5bf2d419edbf81
+
+    steps:
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then SSH_PORT=22; fi
+          echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Record exact-SHA support runbook operator evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_SHA='$EXPECTED_SHA' RELEASE_BRANCH='$RELEASE_BRANCH' WORKSPACE_ID='$WORKSPACE_ID' OPERATOR_DISPLAY_NAME='$OPERATOR_DISPLAY_NAME' PROOF_COMMIT_SHA='$PROOF_COMMIT_SHA' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          A=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          E="$A/.env"
+          cd "$A"
+
+          envv() {
+            node - "$E" "$1" <<'NODE'
+          const fs=require('node:fs'); const [file,key]=process.argv.slice(2);
+          for(const raw of fs.readFileSync(file,'utf8').split(/\r?\n/)){
+            let line=raw.trim(); if(!line||line.startsWith('#')) continue;
+            if(line.startsWith('export ')) line=line.slice(7).trim();
+            const i=line.indexOf('='); if(i<1||line.slice(0,i).trim()!==key) continue;
+            let value=line.slice(i+1).trim();
+            if(value.length>=2&&((value.startsWith('"')&&value.endsWith('"'))||(value.startsWith("'")&&value.endsWith("'")))) value=value.slice(1,-1);
+            process.stdout.write(value); process.exit(0);
+          }
+          process.exit(1);
+          NODE
+          }
+
+          git fetch origin "+refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH" >/dev/null 2>&1
+          release_sha="$(git rev-parse "refs/remotes/origin/$RELEASE_BRANCH")"
+          live_sha="$(git rev-parse HEAD)"
+          dirty_count="$(git status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          pm2_state="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(String(p?.pm2_env?.status||"missing"))})')"
+          login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login || true)"
+          printf 'PRECHECK_RELEASE_SHA=%s\nPRECHECK_LIVE_SHA=%s\nPRECHECK_TRACKED_DIRTY_COUNT=%s\nPRECHECK_PM2_STATE=%s\nPRECHECK_LOGIN_HTTP=%s\n' "$release_sha" "$live_sha" "$dirty_count" "$pm2_state" "$login_http"
+          test "$release_sha" = "$EXPECTED_SHA"
+          test "$live_sha" = "$EXPECTED_SHA"
+          test "$dirty_count" = "0"
+          test "$pm2_state" = "online"
+          test "$login_http" = "200"
+          test -x ./node_modules/.bin/tsx
+
+          database_url="$(envv DATABASE_URL)"
+          DB="$(node scripts/prisma-postgres-cli-url.mjs "$database_url")"
+          q(){ PGOPTIONS='-c default_transaction_read_only=on' psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "$1"; }
+
+          actor_rows="$(q "SELECT u.id FROM \"DashboardUser\" u JOIN \"EngageWorkspaceMembership\" m ON m.\"userId\"=u.id WHERE m.\"workspaceId\"='$WORKSPACE_ID' AND m.\"isActive\"=true AND u.\"isActive\"=true AND lower(trim(u.name))=lower(trim('$OPERATOR_DISPLAY_NAME')) ORDER BY u.id;")"
+          actor_count="$(printf '%s\n' "$actor_rows" | sed '/^$/d' | wc -l | tr -d ' ')"
+          printf 'OPERATOR_IDENTITY_MATCH_COUNT=%s\n' "$actor_count"
+          test "$actor_count" = "1"
+          actor_id="$(printf '%s\n' "$actor_rows" | head -n1)"
+          test -n "$actor_id"
+
+          proof_ref="github:SikhaDenge-Org/sikhadenge-website@$PROOF_COMMIT_SHA:.github/phase17-operator-evidence/support-runbook-active-e71d1ee.md"
+          existing_gate_count="$(q "SELECT COUNT(*) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='$WORKSPACE_ID' AND action='PHASE17_SUPPORT_RUNBOOK_ACTIVE' AND outcome='VERIFIED' AND \"entityType\"='CONTROLLED_LAUNCH_GOVERNANCE' AND \"entityId\"='$EXPECTED_SHA' AND \"reasonCode\"='OPERATOR_VERIFIED_EXACT_SHA' AND metadata->>'runbookStatus'='ACTIVE' AND metadata->>'liveSha'='$EXPECTED_SHA';")"
+          printf 'PREEXISTING_SUPPORT_RUNBOOK_GATE_COUNT=%s\n' "$existing_gate_count"
+          if [[ "$existing_gate_count" != "0" ]]; then
+            test "$existing_gate_count" = "1"
+            echo 'PASS: PHASE17_SUPPORT_RUNBOOK_ACTIVE_ALREADY_PROVEN_EXACT_SHA'
+            exit 0
+          fi
+
+          verified_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          request_id="phase17-op-e71d1ee579c-support-runbook-${PROOF_COMMIT_SHA:0:12}"
+          common_env=(
+            NODE_ENV=production
+            DATABASE_URL="$database_url"
+            PHASE17_WORKSPACE_ID="$WORKSPACE_ID"
+            PHASE17_EXPECTED_LIVE_SHA="$EXPECTED_SHA"
+            PHASE17_OPERATOR_ACTOR_ID="$actor_id"
+            PHASE17_OPERATOR_PROOF_REF="$proof_ref"
+            PHASE17_OPERATOR_VERIFIED_AT="$verified_at"
+            PHASE17_OPERATOR_ATTESTATION="I_ATTEST_THIS_EVIDENCE_IS_REAL_AND_EXACT_SHA_BOUND"
+            PHASE17_OPERATOR_EVIDENCE_ACTION=PHASE17_SUPPORT_RUNBOOK_ACTIVE
+            PHASE17_OPERATOR_REQUEST_ID="$request_id"
+            PHASE17_OPERATOR_METADATA_JSON='{"runbookStatus":"ACTIVE"}'
+          )
+
+          env "${common_env[@]}" \
+            ./node_modules/.bin/tsx scripts/engageos-phase17-stage2-record-operator-evidence.ts
+          echo 'PASS: PHASE17_SUPPORT_RUNBOOK_ACTIVE_DRY_RUN_VALIDATED'
+
+          env "${common_env[@]}" \
+            PHASE17_OPERATOR_EVIDENCE_COMMIT=RECORD_OPERATOR_VERIFIED_EVIDENCE \
+            ./node_modules/.bin/tsx scripts/engageos-phase17-stage2-record-operator-evidence.ts
+
+          verified_count="$(q "SELECT COUNT(*) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='$WORKSPACE_ID' AND action='PHASE17_SUPPORT_RUNBOOK_ACTIVE' AND outcome='VERIFIED' AND \"entityType\"='CONTROLLED_LAUNCH_GOVERNANCE' AND \"entityId\"='$EXPECTED_SHA' AND \"reasonCode\"='OPERATOR_VERIFIED_EXACT_SHA' AND \"requestId\"='$request_id' AND \"actorId\"='$actor_id' AND metadata->>'liveSha'='$EXPECTED_SHA' AND metadata->>'proofRef'='$proof_ref' AND metadata->>'runbookStatus'='ACTIVE';")"
+          printf 'POSTWRITE_SUPPORT_RUNBOOK_EVIDENCE_COUNT=%s\n' "$verified_count"
+          test "$verified_count" = "1"
+
+          stage1_state="$(q "SELECT stage||'|'||mode||'|'||\"writePolicy\"||'|'||\"externalWritesAllowed\"::text||'|'||version::text FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='$WORKSPACE_ID';")"
+          transition_count="$(q "SELECT COUNT(*) FROM \"EngageControlledLaunchTransition\" WHERE \"workspaceId\"='$WORKSPACE_ID';")"
+          printf 'POSTWRITE_STAGE1_STATE=%s\nPOSTWRITE_TRANSITION_COUNT=%s\n' "$stage1_state" "$transition_count"
+          test "$stage1_state" = 'INTERNAL_TEST_IDENTITIES|SHADOW|NO_EXTERNAL_WRITES|false|1'
+          test "$transition_count" = '1'
+
+          git fetch origin "+refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH" >/dev/null 2>&1
+          post_release_sha="$(git rev-parse "refs/remotes/origin/$RELEASE_BRANCH")"
+          post_live_sha="$(git rev-parse HEAD)"
+          post_dirty_count="$(git status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          printf 'POSTCHECK_RELEASE_SHA=%s\nPOSTCHECK_LIVE_SHA=%s\nPOSTCHECK_TRACKED_DIRTY_COUNT=%s\n' "$post_release_sha" "$post_live_sha" "$post_dirty_count"
+          test "$post_release_sha" = "$EXPECTED_SHA"
+          test "$post_live_sha" = "$EXPECTED_SHA"
+          test "$post_dirty_count" = "0"
+          echo 'PASS: PHASE17_SUPPORT_RUNBOOK_ACTIVE_RECORDED_EXACT_SHA'
+          REMOTE
