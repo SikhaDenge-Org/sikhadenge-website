@@ -88,7 +88,7 @@ command -v node >/dev/null
 command -v npm >/dev/null
 command -v pm2 >/dev/null
 command -v rsync >/dev/null
-install -d -m 700 "$BACKUP_DIR" "$STAGE_ROOT"
+install -d -m 700 "$BACKUP_DIR" "$STAGE_ROOT" "$STAGE_ROOT/apps"
 install -d -m 755 "$RELEASES_ROOT"
 
 PM2JSON="$(mktemp)"
