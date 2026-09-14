@@ -8,6 +8,7 @@
 // Production Batch exact-SHA companion trigger for Page02 V19 machine evidence — 2026-09-14
 // Atomic exact-SHA companion trigger for final Page02 V19 machine evidence — 2026-09-14
 // Clean atomic retry after production concurrency drain — 2026-09-14
+// Production Batch trigger for Page02 mobile Lead Intelligence drawer width fix — 2026-09-14
 const rawUrl = process.argv[2] ?? "";
 
 if (!rawUrl.trim()) {
