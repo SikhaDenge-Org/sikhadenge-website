@@ -177,3 +177,5 @@ const invertedObservation = derive([operatorVerified(STAGE2_GOVERNANCE_ACTIONS.o
 assert.equal(invertedObservation.observationWindowComplete, false);
 
 console.log("PASS: engageos phase17 stage2 governance evidence");
+
+// Read-only audit rerun marker — 2026-09-14 after exact-SHA machine evidence refresh.
