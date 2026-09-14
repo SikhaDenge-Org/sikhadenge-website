@@ -51,3 +51,4 @@ export * from "@/modules/release/application/phase-readiness";
 export * from "@/modules/release/application/release-exit-gate";
 export * from "@/modules/release/application/phase16-final-governance";
 export * from "@/modules/release/application/controlled-launch";
+export * from "@/modules/email-automation";
