@@ -258,7 +258,7 @@
   color: #203653 !important;
   font-size: 10px !important;
   font-weight: 900 !important;
-  letter-spacing: .085em;
+  letter-spacing: .085em !important;
   text-transform: uppercase;
 }
 
