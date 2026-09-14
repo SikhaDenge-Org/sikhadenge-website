@@ -3,6 +3,7 @@ import { DashboardRole } from "@prisma/client";
 import DashboardModuleShell from "../../components/navigation/DashboardModuleShell";
 import { requireDashboardUser } from "../../lib/auth/session";
 import EmailSenderManager from "../../modules/email-automation/ui/EmailSenderManager";
+import EmailTemplateStudio from "../../modules/email-automation/ui/EmailTemplateStudio";
 import "../dashboard-system.css";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +24,7 @@ export default async function EmailControlCenterPage() {
       userRole={user.role}
     >
       <EmailSenderManager />
+      <EmailTemplateStudio />
     </DashboardModuleShell>
   );
 }
