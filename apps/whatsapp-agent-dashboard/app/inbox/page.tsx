@@ -8,6 +8,7 @@ import {
 import "../inbox-rebuild.css";
 import "../core-workflows-refinement.css";
 import "../inbox-enterprise-final.css";
+import "../inbox-page02.css";
 
 export const dynamic = "force-dynamic";
 
