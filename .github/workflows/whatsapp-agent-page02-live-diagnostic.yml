@@ -71,9 +71,24 @@ jobs:
           git -C "$REPO_ROOT" diff HEAD --binary -- "${paths[@]}" > "$patch_file"
           printf 'PAGE01_DRIFT_PATCH_SHA256=%s\n' "$(sha256sum "$patch_file" | awk '{print $1}')"
           printf 'PAGE01_DRIFT_PATCH_BYTES=%s\n' "$(wc -c < "$patch_file" | tr -d ' ')"
-          printf 'PAGE01_DRIFT_DIFF_BEGIN\n'
-          git -C "$REPO_ROOT" diff --no-ext-diff --no-color HEAD -- "${paths[@]}"
-          printf 'PAGE01_DRIFT_DIFF_END\n'
+          printf 'UNTRACKED_PATHS_BEGIN\n'
+          git -C "$REPO_ROOT" ls-files --others --exclude-standard | LC_ALL=C sort
+          printf 'UNTRACKED_PATHS_END\n'
+          for rel in \
+            apps/whatsapp-agent-dashboard/app/login-right-panel-v16.css \
+            apps/whatsapp-agent-dashboard/public/page01-hero-desktop-v17.png \
+            apps/whatsapp-agent-dashboard/public/page01-hero-tablet-v17.png \
+            apps/whatsapp-agent-dashboard/public/page01-hero-ultrawide-v17.png; do
+            abs="$REPO_ROOT/$rel"
+            if [[ -f "$abs" ]]; then
+              printf 'UNTRACKED_FILE %s sha256=%s bytes=%s\n' \
+                "$rel" \
+                "$(sha256sum "$abs" | awk '{print $1}')" \
+                "$(wc -c < "$abs" | tr -d ' ')"
+            else
+              printf 'UNTRACKED_FILE_MISSING %s\n' "$rel"
+            fi
+          done
           rm -f "$patch_file"
           printf 'PASS: READ_ONLY_LIVE_DRIFT_CAPTURE_COMPLETE\n'
           REMOTE
