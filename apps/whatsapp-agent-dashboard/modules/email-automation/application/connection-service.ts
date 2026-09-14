@@ -44,24 +44,32 @@ export class EmailConnectionService {
     const connectionId = this.id();
     const now = this.now();
 
-    const connection: EmailConnection = {
+    const pendingConnection: EmailConnection = {
       id: connectionId,
       workspaceId: input.workspaceId,
       provider: input.provider,
       displayName: oauth.displayName,
       externalAccountId: oauth.externalAccountId,
-      status: "CONNECTED",
-      connectedAt: now,
+      status: "PENDING",
+      connectedAt: null,
       lastVerifiedAt: null,
       revokedAt: null,
     };
 
+    await this.deps.connections.save(pendingConnection);
     await this.deps.credentials.storeOAuthCredentials({
       workspaceId: input.workspaceId,
       connectionId,
       provider: input.provider,
       credentials: oauth.credentials,
     });
+
+    const connection: EmailConnection = {
+      ...pendingConnection,
+      status: "CONNECTED",
+      connectedAt: now,
+      lastVerifiedAt: now,
+    };
     await this.deps.connections.save(connection);
 
     const discovered = await adapter.listSenderIdentities(connection);
