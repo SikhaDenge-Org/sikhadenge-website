@@ -1,11 +1,14 @@
 import type { EmailTemplateBlock, EmailTemplateDocument } from "./blocks";
 
 const VARIABLE_KEY = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
-const TOKEN = /{{\s*([A-Za-z][A-Za-z0-9_.-]{0,63})\s*}}/g;
 const HEX_COLOR = /^#[0-9A-Fa-f]{6}$/;
 
+function tokenRegex(): RegExp {
+  return /{{\s*([A-Za-z][A-Za-z0-9_.-]{0,63})\s*}}/g;
+}
+
 function textTokens(value: string): string[] {
-  return [...value.matchAll(TOKEN)].map((match) => match[1]);
+  return [...value.matchAll(tokenRegex())].map((match) => match[1]);
 }
 
 function blockText(block: EmailTemplateBlock): readonly string[] {
@@ -24,8 +27,7 @@ function blockText(block: EmailTemplateBlock): readonly string[] {
 }
 
 function hasTemplateToken(value: string): boolean {
-  TOKEN.lastIndex = 0;
-  return TOKEN.test(value);
+  return tokenRegex().test(value);
 }
 
 export function assertSafeEmailUrl(value: string, purpose: "LINK" | "IMAGE"): void {
