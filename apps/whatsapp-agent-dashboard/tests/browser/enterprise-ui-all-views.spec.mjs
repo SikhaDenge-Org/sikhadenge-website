@@ -51,11 +51,11 @@ async function expectNoRootHorizontalOverflow(page) {
   expect(geometry.bodyScrollWidth).toBeLessThanOrEqual(geometry.innerWidth + 2);
 }
 
-async function expectInterFont(page) {
+async function expectManropeFont(page) {
   const family = await page.locator("body").evaluate(
     (node) => getComputedStyle(node).fontFamily.toLowerCase(),
   );
-  expect(family).toContain("inter");
+  expect(family).toContain("manrope");
 }
 
 async function login(page) {
@@ -189,13 +189,13 @@ for (const viewport of VIEWPORTS) {
     await page.goto("/login", { waitUntil: "domcontentloaded" });
     await waitForFonts(page);
     await expect(page.locator(".split01")).toBeVisible();
-    await expectInterFont(page);
+    await expectManropeFont(page);
     await expectNoRootHorizontalOverflow(page);
     await attachViewport(page, testInfo, `${viewport.name}-login`);
 
     await login(page);
     await waitForFonts(page);
-    await expectInterFont(page);
+    await expectManropeFont(page);
     await validateInbox(page, viewport);
     await expectNoRootHorizontalOverflow(page);
     await attachViewport(page, testInfo, `${viewport.name}-inbox`);
@@ -204,7 +204,7 @@ for (const viewport of VIEWPORTS) {
       await page.goto(route, { waitUntil: "domcontentloaded" });
       await waitForFonts(page);
       await expect(page).toHaveURL(new RegExp(`${route.replace("/", "\\/")}(?:\\?|$)`));
-      await expectInterFont(page);
+      await expectManropeFont(page);
       await validateModuleShell(page, viewport);
       await expectNoRootHorizontalOverflow(page);
       await attachViewport(

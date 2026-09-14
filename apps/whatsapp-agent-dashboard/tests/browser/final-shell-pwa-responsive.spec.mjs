@@ -56,7 +56,7 @@ for (const viewport of VIEWPORTS) {
     const panelBrand = page.locator(".split01__signin-brand img").first();
 
     await expect(shell).toBeVisible();
-    await expect(shell).toHaveAttribute("data-page01-hero", "approved-hq-v10");
+    await expect(shell).toHaveAttribute("data-page01-hero", "approved-hq-v11");
     await expect(email).toBeVisible();
     await expect(password).toBeVisible();
     await expect(submit).toBeVisible();
