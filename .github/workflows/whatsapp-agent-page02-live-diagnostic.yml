@@ -1,0 +1,79 @@
+name: WhatsApp Agent Page 02 Live Diagnostic
+
+on:
+  push:
+    branches:
+      - ops/page02-live-reconcile-20260914
+    paths:
+      - ".github/workflows/whatsapp-agent-page02-live-diagnostic.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-page02-live-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  inspect-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+    steps:
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "${SSH_PORT:-}" ]]; then SSH_PORT=22; echo "SSH_PORT=22" >> "$GITHUB_ENV"; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          canonical_host="[$SSH_HOST]:$SSH_PORT"
+          printf '%s %s %s\n' "$canonical_host" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Read-only live drift evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          REPO_ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          LIVE_APP="$REPO_ROOT/apps/whatsapp-agent-dashboard"
+          paths=(
+            apps/whatsapp-agent-dashboard/app/layout.tsx
+            apps/whatsapp-agent-dashboard/app/login-page01-left-image.css
+            apps/whatsapp-agent-dashboard/app/login/page.tsx
+            apps/whatsapp-agent-dashboard/next-env.d.ts
+          )
+          printf 'LIVE_HEAD=%s\n' "$(git -C "$LIVE_APP" rev-parse HEAD)"
+          printf 'LIVE_BRANCH=%s\n' "$(git -C "$LIVE_APP" branch --show-current)"
+          printf 'DIRTY_PATHS_BEGIN\n'
+          git -C "$REPO_ROOT" diff HEAD --name-only --no-renames | LC_ALL=C sort
+          printf 'DIRTY_PATHS_END\n'
+          patch_file="$(mktemp)"
+          git -C "$REPO_ROOT" diff HEAD --binary -- "${paths[@]}" > "$patch_file"
+          printf 'PAGE01_DRIFT_PATCH_SHA256=%s\n' "$(sha256sum "$patch_file" | awk '{print $1}')"
+          printf 'PAGE01_DRIFT_PATCH_BYTES=%s\n' "$(wc -c < "$patch_file" | tr -d ' ')"
+          printf 'PAGE01_DRIFT_DIFF_BEGIN\n'
+          git -C "$REPO_ROOT" diff --no-ext-diff --no-color HEAD -- "${paths[@]}"
+          printf 'PAGE01_DRIFT_DIFF_END\n'
+          rm -f "$patch_file"
+          printf 'PASS: READ_ONLY_LIVE_DRIFT_CAPTURE_COMPLETE\n'
+          REMOTE
