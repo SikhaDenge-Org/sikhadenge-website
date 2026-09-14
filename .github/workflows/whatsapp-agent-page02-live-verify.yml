@@ -1,0 +1,68 @@
+name: Verify Page 02 Live
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-page02-live-verify.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
+          install -d -m 700 "$HOME/.ssh"
+          KEY="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"; fi
+          chmod 600 "$KEY"
+          read -r _ kt km _ <<< "$SSH_HOST_KEY"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$KEY" >/dev/null
+
+      - name: Verify exact production runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          PM2=sikhadenge-whatsapp-agent
+          EXPECTED=yW6kWBpBRQWMeuQCJtDPd
+          J=$(mktemp); pm2 jlist > "$J"
+          RUNTIME=$(node - "$PM2" "$J" <<'NODE'
+          const fs=require('node:fs'); const [n,f]=process.argv.slice(2); const p=JSON.parse(fs.readFileSync(f,'utf8')).find(x=>x.name===n); if(!p?.pm2_env?.pm_cwd) process.exit(2); process.stdout.write(p.pm2_env.pm_cwd);
+          NODE
+          ); rm -f "$J"
+          BUILD=$(cat "$RUNTIME/.next/BUILD_ID")
+          test "$BUILD" = "$EXPECTED"
+          LOCAL=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' 'http://127.0.0.1:3100/inbox?verify=page02')
+          PUBLIC=$(curl --max-time 15 -sS -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/inbox?verify=page02')
+          case "$LOCAL" in 200|301|302|303|307|308) ;; *) exit 3;; esac
+          case "$PUBLIC" in 200|301|302|303|307|308) ;; *) exit 4;; esac
+          for a in page01-hero-desktop-v17.png page01-hero-tablet-v17.png page01-hero-ultrawide-v17.png; do test -s "$RUNTIME/public/$a"; done
+          echo "PASS: LIVE_BUILD=$BUILD LOCAL_INBOX=$LOCAL PUBLIC_INBOX=$PUBLIC PAGE01_ASSETS=OK"
+          REMOTE
+
+      - name: External public inbox verification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          CODE=$(curl --max-time 15 -sS -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/inbox?verify=external')
+          case "$CODE" in 200|301|302|303|307|308) ;; *) exit 1;; esac
+          echo "PASS: EXTERNAL_PUBLIC_INBOX=$CODE"
