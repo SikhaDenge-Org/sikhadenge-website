@@ -72,9 +72,11 @@ const repositorySource = readFileSync(
   "utf8",
 );
 
-assert.match(layoutSource, /import \{ Inter \} from "next\/font\/google";/u);
+assert.match(layoutSource, /import \{ Manrope \} from "next\/font\/google";/u);
+assert.match(layoutSource, /const manrope = Manrope\(/u);
+assert.match(layoutSource, /data-ui-foundation="manrope-v15-hard-lock"/u);
 assert.match(layoutSource, /ServiceWorkerRegistration/u);
-assert.doesNotMatch(layoutSource, /import \{ Manrope \} from "next\/font\/google";/u);
+assert.doesNotMatch(layoutSource, /import \{ Inter \} from "next\/font\/google";/u);
 assert.match(layoutSource, /import "\.\/enterprise-ui-v2\.css";/u);
 assert.match(layoutSource, /import "\.\/enterprise-ui-v2-hardening\.css";/u);
 assert.match(layoutSource, /import "\.\/enterprise-product-polish\.css";/u);
