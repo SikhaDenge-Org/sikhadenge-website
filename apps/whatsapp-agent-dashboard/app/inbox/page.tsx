@@ -13,6 +13,7 @@ import "../page02-inbox-future-v17.css";
 import "../page02-right-intelligence-v18.css";
 import "../page02-right-intelligence-v19.css";
 import "../page02-inbox-futuristic-v20.css";
+import "../page02-inbox-structural-v22.css";
 
 export const dynamic = "force-dynamic";
 

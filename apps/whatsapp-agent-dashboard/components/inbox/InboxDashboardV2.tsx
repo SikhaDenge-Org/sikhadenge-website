@@ -1202,12 +1202,13 @@ export default function InboxDashboardV2({
         </div>
       </aside>
 
+      <div className="sx-workspace-v22" data-ui-version="22">
       {/* CONVERSATION LIST COLUMN */}
       <section className="sx-list">
         <header className="sx-list-head">
           <div className="sx-list-headtop">
             <div>
-              <h1 className="sx-list-title">Messages</h1>
+              <h1 className="sx-list-title">Unified Inbox</h1>
               <p className="sx-list-sub">
                 {conversations.length} conversations ·{" "}
                 {scope === "RECENT"
@@ -1622,6 +1623,7 @@ export default function InboxDashboardV2({
           <div className="sx-empty"><strong>No lead selected</strong><p>Select a conversation to view qualification and agent context.</p></div>
         )}
       </aside>
+      </div>
     </main>
   );
 }
