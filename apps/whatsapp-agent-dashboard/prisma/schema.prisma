@@ -473,7 +473,9 @@ model EngageWorkspace {
   emailTemplateVersions     EngageEmailTemplateVersion[]
   emailTemplateAssets       EngageEmailTemplateAsset[]
 
-  @@index([isActive, createdAt])
+
+  emailMessages             EngageEmailMessage[]
+@@index([isActive, createdAt])
 }
 
 model EngageWorkspaceMembership {
@@ -927,5 +929,42 @@ model EngageEmailTemplateAsset {
   version   EngageEmailTemplateVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
 
   @@unique([versionId, storageKey])
+  @@index([workspaceId, templateId, createdAt])
+}
+
+model EngageEmailMessage {
+  id                    String   @id @default(cuid())
+  workspaceId           String
+  templateId            String?
+  templateVersionId     String?
+  connectionId          String
+  senderIdentityId      String
+  senderResolutionSource String
+  status                String   @default("DRAFT")
+  runtimeMode           String
+  toRecipients          Json
+  ccRecipients          Json
+  bccRecipients         Json
+  replyTo               Json?
+  subject               String
+  preheader             String?
+  htmlBody              String
+  textBody              String
+  variables             Json
+  attachments           Json
+  idempotencyKey        String
+  providerMessageId     String?
+  providerThreadId      String?
+  externalRequestSent   Boolean  @default(false)
+  lastError             String?
+  createdById           String
+  sentAt                DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  workspace EngageWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, status, createdAt])
   @@index([workspaceId, templateId, createdAt])
 }

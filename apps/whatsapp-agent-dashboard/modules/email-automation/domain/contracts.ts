@@ -95,6 +95,8 @@ export type EmailAttachmentReference = {
   sizeBytes: number;
   disposition: "ATTACHMENT" | "INLINE";
   contentId?: string;
+
+  contentBase64?: string;
 };
 
 export type EmailRenderedContent = {
@@ -109,7 +111,9 @@ export type EmailSendRequest = {
   workspaceId: string;
   connectionId: string;
   senderIdentityId: string;
-  to: readonly EmailAddress[];
+
+  from: EmailAddress;
+to: readonly EmailAddress[];
   cc?: readonly EmailAddress[];
   bcc?: readonly EmailAddress[];
   replyTo?: EmailAddress;
