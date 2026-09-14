@@ -52,6 +52,7 @@ import "./enterprise-ui-v2-hardening.css";
 import "./enterprise-product-polish.css";
 import "./ui-foundation-v14.css";
 import "./font-hard-lock-v15.css";
+import "./login-right-panel-v16.css";
 
 const manrope = Manrope({
   subsets: ["latin"],

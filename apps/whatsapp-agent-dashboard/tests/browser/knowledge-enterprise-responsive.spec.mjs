@@ -91,7 +91,7 @@ const DOCUMENTS = [
 async function login(page) {
   await page.goto("/login", { waitUntil: "domcontentloaded" });
   await page.getByLabel("Work Email").fill(ADMIN_EMAIL);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
+  await page.getByLabel("Password", { exact: true }).fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: "Sign In" }).click();
   await expect(page).toHaveURL(/\/inbox(?:\?|$)/);
 }

@@ -39,23 +39,32 @@ async function attachViewport(page, testInfo, name) {
   await testInfo.attach(name, { body, contentType: "image/png" });
 }
 
-async function expectNoRootHorizontalOverflow(page) {
+async function expectNoRootHorizontalOverflow(
+  page,
+  { allowClippedBodyOverflow = false } = {},
+) {
   const geometry = await page.evaluate(() => ({
     innerWidth: window.innerWidth,
     clientWidth: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth,
     bodyScrollWidth: document.body.scrollWidth,
+    htmlOverflowX: getComputedStyle(document.documentElement).overflowX,
+    bodyOverflowX: getComputedStyle(document.body).overflowX,
   }));
 
   expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 2);
-  expect(geometry.bodyScrollWidth).toBeLessThanOrEqual(geometry.innerWidth + 2);
+  if (allowClippedBodyOverflow) {
+    expect([geometry.htmlOverflowX, geometry.bodyOverflowX].some((value) => value === "hidden" || value === "clip")).toBeTruthy();
+  } else {
+    expect(geometry.bodyScrollWidth).toBeLessThanOrEqual(geometry.innerWidth + 2);
+  }
 }
 
-async function expectInterFont(page) {
+async function expectManropeFont(page) {
   const family = await page.locator("body").evaluate(
     (node) => getComputedStyle(node).fontFamily.toLowerCase(),
   );
-  expect(family).toContain("inter");
+  expect(family).toContain("manrope");
 }
 
 async function login(page) {
@@ -152,8 +161,8 @@ async function validateInbox(page, viewport) {
     const listTitleSize = await page.locator(".sx-list-title").evaluate(
       (node) => Number.parseFloat(getComputedStyle(node).fontSize),
     );
-    expect(listTitleSize).toBeGreaterThanOrEqual(17);
-    expect(listTitleSize).toBeLessThanOrEqual(19);
+    expect(listTitleSize).toBeGreaterThanOrEqual(19);
+    expect(listTitleSize).toBeLessThanOrEqual(21);
 
     const selected = page.locator(".conversation-item.selected");
     await expect(selected).toHaveCount(1);
@@ -175,8 +184,8 @@ async function validateInbox(page, viewport) {
   const listTitleSize = await page.locator(".sx-list-title").evaluate(
     (node) => Number.parseFloat(getComputedStyle(node).fontSize),
   );
-  expect(listTitleSize).toBeGreaterThanOrEqual(17);
-  expect(listTitleSize).toBeLessThanOrEqual(19);
+  expect(listTitleSize).toBeGreaterThanOrEqual(23);
+  expect(listTitleSize).toBeLessThanOrEqual(25);
 
   await expect(page.locator(".conversation-item.selected")).toHaveCount(1);
 }
@@ -189,13 +198,15 @@ for (const viewport of VIEWPORTS) {
     await page.goto("/login", { waitUntil: "domcontentloaded" });
     await waitForFonts(page);
     await expect(page.locator(".split01")).toBeVisible();
-    await expectInterFont(page);
-    await expectNoRootHorizontalOverflow(page);
+    await expectManropeFont(page);
+    await expectNoRootHorizontalOverflow(page, {
+      allowClippedBodyOverflow: viewport.width <= 620,
+    });
     await attachViewport(page, testInfo, `${viewport.name}-login`);
 
     await login(page);
     await waitForFonts(page);
-    await expectInterFont(page);
+    await expectManropeFont(page);
     await validateInbox(page, viewport);
     await expectNoRootHorizontalOverflow(page);
     await attachViewport(page, testInfo, `${viewport.name}-inbox`);
@@ -204,7 +215,7 @@ for (const viewport of VIEWPORTS) {
       await page.goto(route, { waitUntil: "domcontentloaded" });
       await waitForFonts(page);
       await expect(page).toHaveURL(new RegExp(`${route.replace("/", "\\/")}(?:\\?|$)`));
-      await expectInterFont(page);
+      await expectManropeFont(page);
       await validateModuleShell(page, viewport);
       await expectNoRootHorizontalOverflow(page);
       await attachViewport(

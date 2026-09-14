@@ -52,19 +52,19 @@ for (const viewport of VIEWPORTS) {
     await expect(page.locator(".contact-directory")).toBeVisible();
     await expect(page.locator(".contact-editor")).toBeVisible();
 
-    await expect(page.getByText("Loading contacts...", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Loading customer intelligence…", { exact: true })).toHaveCount(0);
     await expect(page.getByLabel("Search contacts")).toBeVisible();
-    await expect(page.getByLabel("Filter contacts by consent")).toBeVisible();
-    await expect(page.getByLabel("Filter contacts by lead stage")).toBeVisible();
+    await expect(page.getByLabel("Filter by consent")).toBeVisible();
+    await expect(page.getByLabel("Filter by stage")).toBeVisible();
 
     // Loading a directory must not silently put the editor into an ambiguous
     // create/edit state. Contacts remain unselected until the operator picks one.
     const firstRow = page.locator(".contact-table tbody tr").first();
     await expect(firstRow).toBeVisible();
     await expect(page.locator(".contact-table tbody tr.selected")).toHaveCount(0);
-    await expect(page.locator(".contact-editor h3")).toHaveText("Add contact");
+    await expect(page.locator(".contact-editor h3")).toHaveText("Select a contact");
     await expect(
-      page.locator(".contact-editor").getByRole("button", { name: "Open inbox" }),
+      page.locator(".contact-editor").getByRole("button", { name: "Message" }),
     ).toHaveCount(0);
 
     await expectNoRootOverflow(page);
@@ -82,7 +82,7 @@ for (const viewport of VIEWPORTS) {
 
     if (viewport.width <= 767) {
       const searchControls = page.locator(
-        ".contact-search-group > input, .contact-search-group > select",
+        ".contact-search-v2 input, .contact-filter-row select",
       );
       await expect(searchControls).toHaveCount(3);
       for (let index = 0; index < 3; index += 1) {
@@ -96,6 +96,12 @@ for (const viewport of VIEWPORTS) {
       for (let index = 0; index < 3; index += 1) {
         await expectInsideViewport(actions.nth(index), viewport.width);
       }
+
+      await page
+        .locator(".contact-toolbar-actions")
+        .getByRole("button", { name: "Add contact" })
+        .click();
+      await expect(page.locator(".contact-editor h3")).toHaveText("Add contact");
 
       const formGeometry = await page.locator(".contact-form-grid label").evaluateAll((nodes) =>
         nodes.slice(0, 2).map((node) => {
@@ -149,7 +155,7 @@ for (const viewport of VIEWPORTS) {
       await expect(firstRow).toHaveClass(/selected/);
       await expect(page.locator(".contact-editor h3")).toHaveText("CI Browser Learner");
       await expect(
-        page.locator(".contact-editor").getByRole("button", { name: "Open inbox" }),
+        page.locator(".contact-editor").getByRole("button", { name: "Message" }),
       ).toBeVisible();
 
       await page
@@ -159,7 +165,7 @@ for (const viewport of VIEWPORTS) {
       await expect(firstRow).not.toHaveClass(/selected/);
       await expect(page.locator(".contact-editor h3")).toHaveText("Add contact");
       await expect(
-        page.locator(".contact-editor").getByRole("button", { name: "Open inbox" }),
+        page.locator(".contact-editor").getByRole("button", { name: "Message" }),
       ).toHaveCount(0);
     }
 

@@ -74,3 +74,836 @@
     aspect-ratio: 1421 / 1107 !important;
   }
 }
+
+/* ===== V16.8 DESKTOP LEFT HARD LOCK START ===== */
+
+/*
+ * FINAL DESKTOP SOURCE-OF-TRUTH
+ *
+ * Approved image: 1421 × 1107
+ *
+ * This block lives inside the SAME stylesheet that
+ * originally sets object-fit: cover !important.
+ *
+ * High selector specificity + last source position
+ * guarantees that desktop artwork is NOT cropped.
+ *
+ * Mobile/tablet are intentionally excluded.
+ */
+
+@media (min-width: 1181px) {
+
+  .page01-login-asset-root
+  main.split01[data-page="login-page01-split-v1"]
+  > section.split01__hero.split01__hero--approved-image {
+
+    position: relative !important;
+
+    display: grid !important;
+    place-items: center !important;
+
+    width: 100% !important;
+    height: 100dvh !important;
+
+    min-width: 0 !important;
+    min-height: 650px !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    overflow: hidden !important;
+
+    background:
+      radial-gradient(
+        ellipse at center,
+        rgba(20, 70, 210, .11) 0%,
+        rgba(5, 20, 63, .08) 48%,
+        transparent 72%
+      ),
+      #020b26 !important;
+
+    isolation: isolate !important;
+  }
+
+
+  /*
+   * Critical hard-lock.
+   *
+   * Do not fill the panel dimensions.
+   * Let the image retain its native 1421:1107 ratio.
+   */
+  .page01-login-asset-root
+  main.split01[data-page="login-page01-split-v1"]
+  > section.split01__hero.split01__hero--approved-image
+  > img.split01__hero-approved-image {
+
+    position: relative !important;
+
+    inset: auto !important;
+
+    display: block !important;
+
+    /*
+     * Width is constrained by BOTH:
+     * - available panel width
+     * - available viewport height converted to native ratio
+     */
+    width:
+      min(
+        100%,
+        128.365dvh
+      ) !important;
+
+    height: auto !important;
+
+    min-width: 0 !important;
+    min-height: 0 !important;
+
+    max-width: 100% !important;
+    max-height: 100% !important;
+
+    aspect-ratio:
+      1421 / 1107 !important;
+
+    object-fit: contain !important;
+    object-position: center center !important;
+
+    margin:
+      auto !important;
+
+    padding: 0 !important;
+
+    border: 0 !important;
+    border-radius: 0 !important;
+
+    transform: none !important;
+    translate: none !important;
+    scale: none !important;
+
+    filter: none !important;
+
+    image-rendering: auto !important;
+
+    pointer-events: none !important;
+    user-select: none !important;
+  }
+
+
+  /* Never render a second SikhaDenge logo. */
+  .page01-login-asset-root
+  main.split01[data-page="login-page01-split-v1"]
+  .split01__brand--approved-image {
+
+    display: none !important;
+  }
+}
+
+
+/* =====================================================
+   STANDARD LAPTOP / MACBOOK HEIGHT
+   Width normally becomes the limiting dimension.
+   ===================================================== */
+
+@media
+  (min-width: 1181px)
+  and (max-height: 900px) {
+
+  .page01-login-asset-root
+  main.split01[data-page="login-page01-split-v1"]
+  > section.split01__hero.split01__hero--approved-image
+  > img.split01__hero-approved-image {
+
+    width: 100% !important;
+    height: auto !important;
+
+    max-width: 100% !important;
+    max-height: 100% !important;
+
+    object-fit: contain !important;
+    object-position: center center !important;
+  }
+}
+
+
+/* =====================================================
+   LARGE DESKTOP
+   Avoid unnecessary native-image upscaling.
+   ===================================================== */
+
+@media (min-width: 1920px) {
+
+  .page01-login-asset-root
+  main.split01[data-page="login-page01-split-v1"]
+  > section.split01__hero.split01__hero--approved-image
+  > img.split01__hero-approved-image {
+
+    width:
+      min(
+        100%,
+        1421px
+      ) !important;
+
+    height: auto !important;
+
+    object-fit: contain !important;
+  }
+}
+
+
+/* ===== V16.8 DESKTOP LEFT HARD LOCK END ===== */
+
+/* ===== V16.9 SEAMLESS DESKTOP START ===== */
+
+/*
+ * Goal:
+ * Keep the complete 1421×1107 artwork visible,
+ * but remove the obvious "image pasted inside panel"
+ * appearance created by plain contain/letterboxing.
+ *
+ * Architecture:
+ * Layer 0 = dark native panel
+ * Layer 1 = same artwork as atmospheric bleed
+ * Layer 2 = navy tonal veil
+ * Layer 3 = sharp approved artwork
+ *
+ * Desktop only.
+ * Tablet V16.5 and mobile V16.4 remain untouched.
+ */
+
+@media (min-width: 1181px) {
+
+  /* ==================================================
+     LEFT ART-DIRECTION CANVAS
+     ================================================== */
+
+  .page01-login-asset-root
+  main.split01[data-page="login-page01-split-v1"]
+  > section.split01__hero.split01__hero--approved-image {
+
+    position: relative !important;
+
+    display: grid !important;
+    place-items: center !important;
+
+    width: 100% !important;
+    height: 100dvh !important;
+
+    min-width: 0 !important;
+    min-height: 650px !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    overflow: hidden !important;
+
+    background:
+      radial-gradient(
+        ellipse at 50% 52%,
+        #071b53 0%,
+        #031238 48%,
+        #020b26 100%
+      ) !important;
+
+    isolation: isolate !important;
+  }
+
+
+  /* ==================================================
+     AMBIENT BLEED
+     Same image fills full panel but is intentionally
+     abstracted so it does NOT look duplicated.
+     ================================================== */
+
+  .page01-login-asset-root
+  main.split01[data-page="login-page01-split-v1"]
+  > section.split01__hero.split01__hero--approved-image::before {
+
+    content: "" !important;
+
+    position: absolute !important;
+
+    z-index: 0 !important;
+
+    inset: -8% !important;
+
+    pointer-events: none !important;
+
+    background-image:
+      url("/page01-left-hq-v11.png?v=11") !important;
+
+    background-repeat:
+      no-repeat !important;
+
+    background-position:
+      center center !important;
+
+    background-size:
+      cover !important;
+
+    /*
+     * Heavy abstraction:
+     * this should read as light/color atmosphere,
+     * not as a second image.
+     */
+    filter:
+      blur(34px)
+      brightness(.30)
+      saturate(1.35)
+      contrast(1.04) !important;
+
+    opacity: .88 !important;
+
+    transform:
+      scale(1.10) !important;
+
+    transform-origin:
+      center center !important;
+  }
+
+
+  /* ==================================================
+     TONAL VEIL
+     Creates one continuous navy environment.
+     ================================================== */
+
+  .page01-login-asset-root
+  main.split01[data-page="login-page01-split-v1"]
+  > section.split01__hero.split01__hero--approved-image::after {
+
+    content: "" !important;
+
+    position: absolute !important;
+
+    z-index: 1 !important;
+
+    inset: 0 !important;
+
+    pointer-events: none !important;
+
+    background:
+      radial-gradient(
+        ellipse at 50% 50%,
+        rgba(3, 20, 67, .02) 0%,
+        rgba(2, 13, 46, .08) 48%,
+        rgba(2, 11, 38, .30) 100%
+      ),
+      linear-gradient(
+        180deg,
+        rgba(2, 11, 38, .18) 0%,
+        transparent 15%,
+        transparent 85%,
+        rgba(2, 11, 38, .20) 100%
+      ) !important;
+  }
+
+
+  /* ==================================================
+     SHARP APPROVED ARTWORK
+     Entire image remains visible.
+     ================================================== */
+
+  .page01-login-asset-root
+  main.split01[data-page="login-page01-split-v1"]
+  > section.split01__hero.split01__hero--approved-image
+  > img.split01__hero-approved-image {
+
+    position: relative !important;
+
+    z-index: 2 !important;
+
+    inset: auto !important;
+
+    display: block !important;
+
+    /*
+     * Keep the complete artwork.
+     */
+    width:
+      min(
+        100%,
+        128.365dvh
+      ) !important;
+
+    height: auto !important;
+
+    min-width: 0 !important;
+    min-height: 0 !important;
+
+    max-width: 100% !important;
+    max-height: 100% !important;
+
+    aspect-ratio:
+      1421 / 1107 !important;
+
+    object-fit:
+      contain !important;
+
+    object-position:
+      center center !important;
+
+    margin:
+      auto !important;
+
+    padding: 0 !important;
+
+    border: 0 !important;
+    border-radius: 0 !important;
+
+    transform:
+      none !important;
+
+    filter:
+      drop-shadow(
+        0
+        24px
+        52px
+        rgba(0, 5, 28, .18)
+      ) !important;
+
+    /*
+     * Tiny feather on extreme image boundary.
+     * Main content remains fully sharp.
+     */
+    -webkit-mask-image:
+      linear-gradient(
+        to bottom,
+        rgba(0,0,0,.94) 0%,
+        #000 2.5%,
+        #000 97.5%,
+        rgba(0,0,0,.94) 100%
+      ) !important;
+
+    mask-image:
+      linear-gradient(
+        to bottom,
+        rgba(0,0,0,.94) 0%,
+        #000 2.5%,
+        #000 97.5%,
+        rgba(0,0,0,.94) 100%
+      ) !important;
+
+    image-rendering:
+      auto !important;
+
+    pointer-events:
+      none !important;
+
+    user-select:
+      none !important;
+  }
+
+
+  /* Artwork itself already contains correct branding. */
+
+  .page01-login-asset-root
+  main.split01[data-page="login-page01-split-v1"]
+  .split01__brand--approved-image {
+
+    display: none !important;
+  }
+}
+
+
+/* =====================================================
+   LAPTOP / MACBOOK CLASS
+   ===================================================== */
+
+@media
+  (min-width: 1181px)
+  and (max-height: 900px) {
+
+  .page01-login-asset-root
+  main.split01[data-page="login-page01-split-v1"]
+  > section.split01__hero.split01__hero--approved-image
+  > img.split01__hero-approved-image {
+
+    width: 100% !important;
+    height: auto !important;
+
+    max-width: 100% !important;
+    max-height: 100% !important;
+
+    object-fit:
+      contain !important;
+  }
+}
+
+
+/* =====================================================
+   LARGE DESKTOP
+   Avoid scaling raster artwork past useful resolution.
+   ===================================================== */
+
+@media (min-width: 1920px) {
+
+  .page01-login-asset-root
+  main.split01[data-page="login-page01-split-v1"]
+  > section.split01__hero.split01__hero--approved-image
+  > img.split01__hero-approved-image {
+
+    width:
+      min(
+        100%,
+        1421px
+      ) !important;
+
+    height: auto !important;
+  }
+}
+
+
+/* ===== V16.9 SEAMLESS DESKTOP END ===== */
+
+
+
+/* PAGE01_V17_RESPONSIVE_START */
+
+/*
+ * V17 responsive hero is deliberately placed above all
+ * previous V16 artwork layers. Right-side authentication
+ * layout is not modified here.
+ */
+
+.page01-hero-v17-shell {
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 100 !important;
+
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+
+  padding:
+    clamp(18px, 2.15vw, 34px)
+    clamp(18px, 2.15vw, 34px) !important;
+
+  background:
+    radial-gradient(
+      circle at 18% 18%,
+      rgba(120, 210, 255, 0.18),
+      transparent 32%
+    ),
+    radial-gradient(
+      circle at 84% 82%,
+      rgba(116, 104, 255, 0.10),
+      transparent 34%
+    ),
+    #f7fbff !important;
+}
+
+.page01-hero-v17-picture {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+
+  width: 100% !important;
+  height: 100% !important;
+
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.page01-hero-v17-image {
+  position: static !important;
+
+  display: block !important;
+
+  width: 100% !important;
+  height: 100% !important;
+
+  max-width: 100% !important;
+  max-height: 100% !important;
+
+  margin: 0 auto !important;
+  padding: 0 !important;
+
+  object-fit: contain !important;
+  object-position: center center !important;
+
+  border: 0 !important;
+  border-radius: clamp(16px, 1.4vw, 24px) !important;
+
+  box-shadow: none !important;
+
+  filter: none !important;
+  transform: none !important;
+
+  image-rendering: auto !important;
+}
+
+
+/* Tablet */
+@media (min-width: 621px) and (max-width: 1180px) {
+
+  .page01-hero-v17-shell {
+    padding: 18px !important;
+  }
+
+  .page01-hero-v17-image {
+    border-radius: 18px !important;
+  }
+}
+
+
+/* Normal desktop / laptop */
+@media (min-width: 1181px) and (max-width: 1919px) {
+
+  .page01-hero-v17-shell {
+    padding:
+      clamp(20px, 2vw, 30px)
+      clamp(20px, 2vw, 32px) !important;
+  }
+}
+
+
+/* Large desktop / ultrawide */
+@media (min-width: 1920px) {
+
+  .page01-hero-v17-shell {
+    padding:
+      clamp(26px, 1.8vw, 40px)
+      clamp(30px, 2.2vw, 52px) !important;
+  }
+
+  .page01-hero-v17-image {
+    border-radius: 24px !important;
+  }
+}
+
+
+/* Mobile keeps approved login-first architecture */
+@media (max-width: 620px) {
+
+  .page01-hero-v17-shell {
+    display: none !important;
+  }
+}
+
+/* PAGE01_V17_RESPONSIVE_END */
+
+/* ===== V17.2 HERO SIZE RESTORE START ===== */
+
+/* Desktop / laptop: hero should visually fill the complete left panel */
+@media (min-width: 1181px) {
+
+  .page01-hero-v17-shell {
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 100vh !important;
+    padding: 18px 14px 18px 20px !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+  }
+
+  .page01-hero-v17-picture {
+    width: 100% !important;
+    height: 100% !important;
+    display: block !important;
+  }
+
+  .page01-hero-v17-shell img,
+  .page01-hero-v17-picture img,
+  .split01__hero-approved-image {
+    width: 100% !important;
+    height: 100% !important;
+
+    /* Fill left visual area without looking like a small card */
+    object-fit: cover !important;
+
+    /* Generated artwork already carries internal safe margins */
+    object-position: center center !important;
+
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+
+    transform: scale(1.025) !important;
+    transform-origin: center center !important;
+  }
+}
+
+/* Common notebook / smaller desktop */
+@media (min-width: 1181px) and (max-width: 1536px) {
+  .page01-hero-v17-shell {
+    padding: 12px 8px 12px 14px !important;
+  }
+
+  .page01-hero-v17-shell img,
+  .page01-hero-v17-picture img,
+  .split01__hero-approved-image {
+    transform: scale(1.045) !important;
+  }
+}
+
+/* Large desktop */
+@media (min-width: 1537px) and (max-width: 1919px) {
+  .page01-hero-v17-shell {
+    padding: 16px 10px 16px 18px !important;
+  }
+
+  .page01-hero-v17-shell img,
+  .page01-hero-v17-picture img,
+  .split01__hero-approved-image {
+    transform: scale(1.03) !important;
+  }
+}
+
+/* Full-HD / ultrawide */
+@media (min-width: 1920px) {
+  .page01-hero-v17-shell {
+    padding: 20px 14px 20px 24px !important;
+  }
+
+  .page01-hero-v17-shell img,
+  .page01-hero-v17-picture img,
+  .split01__hero-approved-image {
+    transform: scale(1.02) !important;
+  }
+}
+
+/* Tablet: keep controlled margins */
+@media (min-width: 621px) and (max-width: 1180px) {
+  .page01-hero-v17-shell {
+    width: 100% !important;
+    height: 100% !important;
+    padding: 14px !important;
+    overflow: hidden !important;
+  }
+
+  .page01-hero-v17-picture,
+  .page01-hero-v17-shell img,
+  .page01-hero-v17-picture img {
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  .page01-hero-v17-shell img,
+  .page01-hero-v17-picture img {
+    object-fit: cover !important;
+    object-position: center !important;
+    transform: scale(1.02) !important;
+  }
+}
+
+/* ===== V17.2 HERO SIZE RESTORE END ===== */
+
+/* ===== V17.3 STRONG HERO ZOOM START ===== */
+
+/*
+  V17.3
+  Problem:
+  Generated artwork itself contains generous internal safe-space.
+  Previous 1.02–1.045 zoom was too conservative.
+
+  Goal:
+  Make artwork visually large without changing the right auth panel.
+*/
+
+@media (min-width: 1181px) {
+
+  .page01-hero-v17-shell {
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 100vh !important;
+
+    padding: 0 !important;
+    margin: 0 !important;
+
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+
+    overflow: hidden !important;
+  }
+
+  .page01-hero-v17-picture {
+    width: 100% !important;
+    height: 100% !important;
+
+    display: block !important;
+    overflow: hidden !important;
+  }
+
+  .page01-hero-v17-shell img,
+  .page01-hero-v17-picture img,
+  .split01__hero-approved-image {
+    width: 100% !important;
+    height: 100% !important;
+
+    max-width: none !important;
+    max-height: none !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    object-fit: cover !important;
+    object-position: center center !important;
+
+    transform-origin: center center !important;
+  }
+}
+
+/* Typical laptop / 1366–1536 class */
+@media (min-width: 1181px) and (max-width: 1536px) {
+  .page01-hero-v17-shell img,
+  .page01-hero-v17-picture img,
+  .split01__hero-approved-image {
+    transform: scale(1.145) !important;
+  }
+}
+
+/* 1537–1919 desktop */
+@media (min-width: 1537px) and (max-width: 1919px) {
+  .page01-hero-v17-shell img,
+  .page01-hero-v17-picture img,
+  .split01__hero-approved-image {
+    transform: scale(1.125) !important;
+  }
+}
+
+/* Full HD / large desktop */
+@media (min-width: 1920px) and (max-width: 2559px) {
+  .page01-hero-v17-shell img,
+  .page01-hero-v17-picture img,
+  .split01__hero-approved-image {
+    transform: scale(1.11) !important;
+  }
+}
+
+/* Ultrawide */
+@media (min-width: 2560px) {
+  .page01-hero-v17-shell img,
+  .page01-hero-v17-picture img,
+  .split01__hero-approved-image {
+    transform: scale(1.095) !important;
+  }
+}
+
+/* Tablet stays controlled */
+@media (min-width: 621px) and (max-width: 1180px) {
+  .page01-hero-v17-shell {
+    padding: 6px !important;
+    overflow: hidden !important;
+  }
+
+  .page01-hero-v17-shell img,
+  .page01-hero-v17-picture img {
+    width: 100% !important;
+    height: 100% !important;
+
+    object-fit: cover !important;
+    object-position: center !important;
+
+    transform: scale(1.08) !important;
+    transform-origin: center center !important;
+  }
+}
+
+/* ===== V17.3 STRONG HERO ZOOM END ===== */
