@@ -53,6 +53,7 @@ import "./enterprise-product-polish.css";
 import "./ui-foundation-v14.css";
 import "./font-hard-lock-v15.css";
 import "./login-right-panel-v16.css";
+import "./sidebar-standard-v18.css";
 
 const manrope = Manrope({
   subsets: ["latin"],
