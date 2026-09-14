@@ -73,11 +73,10 @@ export class EmailConnectionService {
     await this.deps.connections.save(connection);
 
     const discovered = await adapter.listSenderIdentities(connection);
-    const senders = this.normalizeDefaultSender(discovered);
-    await this.deps.senders.replaceConnectionSenders({
+    const senders = await this.deps.senders.replaceConnectionSenders({
       workspaceId: input.workspaceId,
       connectionId,
-      senders,
+      senders: discovered,
     });
 
     return { connection, senders };
@@ -94,9 +93,7 @@ export class EmailConnectionService {
 
     const adapter = this.deps.providers.get(connection.provider);
     const discovered = await adapter.listSenderIdentities(connection);
-    const senders = this.normalizeDefaultSender(discovered);
-    await this.deps.senders.replaceConnectionSenders({ ...input, senders });
-    return senders;
+    return this.deps.senders.replaceConnectionSenders({ ...input, senders: discovered });
   }
 
   async setDefaultSender(input: {
@@ -130,21 +127,5 @@ export class EmailConnectionService {
     const connection = await this.deps.connections.getById(input);
     if (!connection) throw new Error("Email connection not found.");
     return connection;
-  }
-
-  private normalizeDefaultSender(
-    senders: readonly EmailSenderIdentity[],
-  ): readonly EmailSenderIdentity[] {
-    if (senders.length === 0) return senders;
-    const usable = senders.filter(
-      (sender) => sender.isActive && sender.verificationStatus === "VERIFIED",
-    );
-    if (usable.length === 0) return senders.map((sender) => ({ ...sender, isDefault: false }));
-
-    const existing = usable.find((sender) => sender.isDefault) ?? usable[0];
-    return senders.map((sender) => ({
-      ...sender,
-      isDefault: sender.id === existing.id,
-    }));
   }
 }
