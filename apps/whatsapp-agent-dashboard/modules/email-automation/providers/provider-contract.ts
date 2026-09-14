@@ -40,8 +40,18 @@ export interface EmailCredentialVaultPort {
     provider: EmailProvider;
     credentials: EmailOAuthCredentialMaterial;
   }): Promise<void>;
-  hasUsableCredentials(connectionId: string): Promise<boolean>;
-  revokeCredentials(connectionId: string): Promise<void>;
+  loadOAuthCredentials(input: {
+    workspaceId: string;
+    connectionId: string;
+  }): Promise<EmailOAuthCredentialMaterial | null>;
+  hasUsableCredentials(input: {
+    workspaceId: string;
+    connectionId: string;
+  }): Promise<boolean>;
+  revokeCredentials(input: {
+    workspaceId: string;
+    connectionId: string;
+  }): Promise<void>;
 }
 
 export interface EmailProviderAdapter {
