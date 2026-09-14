@@ -2,6 +2,7 @@
 # Production trigger marker: Page 01 supplied-reference fidelity deploy — 2026-09-12 v2
 # Production Batch 1 authorization marker — 2026-09-14 canonical release deploy
 # Production Batch 1 retry marker — 2026-09-14 after verified V17 drift reconciliation
+# Production Batch 1 final canonical trigger — 2026-09-14 after atomic runtime repair
 set -Eeuo pipefail
 
 : "${LIVE_APP:?LIVE_APP is required}"
