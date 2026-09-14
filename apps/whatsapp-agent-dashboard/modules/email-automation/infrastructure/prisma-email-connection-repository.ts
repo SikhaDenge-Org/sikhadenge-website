@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+
 import { prisma } from "@/lib/db/prisma";
 
 import type {
@@ -39,7 +41,7 @@ function status(value: string): EmailConnectionStatus {
   }
 }
 
-function capabilitiesFor(connection: EmailConnection): Record<string, unknown> {
+function capabilitiesFor(connection: EmailConnection): Prisma.InputJsonValue {
   return {
     WEBHOOK_VERIFY: false,
     INBOUND_MESSAGE: false,
