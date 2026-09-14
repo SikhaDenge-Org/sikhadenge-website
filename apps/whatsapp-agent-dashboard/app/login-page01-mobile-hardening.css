@@ -1,0 +1,16 @@
+/*
+ * Page 01 mobile regression hardening.
+ *
+ * The approved <=620px login-first architecture intentionally hides the
+ * marketing hero. Decorative auth-panel orbs extend beyond the viewport on
+ * purpose, but they must not enlarge the document scroll width.
+ *
+ * Keep this override isolated and late in the login page cascade so desktop,
+ * tablet, form geometry and the approved hero artwork remain untouched.
+ */
+
+@media (max-width: 620px) {
+  .page01-login-asset-root .split01__signin[data-auth-ui="right-auth-v12"] {
+    overflow: hidden !important;
+  }
+}
