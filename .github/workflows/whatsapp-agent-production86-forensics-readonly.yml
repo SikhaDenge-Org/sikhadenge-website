@@ -1,0 +1,96 @@
+name: WhatsApp Agent Production86 Readonly Forensics
+
+on:
+  push:
+    branches: [phase17-stage2-governance-v15-20260913]
+    paths:
+      - ".github/workflows/whatsapp-agent-production86-forensics-readonly.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production-forensics
+  cancel-in-progress: false
+
+jobs:
+  readonly-forensics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+    steps:
+      - name: Configure pinned SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then SSH_PORT=22; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+      - name: Aggregate Batch86 HTTP and runtime failure signals only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "${SSH_PORT:-22}" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          A=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          printf 'CURRENT_LIVE_SHA=%s\n' "$(git -C "$A" rev-parse HEAD)"
+          printf 'CURRENT_PM2_STATUS=%s\n' "$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(String(p?.pm2_env?.status||"missing"))})')"
+          printf 'CURRENT_LOGIN_HTTP=%s\n' "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login || true)"
+
+          access=/var/log/nginx/access.log
+          if [[ -f "$access" ]]; then
+            awk '
+              $4 ~ /14\/Sep\/2026:18:08:(2[0-9]|3[0-4])/ {
+                req=$7; sub(/\?.*/,"",req);
+                if (req=="/login" || req=="/inbox" || req=="/contacts" || req=="/analytics" || req=="/api/webhooks/whatsapp") {
+                  key=req "|" $9; count[key]++
+                }
+              }
+              END { for (k in count) print "BATCH86_HTTP=" k "|count=" count[k] }
+            ' "$access" | LC_ALL=C sort
+          else
+            echo 'BATCH86_HTTP=ACCESS_LOG_MISSING'
+          fi
+
+          err=/root/.pm2/logs/sikhadenge-whatsapp-agent-error.log
+          if [[ -f "$err" ]]; then
+            bytes=$(stat -c '%s' "$err")
+            printf 'PM2_ERROR_LOG_BYTES=%s\n' "$bytes"
+            tail -c 262144 "$err" | awk '
+              BEGIN { fatal=0; prisma=0; addr=0; uncaught=0; chunk=0; css=0 }
+              /FATAL|Fatal/ {fatal++}
+              /PrismaClientInitializationError/ {prisma++}
+              /EADDRINUSE/ {addr++}
+              /uncaught exception|Unhandled/ {uncaught++}
+              /ChunkLoadError|Cannot find module|MODULE_NOT_FOUND/ {chunk++}
+              /CSS|stylesheet|contacts-live-v20/ {css++}
+              END {
+                print "PM2_FATAL_SIGNATURE_COUNT=" fatal;
+                print "PM2_PRISMA_INIT_SIGNATURE_COUNT=" prisma;
+                print "PM2_EADDRINUSE_SIGNATURE_COUNT=" addr;
+                print "PM2_UNCAUGHT_SIGNATURE_COUNT=" uncaught;
+                print "PM2_CHUNK_MODULE_SIGNATURE_COUNT=" chunk;
+                print "PM2_CSS_SIGNATURE_COUNT=" css;
+              }
+            '
+          else
+            echo 'PM2_ERROR_LOG_MISSING=true'
+          fi
+
+          test -d "$A/.next-failed-engageos-github-34878764369-1"
+          echo 'FAILED_BUILD_PRESERVED=true'
+          echo 'READ_ONLY_FORENSICS=true'
+          REMOTE
