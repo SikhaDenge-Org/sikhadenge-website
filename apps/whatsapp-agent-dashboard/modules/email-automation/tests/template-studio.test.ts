@@ -99,6 +99,7 @@ function testTemplateUrlsCanUseDeclaredVariables() {
   const dynamic = document({
     variables: [
       { key: "firstName", label: "First name", required: true },
+      { key: "course", label: "Course", required: false, fallback: "AI Expert" },
       { key: "destination", label: "Destination", required: true },
     ],
     blocks: [
