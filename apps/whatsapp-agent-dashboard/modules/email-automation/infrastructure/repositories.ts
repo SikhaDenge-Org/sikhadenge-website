@@ -16,7 +16,7 @@ export interface EmailSenderRepository {
     workspaceId: string;
     connectionId: string;
     senders: readonly EmailSenderIdentity[];
-  }): Promise<void>;
+  }): Promise<readonly EmailSenderIdentity[]>;
   setWorkspaceDefault(input: {
     workspaceId: string;
     senderIdentityId: string;
