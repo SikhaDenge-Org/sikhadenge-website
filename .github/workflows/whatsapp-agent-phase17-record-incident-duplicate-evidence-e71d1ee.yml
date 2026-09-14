@@ -1,0 +1,169 @@
+name: WhatsApp Agent Phase17 Record Two Operator Gates e71d1ee
+
+on:
+  push:
+    branches: [phase17-stage2-governance-v15-20260913]
+    paths:
+      - ".github/workflows/whatsapp-agent-phase17-record-incident-duplicate-evidence-e71d1ee.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  record-two-operator-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_SHA: e71d1ee579c6f72020639230a341e4e008ae9af6
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+      PROOF_RUN_ID: "34879767047"
+      OPERATOR_DISPLAY_NAME: "Ankit Singh"
+
+    steps:
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then SSH_PORT=22; fi
+          echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Record exactly two attested operator evidence gates
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_SHA='$EXPECTED_SHA' RELEASE_BRANCH='$RELEASE_BRANCH' PROOF_RUN_ID='$PROOF_RUN_ID' OPERATOR_DISPLAY_NAME='$OPERATOR_DISPLAY_NAME' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          A=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          E="$A/.env"
+          cd "$A"
+
+          envv() {
+            node - "$E" "$1" <<'NODE'
+          const fs=require('node:fs'); const [file,key]=process.argv.slice(2);
+          for(const raw of fs.readFileSync(file,'utf8').split(/\r?\n/)){
+            let line=raw.trim(); if(!line||line.startsWith('#')) continue;
+            if(line.startsWith('export ')) line=line.slice(7).trim();
+            const i=line.indexOf('='); if(i<1||line.slice(0,i).trim()!==key) continue;
+            let value=line.slice(i+1).trim();
+            if(value.length>=2&&((value.startsWith('"')&&value.endsWith('"'))||(value.startsWith("'")&&value.endsWith("'")))) value=value.slice(1,-1);
+            process.stdout.write(value); process.exit(0);
+          }
+          process.exit(1);
+          NODE
+          }
+
+          git fetch origin "+refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH" >/dev/null 2>&1
+          release_sha="$(git rev-parse "refs/remotes/origin/$RELEASE_BRANCH")"
+          live_sha="$(git rev-parse HEAD)"
+          dirty_count="$(git status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          printf 'PRECHECK_RELEASE_SHA=%s\nPRECHECK_LIVE_SHA=%s\nPRECHECK_TRACKED_DIRTY_COUNT=%s\n' "$release_sha" "$live_sha" "$dirty_count"
+          test "$release_sha" = "$EXPECTED_SHA"
+          test "$live_sha" = "$EXPECTED_SHA"
+          test "$dirty_count" = "0"
+          test -x ./node_modules/.bin/tsx
+
+          database_url="$(envv DATABASE_URL)"
+          DB="$(node scripts/prisma-postgres-cli-url.mjs "$database_url")"
+          q(){ PGOPTIONS='-c default_transaction_read_only=on' psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "$1"; }
+
+          actor_rows="$(q "SELECT u.id FROM \"DashboardUser\" u JOIN \"EngageWorkspaceMembership\" m ON m.\"userId\"=u.id WHERE m.\"workspaceId\"='engagews_default' AND m.\"isActive\"=true AND u.\"isActive\"=true AND lower(trim(u.name))=lower(trim('$OPERATOR_DISPLAY_NAME')) ORDER BY u.id;")"
+          actor_count="$(printf '%s\n' "$actor_rows" | sed '/^$/d' | wc -l | tr -d ' ')"
+          printf 'OPERATOR_IDENTITY_MATCH_COUNT=%s\n' "$actor_count"
+          test "$actor_count" = "1"
+          actor_id="$(printf '%s\n' "$actor_rows" | head -n1)"
+          test -n "$actor_id"
+
+          proof_ref="github-actions-readonly-proof-run:$PROOF_RUN_ID"
+          verified_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          short_sha="${EXPECTED_SHA:0:12}"
+          incident_request="phase17-op-${short_sha}-critical-${PROOF_RUN_ID}"
+          duplicate_request="phase17-op-${short_sha}-duplicate-${PROOF_RUN_ID}"
+
+          pre_collision_count="$(q "SELECT COUNT(*) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='engagews_default' AND \"requestId\" IN ('$incident_request','$duplicate_request');")"
+          printf 'PREEXISTING_REQUEST_ID_COUNT=%s\n' "$pre_collision_count"
+          test "$pre_collision_count" = "0"
+
+          common_env=(
+            PHASE17_EXPECTED_LIVE_SHA="$EXPECTED_SHA"
+            PHASE17_OPERATOR_ACTOR_ID="$actor_id"
+            PHASE17_OPERATOR_PROOF_REF="$proof_ref"
+            PHASE17_OPERATOR_VERIFIED_AT="$verified_at"
+            PHASE17_OPERATOR_ATTESTATION="I_ATTEST_THIS_EVIDENCE_IS_REAL_AND_EXACT_SHA_BOUND"
+          )
+
+          env "${common_env[@]}" \
+            PHASE17_OPERATOR_EVIDENCE_ACTION=PHASE17_CRITICAL_INCIDENT_REVIEW \
+            PHASE17_OPERATOR_REQUEST_ID="$incident_request" \
+            PHASE17_OPERATOR_METADATA_JSON='{"unresolvedCriticalIncidents":0}' \
+            ./node_modules/.bin/tsx scripts/engageos-phase17-stage2-record-operator-evidence.ts
+
+          env "${common_env[@]}" \
+            PHASE17_OPERATOR_EVIDENCE_ACTION=PHASE17_DUPLICATE_SEND_REVIEW \
+            PHASE17_OPERATOR_REQUEST_ID="$duplicate_request" \
+            PHASE17_OPERATOR_METADATA_JSON='{"unexplainedDuplicateSends":0}' \
+            ./node_modules/.bin/tsx scripts/engageos-phase17-stage2-record-operator-evidence.ts
+
+          echo 'PASS: BOTH_OPERATOR_EVIDENCE_DRY_RUNS_VALIDATED'
+
+          env "${common_env[@]}" \
+            PHASE17_OPERATOR_EVIDENCE_COMMIT=RECORD_OPERATOR_VERIFIED_EVIDENCE \
+            PHASE17_OPERATOR_EVIDENCE_ACTION=PHASE17_CRITICAL_INCIDENT_REVIEW \
+            PHASE17_OPERATOR_REQUEST_ID="$incident_request" \
+            PHASE17_OPERATOR_METADATA_JSON='{"unresolvedCriticalIncidents":0}' \
+            ./node_modules/.bin/tsx scripts/engageos-phase17-stage2-record-operator-evidence.ts
+
+          env "${common_env[@]}" \
+            PHASE17_OPERATOR_EVIDENCE_COMMIT=RECORD_OPERATOR_VERIFIED_EVIDENCE \
+            PHASE17_OPERATOR_EVIDENCE_ACTION=PHASE17_DUPLICATE_SEND_REVIEW \
+            PHASE17_OPERATOR_REQUEST_ID="$duplicate_request" \
+            PHASE17_OPERATOR_METADATA_JSON='{"unexplainedDuplicateSends":0}' \
+            ./node_modules/.bin/tsx scripts/engageos-phase17-stage2-record-operator-evidence.ts
+
+          incident_verified="$(q "SELECT COUNT(*) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='engagews_default' AND action='PHASE17_CRITICAL_INCIDENT_REVIEW' AND outcome='VERIFIED' AND \"entityType\"='CONTROLLED_LAUNCH_GOVERNANCE' AND \"entityId\"='$EXPECTED_SHA' AND \"reasonCode\"='OPERATOR_VERIFIED_EXACT_SHA' AND \"requestId\"='$incident_request' AND \"actorId\"='$actor_id' AND metadata->>'liveSha'='$EXPECTED_SHA' AND metadata->>'proofRef'='$proof_ref' AND (metadata->>'unresolvedCriticalIncidents')::int=0;")"
+          duplicate_verified="$(q "SELECT COUNT(*) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='engagews_default' AND action='PHASE17_DUPLICATE_SEND_REVIEW' AND outcome='VERIFIED' AND \"entityType\"='CONTROLLED_LAUNCH_GOVERNANCE' AND \"entityId\"='$EXPECTED_SHA' AND \"reasonCode\"='OPERATOR_VERIFIED_EXACT_SHA' AND \"requestId\"='$duplicate_request' AND \"actorId\"='$actor_id' AND metadata->>'liveSha'='$EXPECTED_SHA' AND metadata->>'proofRef'='$proof_ref' AND (metadata->>'unexplainedDuplicateSends')::int=0;")"
+          printf 'POSTWRITE_CRITICAL_INCIDENT_EVIDENCE_COUNT=%s\n' "$incident_verified"
+          printf 'POSTWRITE_DUPLICATE_SEND_EVIDENCE_COUNT=%s\n' "$duplicate_verified"
+          test "$incident_verified" = "1"
+          test "$duplicate_verified" = "1"
+
+          stage1_state="$(q "SELECT stage||'|'||mode||'|'||\"writePolicy\"||'|'||\"externalWritesAllowed\"::text||'|'||version::text FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='engagews_default';")"
+          transition_count="$(q "SELECT COUNT(*) FROM \"EngageControlledLaunchTransition\" WHERE \"workspaceId\"='engagews_default';")"
+          printf 'POSTWRITE_STAGE1_STATE=%s\nPOSTWRITE_TRANSITION_COUNT=%s\n' "$stage1_state" "$transition_count"
+          test "$stage1_state" = 'INTERNAL_TEST_IDENTITIES|SHADOW|NO_EXTERNAL_WRITES|false|1'
+          test "$transition_count" = '1'
+
+          git fetch origin "+refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH" >/dev/null 2>&1
+          post_release_sha="$(git rev-parse "refs/remotes/origin/$RELEASE_BRANCH")"
+          post_live_sha="$(git rev-parse HEAD)"
+          printf 'POSTCHECK_RELEASE_SHA=%s\nPOSTCHECK_LIVE_SHA=%s\n' "$post_release_sha" "$post_live_sha"
+          test "$post_release_sha" = "$EXPECTED_SHA"
+          test "$post_live_sha" = "$EXPECTED_SHA"
+          echo 'PASS: PHASE17_TWO_OPERATOR_GATES_RECORDED_EXACT_SHA'
+          REMOTE
