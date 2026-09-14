@@ -212,12 +212,17 @@ export default function LoginForm() {
             aria-describedby={hasError ? "login-error" : capsLock ? "caps-lock-warning" : undefined}
             required
           />
+          <span id="login-password-toggle-description" hidden>
+            Controls visibility for the Password field.
+          </span>
           <button
             type="button"
             className="split01-form__eye"
             onClick={() => setShowPassword((value) => !value)}
-            aria-label={showPassword ? "Hide password" : "Show password"}
+            aria-label={showPassword ? "Hide secret value" : "Show secret value"}
+            aria-describedby="login-password-toggle-description"
             aria-pressed={showPassword}
+            title={showPassword ? "Hide password" : "Show password"}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M2.75 12s3.3-5 9.25-5 9.25 5 9.25 5-3.3 5-9.25 5-9.25-5-9.25-5Z" />
