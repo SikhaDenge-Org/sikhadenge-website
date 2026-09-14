@@ -1,0 +1,185 @@
+name: WhatsApp Agent Phase17 Stage2 Machine Evidence
+
+on:
+  push:
+    branches:
+      - phase17-stage2-governance-v15-20260913
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-phase17-stage2-machine-evidence.yml"
+      - "apps/whatsapp-agent-dashboard/modules/release/application/phase17-stage2-governance-evidence.ts"
+      - "apps/whatsapp-agent-dashboard/scripts/engageos-phase17-stage2-record-machine-evidence.ts"
+      - "apps/whatsapp-agent-dashboard/tests/engageos-phase17-stage2-governance-evidence.test.ts"
+      - "apps/whatsapp-agent-dashboard/tests/engageos-phase17-stage2-machine-evidence-policy.test.ts"
+      - "apps/whatsapp-agent-dashboard/modules/release/application/controlled-launch.ts"
+      - "apps/whatsapp-agent-dashboard/modules/release/domain/rollout-policy.ts"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  validate-machine-evidence-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact workflow commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate Stage2 governance policy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd apps/whatsapp-agent-dashboard
+          npm install --include=dev --no-audit --no-fund --package-lock=false
+          npx tsx tests/engageos-phase17-stage2-governance-evidence.test.ts
+          npx tsx tests/engageos-phase17-stage2-machine-evidence-policy.test.ts
+          npm run test:phase17-controlled-launch
+          npm run test:phase17-production-readiness
+          npm run typecheck
+
+  record-machine-evidence:
+    needs: validate-machine-evidence-policy
+    if: github.ref == 'refs/heads/release/whatsapp-instagram-agent-flow-20260731'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: whatsapp-agent-production
+    concurrency:
+      group: whatsapp-agent-production
+      cancel-in-progress: false
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+      WORKSPACE_ID: engagews_default
+
+    steps:
+      - name: Checkout exact release commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Freeze exact release SHA
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git fetch origin "+refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH"
+          release_sha="$(git rev-parse "refs/remotes/origin/$RELEASE_BRANCH")"
+          test "$release_sha" = "$GITHUB_SHA"
+          printf 'EXPECTED_LIVE_SHA=%s\n' "$release_sha" >> "$GITHUB_ENV"
+          printf 'POLICY_COMMIT_SHA=%s\n' "$GITHUB_SHA" >> "$GITHUB_ENV"
+          printf 'FROZEN_RELEASE_SHA=%s\n' "$release_sha"
+
+      - name: Prove successful exact Production Batch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/whatsapp-agent-production-batch1.yml/runs?branch=release%2Fwhatsapp-instagram-agent-flow-20260731&per_page=30"
+          json="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$api")"
+          match="$(jq -r --arg sha "$EXPECTED_LIVE_SHA" '
+            [.workflow_runs[]
+              | select(.head_sha == $sha)
+              | select(.status == "completed")
+              | select(.conclusion == "success")
+              | select(.event == "push")]
+            | sort_by(.updated_at)
+            | reverse
+            | .[0]
+            | if . == null then empty else [.id, .run_number, .updated_at] | @tsv end
+          ' <<<"$json")"
+          test -n "$match"
+          IFS=$'\t' read -r production_run_id production_run_number production_updated_at <<< "$match"
+          [[ "$production_run_id" =~ ^[0-9]+$ ]]
+          [[ "$production_run_number" =~ ^[0-9]+$ ]]
+          printf 'PRODUCTION_RUN_ID=%s\n' "$production_run_id" >> "$GITHUB_ENV"
+          printf 'PRODUCTION_RUN_NUMBER=%s\n' "$production_run_number" >> "$GITHUB_ENV"
+          printf 'PRODUCTION_RUN_UPDATED_AT=%s\n' "$production_updated_at" >> "$GITHUB_ENV"
+          printf 'EXACT_PRODUCTION_BATCH=run:%s number:%s sha:%s\n' "$production_run_id" "$production_run_number" "$EXPECTED_LIVE_SHA"
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then echo SSH_PORT=22 >> "$GITHUB_ENV"; SSH_PORT=22; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "${SSH_PORT:-22}" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Verify exact post-deploy state and record two machine proofs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' RELEASE_BRANCH='$RELEASE_BRANCH' WORKSPACE_ID='$WORKSPACE_ID' PRODUCTION_RUN_ID='$PRODUCTION_RUN_ID' PRODUCTION_RUN_NUMBER='$PRODUCTION_RUN_NUMBER' POLICY_RUN_ID='$GITHUB_RUN_ID' POLICY_COMMIT_SHA='$POLICY_COMMIT_SHA' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          A=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          E="$A/.env"
+
+          envv() {
+            node - "$E" "$1" <<'NODE'
+          const fs=require('node:fs'); const [file,key]=process.argv.slice(2);
+          for(const raw of fs.readFileSync(file,'utf8').split(/\r?\n/)){
+            let line=raw.trim(); if(!line||line.startsWith('#')) continue;
+            if(line.startsWith('export ')) line=line.slice(7).trim();
+            const i=line.indexOf('='); if(i<1||line.slice(0,i).trim()!==key) continue;
+            let value=line.slice(i+1).trim();
+            if(value.length>=2&&((value.startsWith('"')&&value.endsWith('"'))||(value.startsWith("'")&&value.endsWith("'")))) value=value.slice(1,-1);
+            process.stdout.write(value); process.exit(0);
+          }
+          process.exit(1);
+          NODE
+          }
+
+          server_release_sha="$(git -C "$A" ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')"
+          live_sha="$(git -C "$A" rev-parse HEAD)"
+          dirty="$(git -C "$A" status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          printf 'SERVER_RELEASE_SHA=%s\nLIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\n' "$server_release_sha" "$live_sha" "$dirty"
+          test "$server_release_sha" = "$EXPECTED_LIVE_SHA"
+          test "$live_sha" = "$EXPECTED_LIVE_SHA"
+          test "$dirty" = "0"
+
+          pm2_state="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(String(p?.pm2_env?.status||"missing"))})')"
+          printf 'PM2_STATE=%s\n' "$pm2_state"
+          test "$pm2_state" = "online"
+
+          login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login || true)"
+          printf 'LOGIN_HTTP=%s\n' "$login_http"
+          test "$login_http" = "200"
+
+          test -f "$A/scripts/engageos-phase17-stage2-record-machine-evidence.ts"
+          database_url="$(envv DATABASE_URL)"
+          test -n "$database_url"
+
+          cd "$A"
+          NODE_ENV=production \
+          DATABASE_URL="$database_url" \
+          PHASE17_WORKSPACE_ID="$WORKSPACE_ID" \
+          PHASE17_EXPECTED_LIVE_SHA="$EXPECTED_LIVE_SHA" \
+          PHASE17_PRODUCTION_RUN_ID="$PRODUCTION_RUN_ID" \
+          PHASE17_PRODUCTION_RUN_NUMBER="$PRODUCTION_RUN_NUMBER" \
+          PHASE17_POLICY_RUN_ID="$POLICY_RUN_ID" \
+          PHASE17_POLICY_COMMIT_SHA="$POLICY_COMMIT_SHA" \
+          PHASE17_MACHINE_EVIDENCE_COMMIT=RECORD_MACHINE_VERIFIED_EVIDENCE \
+          npx --no-install tsx scripts/engageos-phase17-stage2-record-machine-evidence.ts
+          REMOTE
