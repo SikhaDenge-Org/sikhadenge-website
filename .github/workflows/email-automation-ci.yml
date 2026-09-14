@@ -1,0 +1,43 @@
+name: Email Automation CI
+
+on:
+  pull_request:
+    paths:
+      - "apps/whatsapp-agent-dashboard/modules/email-automation/**"
+      - "apps/whatsapp-agent-dashboard/modules/index.ts"
+      - ".github/workflows/email-automation-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: email-automation-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  foundation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/whatsapp-agent-dashboard
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run email automation foundation contracts
+        run: npx tsx modules/email-automation/tests/foundation.test.ts
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Typecheck application
+        run: npm run typecheck
