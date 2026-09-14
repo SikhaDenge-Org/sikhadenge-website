@@ -1,0 +1,51 @@
+name: Ops Dispatch Production 42f8d7
+
+on:
+  push:
+    branches:
+      - ops/production-dispatch-42f8d7-20260914
+    paths:
+      - .github/workflows/ops-dispatch-production-42f8d7.yml
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  dispatch-production:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout current release ref
+        uses: actions/checkout@v4
+        with:
+          ref: release/whatsapp-instagram-agent-flow-20260731
+          fetch-depth: 1
+
+      - name: Fail closed unless release SHA is exact
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected="42f8d732d2cfa8fb353a3f519d4dc63cb4cae5c6"
+          actual="$(git rev-parse HEAD)"
+          printf 'EXPECTED_RELEASE_SHA=%s\n' "$expected"
+          printf 'ACTUAL_RELEASE_SHA=%s\n' "$actual"
+          test "$actual" = "$expected"
+
+      - name: Dispatch guarded production batch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          payload='{"ref":"release/whatsapp-instagram-agent-flow-20260731","inputs":{"release_sha":"42f8d732d2cfa8fb353a3f519d4dc63cb4cae5c6","execute":"true"}}'
+          code="$(curl --silent --show-error --output /tmp/dispatch.out --write-out '%{http_code}' \
+            --request POST \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/whatsapp-agent-production-batch1.yml/dispatches \
+            --data "$payload")"
+          printf 'DISPATCH_HTTP=%s\n' "$code"
+          cat /tmp/dispatch.out || true
+          test "$code" = "204"
+          printf 'PASS: EXACT_SHA_PRODUCTION_DISPATCH_ACCEPTED\n'
