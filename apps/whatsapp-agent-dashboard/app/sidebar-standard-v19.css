@@ -1,6 +1,6 @@
 /* SIDEBAR STANDARD V19 — production hardening after V18.
  * Loaded last. Fixes legacy cascade collisions that painted oversized blue
- * icon blocks, and restores the intended module workspace on tablet/mobile.
+ * icon blocks, and restores the intended workspace on tablet/mobile.
  */
 
 :root {
@@ -50,9 +50,8 @@ body :is(.sx-module, .sx-inbox) .sx-brand-logo {
   height: 42px !important;
 }
 
-/* The previous cascade let legacy pseudo/icon rules paint 50px blue tiles.
- * V19 removes decorative pseudo icons entirely and uses the real inline SVGs.
- */
+/* Real inline SVGs are the only menu icons. Legacy decorative pseudo icons
+ * caused the 50px blue blocks visible in production screenshots. */
 body :is(.sx-module, .sx-inbox) .sx-side .rail-button::before,
 body :is(.sx-module, .sx-inbox) .sx-side .rail-button::after {
   content: none !important;
@@ -207,19 +206,81 @@ body :is(.sx-module, .sx-inbox) .sx-side .sx-account {
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.035) !important;
 }
 
-/* Critical regression fix: module pages were still showing the permanent
- * desktop rail below 1024px because V18's display:flex!important loaded last.
- * That consumed nearly the entire phone viewport and made Contacts appear blank.
- */
-@media (max-width: 1023px) {
-  body .sx-module {
+/* Tablet rail: compact, icon-only and deliberate instead of squeezed labels. */
+@media (min-width: 1024px) and (max-width: 1279px) {
+  body .sx-inbox {
+    grid-template-columns: 72px minmax(300px, 326px) minmax(0, 1fr) !important;
+  }
+
+  body .sx-inbox > .sx-side {
+    width: 72px !important;
+    min-width: 72px !important;
+    max-width: 72px !important;
+    padding: 10px 8px !important;
+  }
+
+  body .sx-inbox .sx-side .brand-mark.sx-brand {
+    width: 54px !important;
+    height: 54px !important;
+    min-height: 54px !important;
+    padding: 6px !important;
+    justify-content: center !important;
+  }
+
+  body .sx-inbox .sx-brand-logo {
+    width: 42px !important;
+    height: 42px !important;
+    flex-basis: 42px !important;
+    overflow: hidden !important;
+  }
+
+  body .sx-inbox .sx-brand-logo img {
+    width: 178px !important;
+    max-width: none !important;
+    object-position: left center !important;
+  }
+
+  body .sx-inbox .sx-side .rail-button,
+  body .sx-inbox .sx-side .sx-chan {
+    justify-content: center !important;
+    width: 54px !important;
+    min-width: 54px !important;
+    max-width: 54px !important;
+    padding: 0 !important;
+    margin-inline: auto !important;
+  }
+
+  body .sx-inbox .sx-side :is(.sx-navlabel, .sx-side-label, .sx-chan-name, .sx-chan-tag, .sx-chan-dot, .sx-navbadge, .sx-chan-count, .sx-acc-copy, .logout-button) {
+    display: none !important;
+  }
+
+  body .sx-inbox .sx-account {
     display: grid !important;
-    grid-template-columns: minmax(0, 1fr) !important;
+    place-items: center !important;
+    grid-template-columns: 1fr !important;
+    min-height: 52px !important;
+    padding: 6px !important;
+  }
+}
+
+/* Critical responsive regression fix. V18 loaded after enterprise-ui-v2 and
+ * re-enabled the permanent desktop sidebar below 1024px. On phone-sized
+ * screens that consumed almost the whole viewport, making Inbox/Contacts look
+ * blank or showing only the left rail. Restore the existing mobile contract. */
+@media (max-width: 1023px) {
+  body .sx-module,
+  body .sx-inbox {
     width: 100% !important;
     min-width: 0 !important;
   }
 
-  body .sx-module > .sx-side {
+  body .sx-module {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  body .sx-module > .sx-side,
+  body .sx-inbox > .sx-side {
     display: none !important;
   }
 
@@ -246,6 +307,19 @@ body :is(.sx-module, .sx-inbox) .sx-side .sx-account {
 }
 
 @media (max-width: 767px) {
+  body .sx-inbox {
+    display: block !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    overflow: hidden !important;
+  }
+
+  body .sx-inbox > :is(.sx-list, .sx-chat) {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
   body .sx-module .sx-workspace-head {
     min-width: 0 !important;
     padding-inline: 12px !important;
