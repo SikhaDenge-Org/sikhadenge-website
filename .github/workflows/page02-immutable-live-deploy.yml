@@ -1,0 +1,130 @@
+name: Page 02 Immutable Live Deploy
+
+on:
+  push:
+    branches:
+      - ui/page02-inbox-live-20260914
+    paths:
+      - "apps/whatsapp-agent-dashboard/app/inbox-page02.css"
+      - "apps/whatsapp-agent-dashboard/app/inbox/page.tsx"
+      - "apps/whatsapp-agent-dashboard/scripts/page02-immutable-release-deploy.sh"
+      - ".github/workflows/page02-immutable-live-deploy.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: contains(github.event.head_commit.message, '[page02-live-deploy]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      TARGET_SHA: ${{ github.sha }}
+      RUN_ID_SAFE: page02-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 1
+
+      - name: Validate presentation and deployment inputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          APP=apps/whatsapp-agent-dashboard
+          test -s "$APP/app/inbox-page02.css"
+          test -s "$APP/app/inbox/page.tsx"
+          test -s "$APP/scripts/page02-immutable-release-deploy.sh"
+          test -s "$APP/public/sikhadenge-official-logo.png"
+          test -s "$APP/public/sikhadenge-app-mark-v3.svg"
+          grep -Fq 'import "../inbox-page02.css";' "$APP/app/inbox/page.tsx"
+          grep -Fq -- '--p02-navy-950: #020b26' "$APP/app/inbox-page02.css"
+          grep -Fq "background: url('/sikhadenge-official-logo.png')" "$APP/app/inbox-page02.css"
+          grep -Fq '@media (max-width: 767px)' "$APP/app/inbox-page02.css"
+          printf 'PASS: PAGE02_DEPLOY_INPUTS\n'
+
+      - name: Configure pinned SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$SSH_HOST"
+          test -n "$SSH_USER"
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$SSH_HOST_KEY"
+          if [[ -z "${SSH_PORT:-}" ]]; then SSH_PORT=22; echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          canonical_host="[$SSH_HOST]:$SSH_PORT"
+          printf '%s %s %s\n' "$canonical_host" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+          printf 'PASS: PAGE02_SSH_CONFIGURED\n'
+
+      - name: Verify production transport
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" \
+            'test "$(id -u)" = "0" && printf "PASS: PAGE02_SSH_TRANSPORT\n"'
+
+      - name: Upload Page 02 release inputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            apps/whatsapp-agent-dashboard/app/inbox-page02.css \
+            "$SSH_USER@$SSH_HOST:/tmp/${RUN_ID_SAFE}-inbox-page02.css"
+          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            apps/whatsapp-agent-dashboard/scripts/page02-immutable-release-deploy.sh \
+            "$SSH_USER@$SSH_HOST:/tmp/${RUN_ID_SAFE}-deploy.sh"
+
+      - name: Execute immutable production release
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "RUN_ID_SAFE='$RUN_ID_SAFE' TARGET_SHA='$TARGET_SHA' TRANSPORT_CSS='/tmp/${RUN_ID_SAFE}-inbox-page02.css' bash '/tmp/${RUN_ID_SAFE}-deploy.sh'"
+
+      - name: Public smoke verification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          login_status=000
+          for attempt in $(seq 1 10); do
+            login_status="$(curl -sS -L --max-time 12 -o /tmp/page02-login.html -w '%{http_code}' 'https://whatsapp.sikhadenge.in/login?page02-gha=1' || true)"
+            if [[ "$login_status" = "200" ]]; then break; fi
+            sleep 2
+          done
+          test "$login_status" = "200"
+          inbox_status="$(curl -sS --max-time 12 -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/inbox?page02-gha=1' || true)"
+          case "$inbox_status" in
+            200|302|303|307|308) ;;
+            *) exit 1 ;;
+          esac
+          printf 'PASS: PAGE02_PUBLIC_SMOKE login=%s inbox=%s\n' "$login_status" "$inbox_status"
