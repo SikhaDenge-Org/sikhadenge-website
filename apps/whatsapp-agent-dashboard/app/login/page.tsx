@@ -33,12 +33,33 @@ export default async function LoginPage() {
       data-page01-hero="approved-hq-v11"
     >
       <section className="split01__hero split01__hero--approved-image" aria-label="SikhaDenge WhatsApp AI Agent workspace">
-        <img
-          className="split01__hero-approved-image"
-          src={PAGE01_HERO_V11}
-          alt=""
-          aria-hidden="true"
-        />
+        
+        <div
+          className="page01-hero-v17-shell"
+          data-page01-hero-version="20260913-211322"
+        >
+          <picture className="page01-hero-v17-picture">
+            <source
+              media="(min-width: 1920px)"
+              srcSet={"/page01-hero-ultrawide-v17.png?v=20260913-211322"}
+            />
+            <source
+              media="(min-width: 1181px)"
+              srcSet={"/page01-hero-desktop-v17.png?v=20260913-211322"}
+            />
+            <source
+              media="(min-width: 621px)"
+              srcSet={"/page01-hero-tablet-v17.png?v=20260913-211322"}
+            />
+            <img
+              src={"/page01-hero-desktop-v17.png?v=20260913-211322"}
+              alt="SikhaDenge WhatsApp AI Agent Workspace"
+              className="split01__hero-approved-image page01-hero-v17-image"
+              loading="eager"
+              decoding="async"
+            />
+          </picture>
+        </div>
       </section>
 
       <section className="split01__signin" data-auth-ui="right-auth-v12" aria-labelledby="login-title">
@@ -65,7 +86,7 @@ export default async function LoginPage() {
           </div>
 
           <div className="split01__signin-heading">
-            <p>SECURE TEAM ACCESS</p>
+            <p>Secure Team Access</p>
             <h2 id="login-title">Welcome back</h2>
             <span>Sign in to manage conversations, qualified leads,<br className="split01__desktop-break" /> agent knowledge and counselor handoffs.</span>
           </div>
