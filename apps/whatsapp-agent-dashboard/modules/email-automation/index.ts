@@ -20,3 +20,7 @@ export * from "./templates/blocks";
 export * from "./templates/validation";
 export * from "./templates/render";
 export * from "./automation/contracts";
+export * from "./templates/persistence";
+export * from "./application/template-service";
+export * from "./infrastructure/prisma-email-template-repository";
+export * from "./infrastructure/template-runtime";

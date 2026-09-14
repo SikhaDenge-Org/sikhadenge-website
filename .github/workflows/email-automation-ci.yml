@@ -39,6 +39,9 @@ jobs:
       - name: Run email template studio contracts
         run: npx tsx modules/email-automation/tests/template-studio.test.ts
 
+      - name: Run email template persistence contracts
+        run: npx tsx modules/email-automation/tests/template-persistence.test.ts
+
       - name: Generate Prisma client
         run: npx prisma generate
 
