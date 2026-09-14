@@ -1,0 +1,305 @@
+name: Page 02 Inbox Live Deploy
+
+on:
+  push:
+    branches:
+      - ui/page02-inbox-live-20260914
+    paths:
+      - "apps/whatsapp-agent-dashboard/app/inbox-page02.css"
+      - "apps/whatsapp-agent-dashboard/app/inbox/page.tsx"
+      - ".github/workflows/page02-inbox-live-deploy.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  validate-and-deploy:
+    if: contains(github.event.head_commit.message, '[page02-live-deploy]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      TARGET_SHA: ${{ github.sha }}
+      RUN_ID_SAFE: page02-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Checkout exact Page 02 revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 1
+
+      - name: Validate Page 02 presentation contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          APP=apps/whatsapp-agent-dashboard
+          test -s "$APP/app/inbox-page02.css"
+          test -s "$APP/public/sikhadenge-official-logo.png"
+          test -s "$APP/public/sikhadenge-app-mark-v3.svg"
+          grep -Fq 'import "../inbox-page02.css";' "$APP/app/inbox/page.tsx"
+          grep -Fq -- '--p02-navy-950: #020b26' "$APP/app/inbox-page02.css"
+          grep -Fq "background: url('/sikhadenge-official-logo.png')" "$APP/app/inbox-page02.css"
+          grep -Fq '@media (min-width: 768px) and (max-width: 1179px)' "$APP/app/inbox-page02.css"
+          grep -Fq '@media (max-width: 767px)' "$APP/app/inbox-page02.css"
+          printf 'PASS: PAGE02_PRESENTATION_CONTRACT\n'
+
+      - name: Validate production access configuration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          missing=0
+          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            if [[ -z "${!variable_name:-}" ]]; then
+              printf 'Missing required production secret: %s\n' "$variable_name" >&2
+              missing=1
+            fi
+          done
+          test "$missing" = "0"
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"
+          fi
+          printf 'PASS: PAGE02_PRODUCTION_ACCESS_CONFIGURED\n'
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          private_key_file="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$private_key_file"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$private_key_file"
+          fi
+          chmod 600 "$private_key_file"
+          [[ "$SSH_HOST" =~ ^[^[:space:]/]+$ ]]
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          (( SSH_PORT >= 1 && SSH_PORT <= 65535 ))
+          read -r _ supplied_key_type supplied_key_material _ <<< "$SSH_HOST_KEY"
+          test "$supplied_key_type" = "ssh-ed25519"
+          test -n "$supplied_key_material"
+          printf '%s %s\n' "$supplied_key_type" "$supplied_key_material" | ssh-keygen -lf - -E sha256 >/dev/null
+          canonical_host="[$SSH_HOST]:$SSH_PORT"
+          printf '%s %s %s\n' "$canonical_host" "$supplied_key_type" "$supplied_key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$private_key_file" >/dev/null
+          ssh-keygen -F "$canonical_host" -f "$HOME/.ssh/known_hosts" >/dev/null
+          printf 'PASS: PAGE02_PINNED_SSH_READY\n'
+
+      - name: Verify pinned SSH transport
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" \
+            'test "$(id -u)" = "0" && printf "PASS: PAGE02_SSH_TRANSPORT_VERIFIED\n"'
+
+      - name: Upload Page 02 stylesheet to staging transport
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            apps/whatsapp-agent-dashboard/app/inbox-page02.css \
+            "$SSH_USER@$SSH_HOST:/tmp/${RUN_ID_SAFE}-inbox-page02.css"
+
+      - name: Isolated build, atomic activation and rollback protection
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "RUN_ID_SAFE='$RUN_ID_SAFE' TARGET_SHA='$TARGET_SHA' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+
+          LIVE_APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          PM2_PROCESS_NAME=sikhadenge-whatsapp-agent
+          PUBLIC_URL=https://whatsapp.sikhadenge.in
+          STAGE_ROOT="/tmp/sikhadenge-${RUN_ID_SAFE}"
+          STAGE_APP="$STAGE_ROOT/app"
+          BACKUP_DIR="/root/sikhadenge-backups/${RUN_ID_SAFE}"
+          TRANSPORT_CSS="/tmp/${RUN_ID_SAFE}-inbox-page02.css"
+          SOURCE_PAGE="$LIVE_APP/app/inbox/page.tsx"
+          SOURCE_CSS="$LIVE_APP/app/inbox-page02.css"
+          ACTIVATED=0
+          SOURCE_CHANGED=0
+          CSS_EXISTED=0
+          RUNTIME_SWAPPED=0
+          LIVE_SWAPPED=0
+
+          cleanup_stage() {
+            rm -rf "$STAGE_ROOT" "$TRANSPORT_CSS" >/dev/null 2>&1 || true
+          }
+
+          rollback() {
+            local code=$?
+            trap - ERR
+            printf 'FAIL: PAGE02_DEPLOY_FAILED code=%s\n' "$code" >&2
+
+            if [[ "$RUNTIME_SWAPPED" = "1" && -n "${RUNTIME_APP:-}" && "$RUNTIME_APP" != "$LIVE_APP" && -d "$BACKUP_DIR/runtime-next-before" ]]; then
+              rm -rf "$RUNTIME_APP/.next" || true
+              mv "$BACKUP_DIR/runtime-next-before" "$RUNTIME_APP/.next" || true
+            fi
+
+            if [[ "$LIVE_SWAPPED" = "1" && -d "$BACKUP_DIR/live-next-before" ]]; then
+              rm -rf "$LIVE_APP/.next" || true
+              mv "$BACKUP_DIR/live-next-before" "$LIVE_APP/.next" || true
+            fi
+
+            if [[ "$SOURCE_CHANGED" = "1" ]]; then
+              cp -a "$BACKUP_DIR/page.tsx.before" "$SOURCE_PAGE" || true
+              if [[ "$CSS_EXISTED" = "1" ]]; then
+                cp -a "$BACKUP_DIR/inbox-page02.css.before" "$SOURCE_CSS" || true
+              else
+                rm -f "$SOURCE_CSS" || true
+              fi
+            fi
+
+            pm2 restart "$PM2_PROCESS_NAME" >/dev/null 2>&1 || true
+            cleanup_stage
+            exit "$code"
+          }
+          trap rollback ERR
+
+          test -d "$LIVE_APP"
+          test -s "$LIVE_APP/.env"
+          test -s "$LIVE_APP/public/sikhadenge-official-logo.png"
+          test -s "$LIVE_APP/public/sikhadenge-app-mark-v3.svg"
+          test -s "$SOURCE_PAGE"
+          test -s "$TRANSPORT_CSS"
+          command -v node >/dev/null
+          command -v npm >/dev/null
+          command -v pm2 >/dev/null
+          command -v rsync >/dev/null
+          printf 'PASS: PAGE02_LIVE_PREFLIGHT\n'
+
+          install -d -m 700 "$BACKUP_DIR" "$STAGE_ROOT"
+          cp -a "$SOURCE_PAGE" "$BACKUP_DIR/page.tsx.before"
+          if [[ -f "$SOURCE_CSS" ]]; then
+            CSS_EXISTED=1
+            cp -a "$SOURCE_CSS" "$BACKUP_DIR/inbox-page02.css.before"
+          fi
+          git -C "$LIVE_APP" rev-parse HEAD > "$BACKUP_DIR/source-before.sha" || true
+          cat "$LIVE_APP/.next/BUILD_ID" > "$BACKUP_DIR/build-before.id"
+
+          PM2_JSON_FILE="$(mktemp)"
+          pm2 jlist > "$PM2_JSON_FILE"
+          RUNTIME_APP="$(node - "$PM2_PROCESS_NAME" "$PM2_JSON_FILE" <<'NODE'
+          const fs = require('node:fs');
+          const [name, file] = process.argv.slice(2);
+          const entry = JSON.parse(fs.readFileSync(file, 'utf8')).find((item) => item.name === name);
+          if (!entry) process.exit(1);
+          process.stdout.write(String(entry.pm2_env?.pm_cwd || ''));
+          NODE
+          )"
+          rm -f "$PM2_JSON_FILE"
+          if [[ -z "$RUNTIME_APP" ]]; then RUNTIME_APP="$LIVE_APP"; fi
+          case "$RUNTIME_APP" in
+            /var/www/sikhadenge-whatsapp-agent/*) ;;
+            *) printf 'Unexpected PM2 cwd: %s\n' "$RUNTIME_APP" >&2; exit 71 ;;
+          esac
+          test -d "$RUNTIME_APP/.next"
+          printf 'RUNTIME_APP=%s\n' "$RUNTIME_APP"
+
+          rsync -a --delete \
+            --exclude='.next' --exclude='node_modules' --exclude='.env' \
+            "$LIVE_APP/" "$STAGE_APP/"
+          ln -s "$LIVE_APP/.env" "$STAGE_APP/.env"
+          install -m 644 "$TRANSPORT_CSS" "$STAGE_APP/app/inbox-page02.css"
+
+          if ! grep -Fq 'import "../inbox-page02.css";' "$STAGE_APP/app/inbox/page.tsx"; then
+            grep -Fq 'import "../inbox-enterprise-final.css";' "$STAGE_APP/app/inbox/page.tsx"
+            sed -i '/import "\.\.\/inbox-enterprise-final\.css";/a import "../inbox-page02.css";' "$STAGE_APP/app/inbox/page.tsx"
+          fi
+          grep -Fq 'import "../inbox-page02.css";' "$STAGE_APP/app/inbox/page.tsx"
+
+          cd "$STAGE_APP"
+          npm install --include=dev --no-audit --no-fund --package-lock=false
+          npx prisma generate
+          npm run typecheck
+          npm run test:inbox-layout
+          NODE_ENV=production npm run build
+          test -s "$STAGE_APP/.next/BUILD_ID"
+          grep -R -Fq -- '--p02-navy-950' "$STAGE_APP/.next/static/css"
+          printf 'PASS: PAGE02_ISOLATED_BUILD_AND_REGRESSION\n'
+
+          cp -a "$STAGE_APP/.next" "$STAGE_ROOT/next-live"
+          if [[ "$RUNTIME_APP" != "$LIVE_APP" ]]; then
+            cp -a "$STAGE_APP/.next" "$STAGE_ROOT/next-runtime"
+          fi
+
+          install -m 644 "$STAGE_APP/app/inbox/page.tsx" "$SOURCE_PAGE"
+          install -m 644 "$STAGE_APP/app/inbox-page02.css" "$SOURCE_CSS"
+          SOURCE_CHANGED=1
+
+          mv "$LIVE_APP/.next" "$BACKUP_DIR/live-next-before"
+          mv "$STAGE_ROOT/next-live" "$LIVE_APP/.next"
+          LIVE_SWAPPED=1
+
+          if [[ "$RUNTIME_APP" != "$LIVE_APP" ]]; then
+            mv "$RUNTIME_APP/.next" "$BACKUP_DIR/runtime-next-before"
+            mv "$STAGE_ROOT/next-runtime" "$RUNTIME_APP/.next"
+            RUNTIME_SWAPPED=1
+            install -d -m 755 "$RUNTIME_APP/public"
+            install -m 644 "$LIVE_APP/public/sikhadenge-official-logo.png" "$RUNTIME_APP/public/sikhadenge-official-logo.png"
+            install -m 644 "$LIVE_APP/public/sikhadenge-app-mark-v3.svg" "$RUNTIME_APP/public/sikhadenge-app-mark-v3.svg"
+          fi
+
+          pm2 restart "$PM2_PROCESS_NAME"
+          sleep 6
+          ACTIVATED=1
+
+          test "$(cat "$LIVE_APP/.next/BUILD_ID")" = "$(cat "$STAGE_APP/.next/BUILD_ID")"
+          test "$(cat "$RUNTIME_APP/.next/BUILD_ID")" = "$(cat "$STAGE_APP/.next/BUILD_ID")"
+          grep -R -Fq -- '--p02-navy-950' "$RUNTIME_APP/.next/static/css"
+
+          LOGIN_STATUS="$(curl -sS -L -o /tmp/${RUN_ID_SAFE}-login.html -w '%{http_code}' "${PUBLIC_URL}/login?page02=${RUN_ID_SAFE}")"
+          test "$LOGIN_STATUS" = "200"
+
+          INBOX_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' "${PUBLIC_URL}/inbox?page02=${RUN_ID_SAFE}")"
+          case "$INBOX_STATUS" in
+            200|302|303|307|308) ;;
+            *) printf 'Unexpected inbox HTTP status: %s\n' "$INBOX_STATUS" >&2; exit 72 ;;
+          esac
+
+          {
+            printf 'RUN_ID=%s\n' "$RUN_ID_SAFE"
+            printf 'TARGET_SHA=%s\n' "$TARGET_SHA"
+            printf 'BUILD_ID=%s\n' "$(cat "$RUNTIME_APP/.next/BUILD_ID")"
+            printf 'LOGIN_HTTP=%s\n' "$LOGIN_STATUS"
+            printf 'INBOX_HTTP=%s\n' "$INBOX_STATUS"
+            printf 'STATUS=PASS\n'
+            printf 'COMPLETED_UTC=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          } > "$BACKUP_DIR/page02-result.txt"
+          chmod 600 "$BACKUP_DIR/page02-result.txt"
+          cat "$BACKUP_DIR/page02-result.txt"
+
+          trap - ERR
+          cleanup_stage
+          printf 'PASS: PAGE02_LIVE_DEPLOY_COMPLETE\n'
+          REMOTE
+
+      - name: Public smoke verification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          login_status="$(curl -sS -L -o /tmp/page02-login.html -w '%{http_code}' 'https://whatsapp.sikhadenge.in/login?page02-gha=1')"
+          test "$login_status" = "200"
+          inbox_status="$(curl -sS -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/inbox?page02-gha=1')"
+          case "$inbox_status" in
+            200|302|303|307|308) ;;
+            *) exit 1 ;;
+          esac
+          printf 'PASS: PAGE02_PUBLIC_SMOKE login=%s inbox=%s\n' "$login_status" "$inbox_status"
