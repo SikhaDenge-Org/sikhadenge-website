@@ -44,12 +44,16 @@ export function resolveEmailSender(input: SenderResolutionInput): SenderResoluti
     return { sender, source };
   }
 
-  const workspaceDefault = input.availableSenders.find(
-    (sender) => sender.isDefault && usable(sender),
+  const workspaceDefaults = input.availableSenders.filter(
+    (sender) => sender.isWorkspaceDefault && usable(sender),
   );
-  if (!workspaceDefault) {
-    throw new Error("No verified active workspace default email sender is available.");
+  if (workspaceDefaults.length !== 1) {
+    throw new Error(
+      workspaceDefaults.length === 0
+        ? "No verified active workspace default email sender is available."
+        : "Multiple verified workspace default email senders are configured.",
+    );
   }
 
-  return { sender: workspaceDefault, source: "WORKSPACE_DEFAULT" };
+  return { sender: workspaceDefaults[0], source: "WORKSPACE_DEFAULT" };
 }
