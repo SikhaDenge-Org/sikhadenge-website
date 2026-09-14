@@ -1,0 +1,98 @@
+name: Page 02 Production Diagnostics
+
+on:
+  push:
+    branches:
+      - ui/page02-inbox-live-20260914
+    paths:
+      - ".github/workflows/page02-production-diagnostics.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: contains(github.event.head_commit.message, '[page02-diagnose]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+    steps:
+      - name: Configure pinned SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          canonical_host="[$SSH_HOST]:$SSH_PORT"
+          printf '%s %s %s\n' "$canonical_host" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Read-only production routing diagnostics
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          NAME=sikhadenge-whatsapp-agent
+          PUBLIC=https://whatsapp.sikhadenge.in
+          PM2JSON="$(mktemp)"
+          pm2 jlist > "$PM2JSON"
+          node - "$NAME" "$PM2JSON" <<'NODE'
+          const fs=require('node:fs');
+          const [name,file]=process.argv.slice(2);
+          const p=JSON.parse(fs.readFileSync(file,'utf8')).find(x=>x.name===name);
+          if(!p) process.exit(2);
+          console.log(`PM2_STATUS=${p.pm2_env?.status||''}`);
+          console.log(`PM2_CWD=${p.pm2_env?.pm_cwd||''}`);
+          console.log(`PM2_PORT=${p.pm2_env?.PORT||p.pm2_env?.port||'3100'}`);
+          console.log(`PM2_SCRIPT=${p.pm2_env?.pm_exec_path||''}`);
+          console.log(`PM2_ARGS=${JSON.stringify(p.pm2_env?.args||[])}`);
+          NODE
+          CWD="$(node - "$NAME" "$PM2JSON" <<'NODE'
+          const fs=require('node:fs'); const [name,file]=process.argv.slice(2); const p=JSON.parse(fs.readFileSync(file,'utf8')).find(x=>x.name===name); process.stdout.write(String(p?.pm2_env?.pm_cwd||''));
+          NODE
+          )"
+          PORT="$(node - "$NAME" "$PM2JSON" <<'NODE'
+          const fs=require('node:fs'); const [name,file]=process.argv.slice(2); const p=JSON.parse(fs.readFileSync(file,'utf8')).find(x=>x.name===name); process.stdout.write(String(p?.pm2_env?.PORT||p?.pm2_env?.port||'3100'));
+          NODE
+          )"
+          rm -f "$PM2JSON"
+          printf 'RUNTIME_BUILD_ID=%s\n' "$(cat "$CWD/.next/BUILD_ID" 2>/dev/null || echo missing)"
+          printf 'RUNTIME_LOGIN_MANIFEST='; grep -F '"/login"' "$CWD/.next/server/app-paths-manifest.json" 2>/dev/null || true
+          printf 'RUNTIME_INBOX_MANIFEST='; grep -F '"/inbox"' "$CWD/.next/server/app-paths-manifest.json" 2>/dev/null || true
+          for path in / /login /inbox /contacts; do
+            printf 'LOCAL_%s=' "$(echo "$path" | tr '/-' '__')"
+            curl -sS --max-time 10 -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:${PORT}${path}" || true
+            printf 'PUBLIC_%s=' "$(echo "$path" | tr '/-' '__')"
+            curl -sS --max-time 10 -o /dev/null -w '%{http_code}\n' "${PUBLIC}${path}" || true
+          done
+          if command -v nginx >/dev/null 2>&1; then
+            echo 'NGINX_WHATSAPP_BEGIN'
+            nginx -T 2>/dev/null | awk '
+              /server_name[[:space:]]+whatsapp\.sikhadenge\.in/ {show=1}
+              show {print}
+              show && /^}/ {exit}
+            ' | sed -n '1,120p'
+            echo 'NGINX_WHATSAPP_END'
+          fi
+          echo 'PM2_ERROR_TAIL_BEGIN'
+          tail -n 40 "/root/.pm2/logs/${NAME}-error.log" 2>/dev/null || true
+          echo 'PM2_ERROR_TAIL_END'
+          REMOTE
