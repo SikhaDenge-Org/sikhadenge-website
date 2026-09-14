@@ -77,7 +77,8 @@ export type EmailSenderIdentity = {
   replyToEmail: string | null;
   externalSenderId: string | null;
   verificationStatus: EmailSenderVerificationStatus;
-  isDefault: boolean;
+  isProviderDefault: boolean;
+  isWorkspaceDefault: boolean;
   isActive: boolean;
   dailyLimit: number | null;
 };
