@@ -74,7 +74,7 @@ const channels: ReadonlyArray<ChannelItem> = [
   { id: "telegram", label: "Telegram", connected: false, href: "/integrations" },
   { id: "linkedin", label: "LinkedIn", connected: false, href: "/integrations" },
   { id: "twitter", label: "X / Twitter", connected: false, href: "/integrations" },
-  { id: "email", label: "Email", connected: false, href: "/integrations" },
+  { id: "email", label: "Email", connected: false, href: "/email" },
   { id: "website", label: "Website Chat", connected: false, href: "/integrations" },
   { id: "sms", label: "SMS", connected: false, href: "/integrations" },
   { id: "contact-form", label: "Contact Form", connected: false, href: "/integrations" },
