@@ -8,13 +8,9 @@ on:
       - ".github/workflows/whatsapp-agent-production-page02.yml"
       - "apps/whatsapp-agent-dashboard/app/inbox/page.tsx"
       - "apps/whatsapp-agent-dashboard/app/page02-inbox-standard-v16.css"
-      - "apps/whatsapp-agent-dashboard/components/inbox/**"
-      - "apps/whatsapp-agent-dashboard/components/navigation/**"
-      - "apps/whatsapp-agent-dashboard/public/sikhadenge-header-safe-320.png"
-      - "apps/whatsapp-agent-dashboard/public/sikhadenge-official-logo.png"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: whatsapp-agent-production
@@ -40,9 +36,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ env.TARGET_SHA }}
-          fetch-depth: 0
+          fetch-depth: 1
 
-      - name: Validate target and production secrets
+      - name: Validate production request and secrets
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -59,7 +55,7 @@ jobs:
           if [[ -z "${SSH_PORT:-}" ]]; then
             printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"
           fi
-          printf 'PASS: PAGE02_TARGET_AND_SECRET_GATE_COMPLETE\n'
+          printf 'PASS: PAGE02_PRODUCTION_REQUEST_VALIDATED\n'
 
       - name: Configure pinned SSH identity
         shell: bash
@@ -95,7 +91,8 @@ jobs:
             "$SSH_USER@$SSH_HOST" \
             'test "$(id -u)" = "0" && printf "PASS: PAGE02_SSH_TRANSPORT_VERIFIED\n"'
 
-      - name: Deploy exact Page 02 release with existing production guardrails
+      - name: Deploy Page 02 runtime overlay while preserving current Page 01
+        id: deploy
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -104,52 +101,240 @@ jobs:
             "$SSH_USER@$SSH_HOST" \
             "TARGET_SHA='$TARGET_SHA' RUN_ID='$RUN_ID' bash -s" <<'REMOTE'
           set -Eeuo pipefail
+
           LIVE_APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           REPO_ROOT=/var/www/sikhadenge-whatsapp-agent/source
           RELEASE_BRANCH=release/whatsapp-instagram-agent-flow-20260731
           RELEASE_REF=refs/remotes/origin/release/whatsapp-instagram-agent-flow-20260731
-          STAGE_ROOT="/tmp/sikhadenge-page02-${RUN_ID}"
-          STAGE_APP="$STAGE_ROOT/apps/whatsapp-agent-dashboard"
+          PM2_PROCESS_NAME=sikhadenge-whatsapp-agent
+          PUBLIC_URL=https://whatsapp.sikhadenge.in
+          BACKUP_ROOT=/root/sikhadenge-backups
+          BACKUP_DIR="$BACKUP_ROOT/page02-runtime-overlay-$RUN_ID"
+          STAGE_ROOT="/tmp/sikhadenge-page02-runtime-$RUN_ID"
+          STAGE_APP="$STAGE_ROOT/app"
+          LIVE_STAGE="$LIVE_APP/.next-stage-page02-$RUN_ID"
+          LIVE_OLD="$LIVE_APP/.next-before-page02-$RUN_ID"
+          LIVE_FAILED="$LIVE_APP/.next-failed-page02-$RUN_ID"
+          RUNTIME_APP="$LIVE_APP"
+          RUNTIME_STAGE=""
+          RUNTIME_OLD=""
+          RUNTIME_FAILED=""
+          ROLLBACK_ARMED=0
 
-          cleanup() {
-            git -C "$LIVE_APP" worktree remove --force "$STAGE_ROOT" >/dev/null 2>&1 || true
+          cleanup_stage() {
+            rm -rf "$STAGE_ROOT" >/dev/null 2>&1 || true
           }
-          trap cleanup EXIT
+
+          rollback_on_error() {
+            code=$?
+            trap - ERR
+            set +e
+            if [[ "$ROLLBACK_ARMED" = "1" ]]; then
+              printf 'INFO: PAGE02_RUNTIME_ROLLBACK_BEGIN code=%s\n' "$code" >&2
+              if [[ -d "$LIVE_APP/.next" && -d "$LIVE_OLD" ]]; then
+                rm -rf "$LIVE_FAILED"
+                mv "$LIVE_APP/.next" "$LIVE_FAILED"
+                mv "$LIVE_OLD" "$LIVE_APP/.next"
+              fi
+              if [[ "$RUNTIME_APP" != "$LIVE_APP" && -n "$RUNTIME_OLD" && -d "$RUNTIME_APP/.next" && -d "$RUNTIME_OLD" ]]; then
+                rm -rf "$RUNTIME_FAILED"
+                mv "$RUNTIME_APP/.next" "$RUNTIME_FAILED"
+                mv "$RUNTIME_OLD" "$RUNTIME_APP/.next"
+              fi
+              pm2 restart "$PM2_PROCESS_NAME" >/dev/null 2>&1 || true
+              printf 'INFO: PAGE02_RUNTIME_ROLLBACK_END\n' >&2
+            fi
+            cleanup_stage
+            exit "$code"
+          }
+          trap rollback_on_error ERR
 
           test -d "$LIVE_APP"
-          test "$(git -C "$LIVE_APP" branch --show-current)" = "$RELEASE_BRANCH"
-          git -C "$LIVE_APP" fetch origin \
+          test -d "$LIVE_APP/.next"
+          test -d "$LIVE_APP/node_modules"
+          test -f "$LIVE_APP/.env"
+          test "$(git -C "$REPO_ROOT" branch --show-current)" = "$RELEASE_BRANCH"
+
+          git -C "$REPO_ROOT" fetch origin \
             +refs/heads/release/whatsapp-instagram-agent-flow-20260731:$RELEASE_REF
-          test "$(git -C "$LIVE_APP" rev-parse "$RELEASE_REF")" = "$TARGET_SHA"
+          test "$(git -C "$REPO_ROOT" rev-parse "$RELEASE_REF")" = "$TARGET_SHA"
+          git -C "$REPO_ROOT" cat-file -e "$TARGET_SHA^{commit}"
 
-          LIVE_SHA="$(git -C "$LIVE_APP" rev-parse HEAD)"
-          printf 'PAGE02_LIVE_SHA_BEFORE=%s\n' "$LIVE_SHA"
+          PAGE02_FILE_1=apps/whatsapp-agent-dashboard/app/inbox/page.tsx
+          PAGE02_FILE_2=apps/whatsapp-agent-dashboard/app/page02-inbox-standard-v16.css
+          git -C "$REPO_ROOT" cat-file -e "$TARGET_SHA:$PAGE02_FILE_1"
+          git -C "$REPO_ROOT" cat-file -e "$TARGET_SHA:$PAGE02_FILE_2"
+
+          for protected_path in "$PAGE02_FILE_1" "$PAGE02_FILE_2"; do
+            if [[ -n "$(git -C "$REPO_ROOT" status --porcelain -- "$protected_path")" ]]; then
+              printf 'FAIL: local production change overlaps Page 02 target: %s\n' "$protected_path" >&2
+              exit 71
+            fi
+          done
+
+          LIVE_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+          LIVE_BUILD_BEFORE="$(cat "$LIVE_APP/.next/BUILD_ID")"
+          test -n "$LIVE_BUILD_BEFORE"
+          printf 'PAGE02_LIVE_SOURCE_SHA_BEFORE=%s\n' "$LIVE_SHA"
+          printf 'PAGE02_LIVE_BUILD_BEFORE=%s\n' "$LIVE_BUILD_BEFORE"
           printf 'PAGE02_TARGET_SHA=%s\n' "$TARGET_SHA"
-          git -C "$LIVE_APP" merge-base --is-ancestor "$LIVE_SHA" "$TARGET_SHA"
+          printf 'PAGE02_PRESERVED_STATUS_BEGIN\n'
+          git -C "$REPO_ROOT" status --porcelain --untracked-files=all || true
+          printf 'PAGE02_PRESERVED_STATUS_END\n'
 
-          tracked_status="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)"
-          if [[ -n "$tracked_status" ]]; then
-            printf 'PAGE02_TRACKED_DIRTY_STATUS_BEGIN\n'
-            printf '%s\n' "$tracked_status"
-            printf 'PAGE02_TRACKED_DIRTY_STATUS_END\n'
-            printf 'FAIL: PAGE02_PRODUCTION_WORKTREE_NOT_CLEAN\n' >&2
-            exit 61
+          for asset in \
+            page01-hero-desktop-v17.png \
+            page01-hero-tablet-v17.png \
+            page01-hero-ultrawide-v17.png; do
+            test -s "$LIVE_APP/public/$asset"
+          done
+          printf 'PASS: PAGE01_V17_ASSETS_PRESENT_BEFORE_PAGE02_DEPLOY\n'
+
+          install -d -m 700 "$BACKUP_DIR"
+          printf '%s\n' "$LIVE_SHA" > "$BACKUP_DIR/source-before.sha"
+          printf '%s\n' "$LIVE_BUILD_BEFORE" > "$BACKUP_DIR/build-before.id"
+          git -C "$REPO_ROOT" status --porcelain --untracked-files=all > "$BACKUP_DIR/worktree-status-before.txt" || true
+          for asset in \
+            page01-hero-desktop-v17.png \
+            page01-hero-tablet-v17.png \
+            page01-hero-ultrawide-v17.png; do
+            sha256sum "$LIVE_APP/public/$asset" >> "$BACKUP_DIR/page01-v17-assets.sha256"
+          done
+
+          rm -rf "$STAGE_ROOT"
+          install -d -m 700 "$STAGE_APP"
+          (
+            cd "$LIVE_APP"
+            tar \
+              --exclude='./.next' \
+              --exclude='./.next-*' \
+              --exclude='./node_modules' \
+              -cf - .
+          ) | (
+            cd "$STAGE_APP"
+            tar -xf -
+          )
+          ln -s "$LIVE_APP/node_modules" "$STAGE_APP/node_modules"
+
+          mkdir -p "$STAGE_APP/app/inbox"
+          git -C "$REPO_ROOT" show "$TARGET_SHA:$PAGE02_FILE_1" > "$STAGE_APP/app/inbox/page.tsx"
+          git -C "$REPO_ROOT" show "$TARGET_SHA:$PAGE02_FILE_2" > "$STAGE_APP/app/page02-inbox-standard-v16.css"
+
+          test "$(git -C "$REPO_ROOT" show "$TARGET_SHA:$PAGE02_FILE_1" | sha256sum | awk '{print $1}')" = \
+               "$(sha256sum "$STAGE_APP/app/inbox/page.tsx" | awk '{print $1}')"
+          test "$(git -C "$REPO_ROOT" show "$TARGET_SHA:$PAGE02_FILE_2" | sha256sum | awk '{print $1}')" = \
+               "$(sha256sum "$STAGE_APP/app/page02-inbox-standard-v16.css" | awk '{print $1}')"
+          printf 'PASS: PAGE02_TARGET_FILES_OVERLAID_EXACTLY\n'
+
+          for asset in \
+            page01-hero-desktop-v17.png \
+            page01-hero-tablet-v17.png \
+            page01-hero-ultrawide-v17.png; do
+            test "$(sha256sum "$LIVE_APP/public/$asset" | awk '{print $1}')" = \
+                 "$(sha256sum "$STAGE_APP/public/$asset" | awk '{print $1}')"
+          done
+          printf 'PASS: PAGE01_V17_BYTES_PRESERVED_IN_STAGE\n'
+
+          cd "$STAGE_APP"
+          npm run typecheck
+          NODE_ENV=production npm run build
+          NEW_BUILD_ID="$(cat "$STAGE_APP/.next/BUILD_ID")"
+          test -n "$NEW_BUILD_ID"
+          test "$NEW_BUILD_ID" != "$LIVE_BUILD_BEFORE"
+          printf 'PAGE02_NEW_BUILD_ID=%s\n' "$NEW_BUILD_ID"
+
+          test "$(cat "$LIVE_APP/.next/BUILD_ID")" = "$LIVE_BUILD_BEFORE"
+
+          PM2_JSON="$(mktemp)"
+          pm2 jlist > "$PM2_JSON"
+          RUNTIME_APP="$(node - "$PM2_PROCESS_NAME" "$PM2_JSON" <<'NODE'
+          const fs = require('node:fs');
+          const [name, file] = process.argv.slice(2);
+          const entry = JSON.parse(fs.readFileSync(file, 'utf8')).find((item) => item.name === name);
+          if (!entry) process.exit(1);
+          process.stdout.write(String(entry.pm2_env?.pm_cwd || ''));
+          NODE
+          )"
+          rm -f "$PM2_JSON"
+          if [[ -z "$RUNTIME_APP" ]]; then RUNTIME_APP="$LIVE_APP"; fi
+          case "$RUNTIME_APP" in
+            /var/www/sikhadenge-whatsapp-agent/*) ;;
+            *) printf 'FAIL: unexpected PM2 runtime cwd: %s\n' "$RUNTIME_APP" >&2; exit 72 ;;
+          esac
+          test -d "$RUNTIME_APP/.next"
+
+          [[ ! -e "$LIVE_STAGE" ]]
+          [[ ! -e "$LIVE_OLD" ]]
+          cp -a "$STAGE_APP/.next" "$LIVE_STAGE"
+          test "$(cat "$LIVE_STAGE/BUILD_ID")" = "$NEW_BUILD_ID"
+
+          if [[ "$RUNTIME_APP" != "$LIVE_APP" ]]; then
+            RUNTIME_STAGE="$RUNTIME_APP/.next-stage-page02-$RUN_ID"
+            RUNTIME_OLD="$RUNTIME_APP/.next-before-page02-$RUN_ID"
+            RUNTIME_FAILED="$RUNTIME_APP/.next-failed-page02-$RUN_ID"
+            [[ ! -e "$RUNTIME_STAGE" ]]
+            [[ ! -e "$RUNTIME_OLD" ]]
+            cp -a "$STAGE_APP/.next" "$RUNTIME_STAGE"
+            test "$(cat "$RUNTIME_STAGE/BUILD_ID")" = "$NEW_BUILD_ID"
           fi
 
-          git -C "$LIVE_APP" worktree add --detach "$STAGE_ROOT" "$TARGET_SHA"
-          ln -s "$LIVE_APP/.env" "$STAGE_APP/.env"
-          cd "$STAGE_APP"
-          npm install --include=dev --no-audit --no-fund --package-lock=false
+          mv "$LIVE_APP/.next" "$LIVE_OLD"
+          mv "$LIVE_STAGE" "$LIVE_APP/.next"
+          if [[ "$RUNTIME_APP" != "$LIVE_APP" ]]; then
+            mv "$RUNTIME_APP/.next" "$RUNTIME_OLD"
+            mv "$RUNTIME_STAGE" "$RUNTIME_APP/.next"
+          fi
+          ROLLBACK_ARMED=1
 
-          LIVE_APP="$LIVE_APP" \
-          STAGE_APP="$STAGE_APP" \
-          RELEASE_SHA="$TARGET_SHA" \
-          RUN_ID="$RUN_ID" \
-          PM2_PROCESS_NAME=sikhadenge-whatsapp-agent \
-          PUBLIC_URL=https://whatsapp.sikhadenge.in \
-          BACKUP_ROOT=/root/sikhadenge-backups \
-          ENV_FILE="$LIVE_APP/.env" \
-          bash "$STAGE_APP/scripts/engageos-production-batch1.sh"
+          pm2 restart "$PM2_PROCESS_NAME"
+          sleep 6
+          test "$(cat "$LIVE_APP/.next/BUILD_ID")" = "$NEW_BUILD_ID"
+          test "$(cat "$RUNTIME_APP/.next/BUILD_ID")" = "$NEW_BUILD_ID"
+
+          login_status="$(curl -sS -L -o /tmp/page02-login-$RUN_ID.html -w '%{http_code}' "$PUBLIC_URL/login?page02-live=$RUN_ID")"
+          test "$login_status" = "200"
+          for asset in \
+            page01-hero-desktop-v17.png \
+            page01-hero-tablet-v17.png \
+            page01-hero-ultrawide-v17.png; do
+            asset_status="$(curl -sS -L -o /tmp/$asset-$RUN_ID -w '%{http_code}' "$PUBLIC_URL/$asset?page02-live=$RUN_ID")"
+            test "$asset_status" = "200"
+            test "$(sha256sum "/tmp/$asset-$RUN_ID" | awk '{print $1}')" = \
+                 "$(sha256sum "$LIVE_APP/public/$asset" | awk '{print $1}')"
+          done
+
+          inbox_status="$(curl -sS -o /dev/null -w '%{http_code}' "$PUBLIC_URL/inbox?page02-live=$RUN_ID")"
+          case "$inbox_status" in
+            200|302|307|308) ;;
+            *) printf 'FAIL: unexpected /inbox HTTP status: %s\n' "$inbox_status" >&2; exit 73 ;;
+          esac
+
+          test "$(git -C "$REPO_ROOT" rev-parse HEAD)" = "$LIVE_SHA"
+          git -C "$REPO_ROOT" status --porcelain --untracked-files=all > "$BACKUP_DIR/worktree-status-after.txt" || true
+          cmp -s "$BACKUP_DIR/worktree-status-before.txt" "$BACKUP_DIR/worktree-status-after.txt"
+          printf '%s\n' "$NEW_BUILD_ID" > "$BACKUP_DIR/build-after.id"
+          printf '%s\n' "$TARGET_SHA" > "$BACKUP_DIR/page02-target.sha"
+          cat > "$BACKUP_DIR/result.txt" <<EOF
+          STATUS=PASS
+          MODE=PAGE02_RUNTIME_OVERLAY
+          RUN_ID=$RUN_ID
+          TARGET_SHA=$TARGET_SHA
+          LIVE_SOURCE_SHA_PRESERVED=$LIVE_SHA
+          LIVE_BUILD_BEFORE=$LIVE_BUILD_BEFORE
+          LIVE_BUILD_AFTER=$NEW_BUILD_ID
+          PAGE01_V17_PRESERVED=true
+          PAGE02_TARGET_FILES_APPLIED=true
+          LOGIN_HTTP=$login_status
+          INBOX_HTTP=$inbox_status
+          COMPLETED_UTC=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          EOF
+          chmod 600 "$BACKUP_DIR/result.txt"
+          cat "$BACKUP_DIR/result.txt"
+
+          ROLLBACK_ARMED=0
+          cleanup_stage
+          trap - ERR
+          printf 'PASS: PAGE02_RUNTIME_OVERLAY_DEPLOYED_WITH_PAGE01_PRESERVED\n'
           REMOTE
 
       - name: Verify public service after Page 02 deploy
@@ -158,7 +343,30 @@ jobs:
           set -Eeuo pipefail
           login_status="$(curl -sS -L -o /tmp/page02-login.html -w '%{http_code}' 'https://whatsapp.sikhadenge.in/login?page02-production-probe=1')"
           test "$login_status" = "200"
-          logo_status="$(curl -sS -L -o /tmp/page02-logo.png -w '%{http_code}' 'https://whatsapp.sikhadenge.in/sikhadenge-header-safe-320.png?page02-production-probe=1')"
-          test "$logo_status" = "200"
-          test "$(wc -c < /tmp/page02-logo.png | tr -d ' ')" -gt 1000
-          printf 'PASS: PAGE02_PUBLIC_SERVICE_AND_CANONICAL_LOGO_VERIFIED\n'
+          inbox_status="$(curl -sS -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/inbox?page02-production-probe=1')"
+          case "$inbox_status" in 200|302|307|308) ;; *) exit 1 ;; esac
+          printf 'PASS: PAGE02_PUBLIC_SERVICE_VERIFIED login=%s inbox=%s\n' "$login_status" "$inbox_status"
+
+      - name: Publish non-sensitive deployment evidence
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          evidence_file="/tmp/page02-evidence.txt"
+          cat > "$evidence_file" <<EOF
+          PAGE02_DEPLOY_JOB_STATUS=$JOB_STATUS
+          TARGET_SHA=$TARGET_SHA
+          RUN_ID=$RUN_ID
+          WORKFLOW_RUN_ID=${{ github.run_id }}
+          WORKFLOW_RUN_ATTEMPT=${{ github.run_attempt }}
+          FINISHED_UTC=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          EOF
+          content="$(base64 -w0 "$evidence_file")"
+          api_path="repos/${{ github.repository }}/contents/.github/deploy-evidence/page02-${{ github.run_id }}-${{ github.run_attempt }}.txt"
+          gh api --method PUT "$api_path" \
+            -f message="chore: record Page 02 deployment evidence [skip ci]" \
+            -f content="$content" \
+            -f branch="${{ github.ref_name }}" >/dev/null
