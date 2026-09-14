@@ -1234,8 +1234,6 @@ export default function InboxDashboardV2({
           </div>
         </header>
 
-        {renderChannels("chips")}
-
         <div
           className="sx-tabs"
           aria-label="Conversation history scope"
