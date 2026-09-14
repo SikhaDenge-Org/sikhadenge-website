@@ -1,5 +1,6 @@
 name: WhatsApp Agent Phase17 Stage2 Machine Evidence
 
+# Exact-SHA machine evidence trigger for operator governance — 2026-09-14
 on:
   push:
     branches:

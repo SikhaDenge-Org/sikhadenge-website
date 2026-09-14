@@ -3,6 +3,7 @@
 // Production Batch retry trigger after V17 source reconciliation — 2026-09-14
 // Production Batch exact-SHA companion trigger for machine evidence — 2026-09-14
 // Production Batch exact-SHA retry trigger for operator governance — 2026-09-14
+// Production Batch exact-SHA companion trigger for refreshed machine evidence — 2026-09-14
 const rawUrl = process.argv[2] ?? "";
 
 if (!rawUrl.trim()) {
