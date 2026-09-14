@@ -181,3 +181,4 @@ console.log("PASS: engageos phase17 stage2 governance evidence");
 // Read-only audit rerun marker — 2026-09-14 after exact-SHA machine evidence refresh.
 // Read-only audit rerun marker — 2026-09-14 after Page02 V19 exact-SHA machine evidence refresh.
 // Read-only audit rerun marker — 2026-09-14 for release e9f65a6 exact-SHA verification.
+// Read-only audit rerun marker — 2026-09-15 for release e71d1ee after support runbook evidence confirmation.
