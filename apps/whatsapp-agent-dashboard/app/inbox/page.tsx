@@ -38,6 +38,11 @@ export default async function InboxPage({
 
   return (
     <>
+      <style>{`
+        .sx-inbox > .sx-list > .sx-channels-chips {
+          display: none !important;
+        }
+      `}</style>
       <CoreWorkflowShortcuts />
       <InboxDashboardV2
         initialConversations={conversations}
