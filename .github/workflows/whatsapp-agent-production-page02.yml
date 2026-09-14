@@ -110,6 +110,7 @@ jobs:
             set +e
             cleanup_temp
             echo "FAIL: Page 02 V17 deploy error code=$code"
+            echo "FAIL_CONTEXT: command=${BASH_COMMAND:-unknown} line=${BASH_LINENO[0]:-unknown}"
             pm2 logs "$PM2_NAME" --nostream --lines 100 || true
             if [[ "$SWITCHED" = 1 && -d "$OLD_APP" ]]; then
               pm2 stop "$PM2_NAME" >/dev/null 2>&1 || true
@@ -127,9 +128,7 @@ jobs:
 
           test -d "$REPO_ROOT/.git"
           test -d "$LIVE_APP"
-          test -d "$LIVE_APP/node_modules"
-          test -f "$LIVE_APP/.env"
-          for cmd in node npm pm2 curl ss; do command -v "$cmd" >/dev/null; done
+          for cmd in node npm pm2 curl ss tar; do command -v "$cmd" >/dev/null; done
 
           PM2_JSON=$(mktemp)
           pm2 jlist > "$PM2_JSON"
@@ -144,6 +143,9 @@ jobs:
           rm -f "$PM2_JSON"
           case "$RUNTIME_APP" in /var/www/sikhadenge-whatsapp-agent/*) ;; *) exit 10 ;; esac
           test -f "$RUNTIME_APP/.next/BUILD_ID"
+          test -f "$RUNTIME_APP/.env"
+          test -d "$LIVE_APP/node_modules"
+          echo "PASS: runtime discovered at $RUNTIME_APP"
 
           PARENT=$(dirname "$RUNTIME_APP")
           NEW_APP="$PARENT/.whatsapp-agent-dashboard-next-$RUN_ID"
@@ -164,16 +166,19 @@ jobs:
           for path in "$PAGE02_TSX" "$PAGE02_V16" "$PAGE02_V17" "$LEGACY_CONTACT"; do
             git -C "$REPO_ROOT" cat-file -e "$TARGET_SHA:$path"
           done
+          echo 'PASS: target commit and Page 02 files verified'
 
           install -d -m 755 "$NEW_APP"
           (
-            cd "$LIVE_APP"
+            cd "$RUNTIME_APP"
             tar --exclude='./.next' --exclude='./.next-*' --exclude='./node_modules' -cf - .
           ) | (
             cd "$NEW_APP"
             tar -xf -
           )
           ln -s "$LIVE_APP/node_modules" "$NEW_APP/node_modules"
+          echo 'PASS: current live runtime cloned into isolated candidate'
+
           mkdir -p "$NEW_APP/app/inbox" "$NEW_APP/app/contact-us"
           git -C "$REPO_ROOT" show "$TARGET_SHA:$PAGE02_TSX" > "$NEW_APP/app/inbox/page.tsx"
           git -C "$REPO_ROOT" show "$TARGET_SHA:$PAGE02_V16" > "$NEW_APP/app/page02-inbox-standard-v16.css"
@@ -181,11 +186,12 @@ jobs:
           git -C "$REPO_ROOT" show "$TARGET_SHA:$LEGACY_CONTACT" > "$NEW_APP/app/contact-us/page.tsx"
 
           grep -Fq 'page02-inbox-future-v17.css' "$NEW_APP/app/inbox/page.tsx"
+          grep -Fq '.sx-inbox > .sx-list > .sx-channels-chips' "$NEW_APP/app/inbox/page.tsx"
           test -s "$NEW_APP/app/page02-inbox-future-v17.css"
           for asset in page01-hero-desktop-v17.png page01-hero-tablet-v17.png page01-hero-ultrawide-v17.png; do
             test -s "$NEW_APP/public/$asset"
           done
-          echo 'PASS: Page 01 preserved and Page 02 V17 files staged'
+          echo 'PASS: Page 01 preserved and Page 02 channel-grid removal staged'
 
           cd "$NEW_APP"
           npm run typecheck
@@ -265,6 +271,7 @@ jobs:
           BUILD_BEFORE=$OLD_BUILD
           BUILD_AFTER=$NEW_BUILD
           PAGE02_V17_DEPLOYED=true
+          CHANNEL_GRID_REMOVED=true
           ROUTE_SET_HEALTHY=true
           PAGE01_PRESERVED=true
           OLD_RUNTIME_BACKUP=$OLD_APP
