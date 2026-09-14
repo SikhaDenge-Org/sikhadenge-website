@@ -37,7 +37,9 @@ export function gmailSendAsToSenderIdentity(input: {
     replyToEmail: input.resource.replyToAddress?.trim().toLowerCase() || null,
     externalSenderId: email,
     verificationStatus: normalizeVerificationStatus(input.resource.verificationStatus),
-    isDefault: input.resource.isDefault === true || input.resource.isPrimary === true,
+    isProviderDefault:
+      input.resource.isDefault === true || input.resource.isPrimary === true,
+    isWorkspaceDefault: false,
     isActive: true,
     dailyLimit: null,
   };
