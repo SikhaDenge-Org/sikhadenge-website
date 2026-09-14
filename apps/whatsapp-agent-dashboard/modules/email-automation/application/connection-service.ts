@@ -80,7 +80,7 @@ export class EmailConnectionService {
     connectionId: string;
   }): Promise<readonly EmailSenderIdentity[]> {
     const connection = await this.requireConnection(input);
-    if (!(await this.deps.credentials.hasUsableCredentials(connection.id))) {
+    if (!(await this.deps.credentials.hasUsableCredentials(input))) {
       throw new Error("Email connection credentials are unavailable or expired.");
     }
 
@@ -107,7 +107,7 @@ export class EmailConnectionService {
   async revoke(input: { workspaceId: string; connectionId: string }): Promise<void> {
     const connection = await this.requireConnection(input);
     await this.deps.providers.get(connection.provider).revoke(connection);
-    await this.deps.credentials.revokeCredentials(connection.id);
+    await this.deps.credentials.revokeCredentials(input);
     await this.deps.connections.save({
       ...connection,
       status: "REVOKED",
