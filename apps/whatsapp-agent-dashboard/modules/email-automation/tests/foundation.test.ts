@@ -27,7 +27,8 @@ function sender(overrides: Partial<EmailSenderIdentity>): EmailSenderIdentity {
     replyToEmail: null,
     externalSenderId: "mail@sikhadenge.in",
     verificationStatus: "VERIFIED",
-    isDefault: true,
+    isProviderDefault: false,
+    isWorkspaceDefault: false,
     isActive: true,
     dailyLimit: null,
     ...overrides,
@@ -36,10 +37,15 @@ function sender(overrides: Partial<EmailSenderIdentity>): EmailSenderIdentity {
 
 function testSenderPrecedence() {
   const available = [
-    sender({ id: "workspace", fromEmail: "mail@sikhadenge.in", isDefault: true }),
-    sender({ id: "template", fromEmail: "masterclass@sikhadenge.in", isDefault: false }),
-    sender({ id: "automation", fromEmail: "admission@sikhadenge.in", isDefault: false }),
-    sender({ id: "manual", fromEmail: "support@sikhadenge.in", isDefault: false }),
+    sender({
+      id: "workspace",
+      fromEmail: "mail@sikhadenge.in",
+      isProviderDefault: true,
+      isWorkspaceDefault: true,
+    }),
+    sender({ id: "template", fromEmail: "masterclass@sikhadenge.in" }),
+    sender({ id: "automation", fromEmail: "admission@sikhadenge.in" }),
+    sender({ id: "manual", fromEmail: "support@sikhadenge.in" }),
   ];
 
   const manual = resolveEmailSender({
@@ -69,6 +75,19 @@ function testSenderPrecedence() {
   const fallback = resolveEmailSender({ availableSenders: available });
   assert.equal(fallback.sender.id, "workspace");
   assert.equal(fallback.source, "WORKSPACE_DEFAULT");
+}
+
+function testMultipleWorkspaceDefaultsFailClosed() {
+  assert.throws(
+    () =>
+      resolveEmailSender({
+        availableSenders: [
+          sender({ id: "one", isWorkspaceDefault: true }),
+          sender({ id: "two", isWorkspaceDefault: true }),
+        ],
+      }),
+    /multiple verified workspace default/i,
+  );
 }
 
 function testUnverifiedOverrideFailsClosed() {
@@ -113,7 +132,8 @@ function testGmailAliasNormalization() {
   assert.equal(mapped.fromEmail, "masterclass@sikhadenge.in");
   assert.equal(mapped.replyToEmail, "support@sikhadenge.in");
   assert.equal(mapped.verificationStatus, "VERIFIED");
-  assert.equal(mapped.isDefault, true);
+  assert.equal(mapped.isProviderDefault, true);
+  assert.equal(mapped.isWorkspaceDefault, false);
 }
 
 function testEmailIsFirstClassChannel() {
@@ -185,6 +205,7 @@ function testOAuthStateSecurity() {
 }
 
 testSenderPrecedence();
+testMultipleWorkspaceDefaultsFailClosed();
 testUnverifiedOverrideFailsClosed();
 testPhaseDependencies();
 testTemplateApprovalLifecycle();
