@@ -417,7 +417,7 @@
 
 @media (max-width: 767px) {
   body .sx-inbox > .sx-details {
-    width: min(390px, 94vw) !important;
+    width: min(380px, 100vw) !important;
     padding: 12px 11px calc(88px + env(safe-area-inset-bottom)) !important;
     background: linear-gradient(180deg, #f8fbff, #f4f7fb) !important;
   }
