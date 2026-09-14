@@ -21,6 +21,8 @@ const ROUTES: Record<string, string> = {
   Settings: "/settings",
 };
 
+const LIVE_CHANNELS = new Set(["WhatsApp", "Instagram", "Messenger"]);
+
 function createTrainingLink(pathname: string): HTMLAnchorElement {
   const link = document.createElement("a");
   link.href = "/training";
@@ -40,6 +42,41 @@ function createTrainingLink(pathname: string): HTMLAnchorElement {
     <span class="sx-navlabel">Agent Training</span>
   `;
   return link;
+}
+
+function normalizeSidebarIdentity() {
+  const sidebars = Array.from(
+    document.querySelectorAll<HTMLElement>(".sx-inbox .sx-side, .sx-module .sx-side"),
+  );
+
+  for (const sidebar of sidebars) {
+    sidebar.dataset.sidebarStandard = "v18";
+  }
+}
+
+function syncModuleConnectedChannels() {
+  const channelRows = Array.from(
+    document.querySelectorAll<HTMLElement>(".sx-module .sx-side .sx-chan"),
+  );
+
+  for (const row of channelRows) {
+    const label = row.querySelector<HTMLElement>(".sx-chan-name")?.textContent?.trim() ?? "";
+    if (!LIVE_CHANNELS.has(label)) continue;
+
+    row.classList.remove("is-pending");
+    row.setAttribute("aria-label", `${label} connected`);
+
+    const pendingTag = row.querySelector<HTMLElement>(".sx-chan-tag");
+    pendingTag?.remove();
+
+    if (!row.querySelector(".sx-chan-dot")) {
+      const dot = document.createElement("span");
+      dot.className = "sx-chan-dot";
+      dot.setAttribute("aria-label", "Connected");
+      dot.setAttribute("title", "Connected");
+      row.append(dot);
+    }
+  }
 }
 
 export default function SidebarNavigationBridge() {
@@ -71,13 +108,18 @@ export default function SidebarNavigationBridge() {
     };
 
     ensureInboxTrainingLink();
+    normalizeSidebarIdentity();
+    syncModuleConnectedChannels();
 
     const sidebarObserver = new MutationObserver(() => {
       ensureInboxTrainingLink();
+      normalizeSidebarIdentity();
+      syncModuleConnectedChannels();
     });
-    const inboxRoot = document.querySelector<HTMLElement>(".sx-inbox");
-    if (inboxRoot) {
-      sidebarObserver.observe(inboxRoot, { childList: true, subtree: true });
+
+    const dashboardRoot = document.querySelector<HTMLElement>(".sx-inbox, .sx-module");
+    if (dashboardRoot) {
+      sidebarObserver.observe(dashboardRoot, { childList: true, subtree: true });
       cleanups.push(() => sidebarObserver.disconnect());
     }
 
