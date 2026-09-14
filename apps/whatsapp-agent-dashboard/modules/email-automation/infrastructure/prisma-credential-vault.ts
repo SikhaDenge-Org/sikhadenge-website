@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 
+import type { EmailProvider } from "../domain/contracts";
 import type { EmailCredentialVaultPort, EmailOAuthCredentialMaterial } from "../providers/provider-contract";
 import {
   decryptEmailCredential,
@@ -36,9 +37,12 @@ export class PrismaEmailCredentialVault implements EmailCredentialVaultPort {
   async storeOAuthCredentials(input: {
     workspaceId: string;
     connectionId: string;
-    provider: EmailOAuthCredentialMaterial extends never ? never : import("../domain/contracts").EmailProvider;
+    provider: EmailProvider;
     credentials: EmailOAuthCredentialMaterial;
   }): Promise<void> {
+    if (input.provider !== "GOOGLE_GMAIL") {
+      throw new Error(`Email credential provider ${input.provider} is not enabled in E1.`);
+    }
     await this.assertOwnedEmailConnection(input.workspaceId, input.connectionId);
 
     const access = encryptEmailCredential({
@@ -157,7 +161,10 @@ export class PrismaEmailCredentialVault implements EmailCredentialVaultPort {
 
     if (records.some((record) => record.kind === REFRESH_TOKEN_KIND)) return true;
     const access = records.find((record) => record.kind === ACCESS_TOKEN_KIND);
-    return Boolean(access && (!access.expiresAt || access.expiresAt.getTime() > this.now().getTime()));
+    return Boolean(
+      access &&
+        (!access.expiresAt || access.expiresAt.getTime() > this.now().getTime()),
+    );
   }
 
   async revokeCredentials(input: {
