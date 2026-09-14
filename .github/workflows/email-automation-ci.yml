@@ -48,6 +48,9 @@ jobs:
       - name: Run email asset storage contracts
         run: npx tsx modules/email-automation/tests/asset-storage.test.ts
 
+      - name: Run email manual send contracts
+        run: npx tsx modules/email-automation/tests/manual-send.test.ts
+
       - name: Generate Prisma client
         run: npx prisma generate
 

@@ -10,6 +10,8 @@ export type EmailE1Runtime = {
   service: EmailConnectionService;
   connections: PrismaEmailConnectionRepository;
   senders: PrismaEmailSenderRepository;
+
+  providers: EmailProviderRegistry;
 };
 
 export function emailOAuthRedirectUri(
@@ -52,6 +54,7 @@ export function buildEmailE1Runtime(
     }),
     connections,
     senders,
+    providers,
   };
 }
 

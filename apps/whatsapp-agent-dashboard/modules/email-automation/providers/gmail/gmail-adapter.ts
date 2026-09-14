@@ -1,3 +1,4 @@
+import { assertEmailExternalDeliveryAllowed, getEmailRuntimePolicy } from "../../application/runtime-policy";
 import type {
   EmailConnection,
   EmailSendRequest,
@@ -17,6 +18,7 @@ import {
   createGmailOAuthState,
   verifyGmailOAuthState,
 } from "./oauth-state";
+import { buildGmailMime, gmailRawBase64Url } from "../../messaging/gmail-mime";
 import {
   gmailSendAsToSenderIdentity,
   type GmailSendAsResource,
@@ -27,6 +29,7 @@ const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke";
 const GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo";
 const GMAIL_SEND_AS_URL = "https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs";
+const GMAIL_SEND_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
 
 type GoogleTokenResponse = {
   access_token?: string;
@@ -194,8 +197,19 @@ export class GmailEmailProviderAdapter implements EmailProviderAdapter {
     );
   }
 
-  async sendMessage(_request: EmailSendRequest): Promise<EmailSendResult> {
-    throw new Error("Gmail external email delivery is disabled until Phase E3.");
+  async sendMessage(request: EmailSendRequest): Promise<EmailSendResult> {
+    assertEmailExternalDeliveryAllowed(getEmailRuntimePolicy());
+    const accessToken = await this.accessTokenFor(request.workspaceId, request.connectionId);
+    const mime = buildGmailMime(request, request.from);
+    const response = await fetch(GMAIL_SEND_URL, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ raw: gmailRawBase64Url(mime), ...(request.providerThreadId ? { threadId: request.providerThreadId } : {}) }),
+      cache: "no-store",
+    });
+    const body = await responseJson<{ id?: string; threadId?: string }>(response, "Gmail message send");
+    if (!body.id) throw new Error("Gmail message send did not return a message id.");
+    return { accepted: true, status: "SENT", providerMessageId: body.id, providerThreadId: body.threadId ?? null, externalRequestSent: true };
   }
 
   async revoke(connection: EmailConnection): Promise<void> {
@@ -227,10 +241,11 @@ export class GmailEmailProviderAdapter implements EmailProviderAdapter {
   }
 
   private async accessToken(connection: EmailConnection): Promise<string> {
-    const stored = await this.credentials.loadOAuthCredentials({
-      workspaceId: connection.workspaceId,
-      connectionId: connection.id,
-    });
+    return this.accessTokenFor(connection.workspaceId, connection.id);
+  }
+
+  private async accessTokenFor(workspaceId: string, connectionId: string): Promise<string> {
+    const stored = await this.credentials.loadOAuthCredentials({ workspaceId, connectionId });
     if (!stored) throw new Error("Google OAuth credentials are unavailable.");
 
     const refreshBefore = this.now().getTime() + 60_000;
@@ -267,8 +282,8 @@ export class GmailEmailProviderAdapter implements EmailProviderAdapter {
       scopes: token.scope?.split(/\s+/u).filter(Boolean) ?? stored.scopes,
     };
     await this.credentials.storeOAuthCredentials({
-      workspaceId: connection.workspaceId,
-      connectionId: connection.id,
+      workspaceId,
+      connectionId,
       provider: this.provider,
       credentials: refreshed,
     });

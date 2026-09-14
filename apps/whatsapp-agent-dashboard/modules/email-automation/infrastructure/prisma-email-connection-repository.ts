@@ -41,8 +41,9 @@ function status(value: string): EmailConnectionStatus {
   }
 }
 
-function capabilitiesFor(connection: EmailConnection): Prisma.InputJsonValue {
+function capabilitiesFor(connection: EmailConnection, existing?: unknown): Prisma.InputJsonValue {
   return {
+    ...asRecord(existing),
     WEBHOOK_VERIFY: false,
     INBOUND_MESSAGE: false,
     OUTBOUND_TEXT: true,
@@ -111,6 +112,11 @@ export class PrismaEmailConnectionRepository implements EmailConnectionRepositor
       throw new Error("Email connection cannot be persisted without an external account id.");
     }
 
+    const existing = await prisma.engageChannelConnection.findFirst({
+      where: { id: connection.id, workspaceId: connection.workspaceId, channel: "EMAIL" },
+      select: { capabilities: true },
+    });
+
     await prisma.engageChannelConnection.upsert({
       where: { id: connection.id },
       create: {
@@ -120,7 +126,7 @@ export class PrismaEmailConnectionRepository implements EmailConnectionRepositor
         externalAccountId,
         displayName: connection.displayName,
         status: connection.status,
-        capabilities: capabilitiesFor(connection),
+        capabilities: capabilitiesFor(connection, existing?.capabilities),
       },
       update: {
         workspaceId: connection.workspaceId,
@@ -128,7 +134,7 @@ export class PrismaEmailConnectionRepository implements EmailConnectionRepositor
         externalAccountId,
         displayName: connection.displayName,
         status: connection.status,
-        capabilities: capabilitiesFor(connection),
+        capabilities: capabilitiesFor(connection, existing?.capabilities),
       },
     });
   }
