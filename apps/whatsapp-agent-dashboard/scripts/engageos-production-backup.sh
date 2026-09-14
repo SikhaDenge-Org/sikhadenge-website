@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Production trigger marker: Page 01 supplied-reference fidelity deploy — 2026-09-12 v2
+# Production Batch 1 authorization marker — 2026-09-14 canonical release deploy
 set -Eeuo pipefail
 
 : "${LIVE_APP:?LIVE_APP is required}"
