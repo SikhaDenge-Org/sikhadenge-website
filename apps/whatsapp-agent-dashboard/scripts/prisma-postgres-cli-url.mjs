@@ -7,6 +7,7 @@
 // Production Batch retry trigger after Page02 V19 release drift — 2026-09-14
 // Production Batch exact-SHA companion trigger for Page02 V19 machine evidence — 2026-09-14
 // Atomic exact-SHA companion trigger for final Page02 V19 machine evidence — 2026-09-14
+// Clean atomic retry after production concurrency drain — 2026-09-14
 const rawUrl = process.argv[2] ?? "";
 
 if (!rawUrl.trim()) {
