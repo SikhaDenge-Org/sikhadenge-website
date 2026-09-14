@@ -124,7 +124,6 @@ async function main() {
     select: {
       id: true,
       role: true,
-      user: { select: { id: true, email: true, name: true } },
     },
   });
   if (!membership) {
@@ -165,7 +164,7 @@ async function main() {
     console.log("PHASE17_OPERATOR_EVIDENCE_MODE=IDEMPOTENT_EXISTING");
     console.log(`PHASE17_OPERATOR_EVIDENCE_ACTION=${evidence.action}`);
     console.log(`PHASE17_OPERATOR_EVIDENCE_LIVE_SHA=${evidence.liveSha}`);
-    console.log(`PHASE17_OPERATOR_EVIDENCE_ACTOR_ID=${evidence.actorId}`);
+    console.log("PHASE17_OPERATOR_EVIDENCE_ACTOR_ID_VERIFIED=true");
     console.log(`PHASE17_OPERATOR_EVIDENCE_ACTOR_ROLE=${membership.role}`);
     console.log("PASS: PHASE17_OPERATOR_EVIDENCE_ALREADY_RECORDED_EXACTLY");
     return;
@@ -174,11 +173,11 @@ async function main() {
   console.log(`PHASE17_OPERATOR_EVIDENCE_MODE=${commitRequested ? "COMMIT" : "DRY_RUN"}`);
   console.log(`PHASE17_OPERATOR_EVIDENCE_ACTION=${evidence.action}`);
   console.log(`PHASE17_OPERATOR_EVIDENCE_LIVE_SHA=${evidence.liveSha}`);
-  console.log(`PHASE17_OPERATOR_EVIDENCE_ACTOR_ID=${evidence.actorId}`);
+  console.log("PHASE17_OPERATOR_EVIDENCE_ACTOR_ID_VERIFIED=true");
   console.log(`PHASE17_OPERATOR_EVIDENCE_ACTOR_ROLE=${membership.role}`);
-  console.log(`PHASE17_OPERATOR_EVIDENCE_PROOF_REF=${evidence.proofRef}`);
+  console.log("PHASE17_OPERATOR_EVIDENCE_PROOF_REF_PRESENT=true");
   console.log(`PHASE17_OPERATOR_EVIDENCE_VERIFIED_AT=${evidence.verifiedAt}`);
-  console.log(`PHASE17_OPERATOR_EVIDENCE_REQUEST_ID=${evidence.requestId}`);
+  console.log("PHASE17_OPERATOR_EVIDENCE_REQUEST_ID_PRESENT=true");
   console.log(`PHASE17_OPERATOR_EVIDENCE_METADATA_KEYS=${Object.keys(evidence.gateMetadata).sort().join(",")}`);
   console.log(`PHASE17_OPERATOR_EVIDENCE_STAGE1_VERSION=${state.version}`);
   console.log(`PHASE17_OPERATOR_EVIDENCE_TRANSITION_COUNT=${transitionCount}`);
