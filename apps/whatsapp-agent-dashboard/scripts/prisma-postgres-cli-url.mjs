@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+// Production Batch retry trigger after V17 source reconciliation — 2026-09-14
 const rawUrl = process.argv[2] ?? "";
 
 if (!rawUrl.trim()) {
