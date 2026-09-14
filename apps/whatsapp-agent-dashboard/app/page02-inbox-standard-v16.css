@@ -1,0 +1,617 @@
+/*
+ * Page 02 — Unified Inbox V16
+ * Presentation-only standardization for /inbox.
+ * Business logic, APIs, polling, AI/HUMAN modes and message delivery are unchanged.
+ * The navigation rail remains shared application chrome and is not treated as
+ * Page 02 content.
+ */
+
+.sx-inbox {
+  --p02-canvas: #f6f9fe;
+  --p02-panel: #ffffff;
+  --p02-panel-soft: #f8fbff;
+  --p02-line: #e5ebf5;
+  --p02-line-strong: #d8e2f1;
+  --p02-ink: #071338;
+  --p02-ink-2: #24365f;
+  --p02-muted: #68789d;
+  --p02-blue: #1768ff;
+  --p02-blue-2: #0ea5ff;
+  --p02-cyan: #16d7ff;
+  --p02-violet: #7a35ff;
+  --p02-green: #14b86e;
+  --p02-danger: #ef476f;
+  --p02-radius-sm: 8px;
+  --p02-radius-md: 12px;
+  --p02-radius-lg: 16px;
+  --p02-shadow-sm: 0 1px 2px rgba(7, 19, 56, .035), 0 4px 14px rgba(31, 71, 136, .035);
+  --p02-shadow-md: 0 12px 34px rgba(30, 70, 132, .08);
+
+  grid-template-columns: minmax(220px, 232px) minmax(338px, 372px) minmax(440px, 1fr) minmax(310px, 336px);
+  background: var(--p02-canvas);
+  color: var(--p02-ink);
+  font-size: var(--ui-text-md, 14px);
+  line-height: var(--ui-leading-md, 20px);
+}
+
+/* --------------------------------------------------------------------------
+   Shared chrome boundary: the sidebar is visually independent of Page 02.
+   Keep the same class hooks used by DashboardModuleShell on all other pages.
+   -------------------------------------------------------------------------- */
+.sx-inbox > .sx-side {
+  background: #ffffff !important;
+  border-right: 1px solid var(--p02-line-strong) !important;
+  box-shadow: 8px 0 30px rgba(32, 72, 132, .035) !important;
+  z-index: 30;
+}
+
+.sx-inbox .sx-side .brand-mark.sx-brand {
+  min-height: 56px !important;
+  margin-bottom: 10px !important;
+  padding: 6px 7px !important;
+}
+
+.sx-inbox .sx-brand-logo {
+  width: 176px !important;
+  height: 42px !important;
+  flex-basis: 176px !important;
+}
+
+.sx-inbox .sx-side .rail-button {
+  min-height: 40px !important;
+  padding: 9px 10px !important;
+  border-radius: var(--p02-radius-md) !important;
+  color: #536484 !important;
+  font-size: var(--ui-text-sm, 13px) !important;
+  font-weight: 600 !important;
+}
+
+.sx-inbox .sx-side .rail-button:hover {
+  background: #f4f7fc !important;
+  color: var(--p02-ink) !important;
+}
+
+.sx-inbox .sx-side .rail-button.is-active,
+.sx-inbox .sx-side .rail-button.active {
+  background: linear-gradient(90deg, #edf5ff 0%, #f4f8ff 100%) !important;
+  color: #145ed8 !important;
+  box-shadow: inset 3px 0 0 var(--p02-blue) !important;
+}
+
+.sx-inbox .sx-navic svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.75;
+}
+
+.sx-inbox .sx-side-label {
+  margin: 16px 10px 6px !important;
+  color: #8a98b5 !important;
+  font-size: 10px !important;
+  letter-spacing: .085em !important;
+}
+
+.sx-inbox .sx-side-foot {
+  border-top-color: var(--p02-line) !important;
+}
+
+.sx-inbox .sx-account {
+  padding: 8px !important;
+  border: 1px solid var(--p02-line) !important;
+  background: #f8faff !important;
+  border-radius: var(--p02-radius-md) !important;
+}
+
+/* --------------------------------------------------------------------------
+   Conversation list
+   -------------------------------------------------------------------------- */
+.sx-inbox > .sx-list {
+  background: var(--p02-panel);
+  border-right: 1px solid var(--p02-line) !important;
+}
+
+.sx-inbox .sx-list-head {
+  padding: 18px 16px 12px;
+  border-bottom: 0;
+  background: rgba(255,255,255,.98) !important;
+}
+
+.sx-inbox .sx-list-title {
+  color: var(--p02-ink);
+  font-size: var(--ui-text-2xl, 24px) !important;
+  line-height: var(--ui-leading-2xl, 32px) !important;
+  font-weight: 800 !important;
+  letter-spacing: -.035em;
+}
+
+.sx-inbox .sx-list-sub {
+  margin-top: 2px;
+  color: var(--p02-muted);
+  font-size: var(--ui-text-xs, 12px) !important;
+  line-height: var(--ui-leading-xs, 16px) !important;
+}
+
+.sx-inbox .sx-live {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid #c9f0df;
+  border-radius: 999px;
+  background: #effbf6;
+  color: #118353;
+  font-size: 11px !important;
+}
+
+.sx-inbox .sx-iconbtn {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  border-color: var(--p02-line-strong);
+  border-radius: 10px;
+  color: #607093;
+  box-shadow: none;
+}
+
+.sx-inbox .sx-list > .sx-channels-chips {
+  margin: 0;
+  padding: 0 16px 12px;
+}
+
+.sx-inbox .sx-channels-chips .sx-channels-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sx-inbox .sx-channels-chips .sx-chan {
+  min-height: 48px;
+  padding: 8px 9px;
+  gap: 7px;
+  border: 1px solid var(--p02-line);
+  border-radius: var(--p02-radius-md);
+  background: #fff;
+  color: #536484;
+  font-size: 11px;
+  font-weight: 700;
+  box-shadow: var(--p02-shadow-sm);
+}
+
+.sx-inbox .sx-channels-chips .sx-chan:hover {
+  border-color: #c8d9f5;
+  background: #f9fbff;
+}
+
+.sx-inbox .sx-channels-chips .sx-chan.is-active {
+  border-color: #9cc7ff;
+  background: #f1f7ff;
+  color: #135dcf;
+  box-shadow: 0 0 0 2px rgba(23,104,255,.06);
+}
+
+.sx-inbox .sx-channels-chips .sx-chan-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sx-inbox .sx-channels-chips .sx-chan-tag {
+  padding: 1px 5px;
+  font-size: 8.5px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.sx-inbox .sx-search {
+  margin: 0 16px 10px;
+  min-height: 40px;
+  border: 1px solid var(--p02-line-strong);
+  border-radius: var(--p02-radius-md);
+  background: #fff;
+  color: #8090ad;
+  box-shadow: 0 1px 2px rgba(7,19,56,.025);
+}
+
+.sx-inbox .sx-search:focus-within {
+  border-color: #8ab9ff;
+  box-shadow: 0 0 0 3px rgba(23,104,255,.09);
+}
+
+.sx-inbox .sx-search input {
+  min-height: 38px !important;
+  color: var(--p02-ink-2);
+  font-size: var(--ui-text-sm, 13px) !important;
+}
+
+.sx-inbox .sx-tabs {
+  margin-inline: 16px;
+  gap: 4px;
+}
+
+.sx-inbox .sx-tabs button {
+  min-height: 34px !important;
+  padding: 7px 10px;
+  border-radius: 9px;
+  font-size: var(--ui-text-xs, 12px) !important;
+  font-weight: 650;
+}
+
+.sx-inbox .sx-tabs button.is-active {
+  background: #edf4ff;
+  color: #145fd9;
+}
+
+.sx-inbox .sx-convos {
+  padding: 10px 10px 16px;
+}
+
+.sx-inbox .sx-convo.conversation-item {
+  min-height: 78px;
+  margin: 0 0 4px;
+  padding: 10px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--p02-radius-md);
+  background: transparent;
+}
+
+.sx-inbox .sx-convo.conversation-item:hover {
+  border-color: #edf1f7;
+  background: #f8faff;
+}
+
+.sx-inbox .sx-convo.conversation-item.is-selected,
+.sx-inbox .sx-convo.conversation-item.selected {
+  border-color: #cfe0fb !important;
+  background: linear-gradient(90deg, #edf5ff 0%, #f7faff 100%) !important;
+  box-shadow: inset 3px 0 0 var(--p02-blue), var(--p02-shadow-sm) !important;
+}
+
+.sx-inbox .sx-avatar {
+  border: 1px solid #e4eaf4;
+  box-shadow: 0 2px 8px rgba(31,66,118,.07);
+}
+
+.sx-inbox .sx-convo-top strong {
+  color: var(--p02-ink);
+  font-size: var(--ui-text-sm, 13px) !important;
+  font-weight: 750;
+}
+
+.sx-inbox .sx-convo-prev,
+.sx-inbox .sx-convo-stage,
+.sx-inbox .sx-convo-top time {
+  color: #7483a1;
+  font-size: 11px !important;
+}
+
+/* --------------------------------------------------------------------------
+   Chat workspace
+   -------------------------------------------------------------------------- */
+.sx-inbox > .sx-chat {
+  min-width: 0;
+  background: var(--p02-panel-soft) !important;
+  border-right: 1px solid var(--p02-line);
+}
+
+.sx-inbox .sx-chat-head {
+  min-height: 78px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--p02-line);
+  background: rgba(255,255,255,.985) !important;
+  backdrop-filter: blur(14px);
+}
+
+.sx-inbox .sx-chat-ident h2 {
+  color: var(--p02-ink);
+  font-size: var(--ui-text-base, 16px) !important;
+  line-height: var(--ui-leading-base, 24px) !important;
+  font-weight: 800;
+}
+
+.sx-inbox .sx-chat-ident p,
+.sx-inbox .sx-chat-phone {
+  color: var(--p02-muted);
+  font-size: var(--ui-text-xs, 12px) !important;
+}
+
+.sx-inbox .sx-switch,
+.sx-inbox .sx-btn-outline,
+.sx-inbox .sx-lead-btn {
+  min-height: 36px !important;
+  border-radius: 10px !important;
+  font-size: var(--ui-text-xs, 12px) !important;
+  font-weight: 700 !important;
+}
+
+.sx-inbox .sx-btn-outline,
+.sx-inbox .sx-lead-btn {
+  border-color: var(--p02-line-strong) !important;
+  background: #fff !important;
+  color: #31527e !important;
+}
+
+.sx-inbox .sx-context {
+  min-height: 46px;
+  padding: 8px 14px;
+  gap: 7px;
+  border-bottom: 1px solid var(--p02-line);
+  background: #fff !important;
+}
+
+.sx-inbox .sx-context span {
+  min-height: 30px;
+  padding: 6px 9px;
+  border: 1px solid #e6edf8;
+  border-radius: 9px;
+  background: #f7faff;
+  color: #51658b;
+  font-size: 11px !important;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.sx-inbox .sx-context .sx-context-ok {
+  border-color: #d3e3ff;
+  background: #eef5ff;
+  color: #165ecf;
+}
+
+.sx-inbox .sx-messages {
+  padding: 20px clamp(18px, 2.4vw, 32px) 18px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(14,165,255,.055), transparent 32%),
+    linear-gradient(180deg, #f8fbff 0%, #f4f8fd 100%) !important;
+}
+
+.sx-inbox .sx-bubble {
+  max-width: min(72%, 650px) !important;
+  padding: 11px 13px;
+  border-radius: 14px !important;
+  font-size: var(--ui-text-sm, 13px) !important;
+  line-height: 1.5;
+  box-shadow: 0 2px 10px rgba(29,65,118,.055);
+}
+
+.sx-inbox .sx-msgrow.inbound .sx-bubble {
+  border: 1px solid #e4eaf3 !important;
+  background: #fff !important;
+  color: #18284b;
+}
+
+.sx-inbox .sx-msgrow.outbound .sx-bubble {
+  border: 1px solid #cfe1ff;
+  background: linear-gradient(145deg, #eef7ff 0%, #e6f2ff 100%) !important;
+  color: #102857;
+}
+
+.sx-inbox .sx-bubble small {
+  color: #1768ff;
+  font-size: 10.5px !important;
+  font-weight: 750;
+}
+
+.sx-inbox .sx-bubble time {
+  color: #8694ae;
+  font-size: 10px !important;
+}
+
+.sx-inbox .sx-agentnote {
+  border: 1px solid #dce7fb;
+  border-radius: var(--p02-radius-md);
+  background: rgba(255,255,255,.94);
+  box-shadow: var(--p02-shadow-sm);
+}
+
+.sx-inbox .sx-composer {
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--p02-line) !important;
+  background: rgba(255,255,255,.99) !important;
+}
+
+.sx-inbox .sx-composer-row {
+  min-height: 52px;
+  padding: 4px 5px 4px 7px;
+  border: 1px solid var(--p02-line-strong);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 5px 18px rgba(31,66,118,.055);
+}
+
+.sx-inbox .sx-composer-row:focus-within {
+  border-color: #8cb9ff;
+  box-shadow: 0 0 0 3px rgba(23,104,255,.08), 0 5px 18px rgba(31,66,118,.055);
+}
+
+.sx-inbox .sx-composer-row textarea {
+  min-height: 42px !important;
+  padding: 10px 8px !important;
+  font-size: var(--ui-text-sm, 13px) !important;
+}
+
+.sx-inbox .sx-send {
+  width: 46px;
+  height: 44px;
+  min-height: 44px;
+  border-radius: 11px;
+  background: linear-gradient(135deg, #0e8cff 0%, #1768ff 72%) !important;
+  box-shadow: 0 7px 18px rgba(23,104,255,.22);
+}
+
+/* --------------------------------------------------------------------------
+   Lead intelligence rail
+   -------------------------------------------------------------------------- */
+.sx-inbox > .sx-details {
+  padding: 14px 12px 16px;
+  border-left: 0 !important;
+  background: #fff !important;
+  box-shadow: -8px 0 30px rgba(32,72,132,.035);
+}
+
+.sx-inbox .sx-profile,
+.sx-inbox .sx-ai-summary,
+.sx-inbox .sx-score,
+.sx-inbox .sx-detail-block,
+.sx-inbox .sx-learning {
+  border-color: var(--p02-line) !important;
+  border-radius: var(--p02-radius-md) !important;
+  box-shadow: var(--p02-shadow-sm);
+}
+
+.sx-inbox .sx-profile h2,
+.sx-inbox .sx-detail-block h3 {
+  color: var(--p02-ink);
+  font-weight: 800;
+}
+
+.sx-inbox .sx-ai-summary {
+  background: linear-gradient(145deg, #f9fbff 0%, #f5f2ff 100%) !important;
+}
+
+.sx-inbox .sx-score-ring {
+  filter: drop-shadow(0 4px 12px rgba(23,104,255,.09));
+}
+
+.sx-inbox .sx-learning {
+  background: linear-gradient(145deg, #f7f4ff 0%, #eef7ff 100%) !important;
+}
+
+/* --------------------------------------------------------------------------
+   Responsive contract
+   Desktop: persistent 4-column workspace.
+   Tablet: shared 72px rail + list + chat, intelligence becomes slide-over.
+   Mobile: one task surface at a time with 64px app dock and docked composer.
+   -------------------------------------------------------------------------- */
+@media (min-width: 1440px) {
+  .sx-inbox {
+    grid-template-columns: 228px minmax(350px, 378px) minmax(560px, 1fr) 332px;
+  }
+}
+
+@media (min-width: 1180px) and (max-width: 1439px) {
+  .sx-inbox {
+    grid-template-columns: 216px minmax(324px, 350px) minmax(430px, 1fr) 310px;
+  }
+
+  .sx-inbox .sx-side .rail-button {
+    padding-inline: 9px !important;
+  }
+
+  .sx-inbox .sx-channels-chips .sx-channels-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1179px) {
+  .sx-inbox {
+    grid-template-columns: 72px minmax(292px, 326px) minmax(0, 1fr) !important;
+  }
+
+  .sx-inbox > .sx-side {
+    box-shadow: 5px 0 20px rgba(32,72,132,.03) !important;
+  }
+
+  .sx-inbox .sx-brand-logo {
+    width: 42px !important;
+    height: 42px !important;
+    flex-basis: 42px !important;
+    overflow: hidden;
+  }
+
+  .sx-inbox .sx-brand-logo img {
+    width: 176px !important;
+    max-width: none !important;
+    object-position: left center !important;
+  }
+
+  .sx-inbox .sx-channels-chips .sx-channels-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sx-inbox .sx-chat-head {
+    min-height: 72px;
+  }
+}
+
+@media (max-width: 767px) {
+  body .sx-inbox {
+    background: #fff !important;
+  }
+
+  body .sx-inbox > .sx-side {
+    border-top: 1px solid var(--p02-line-strong) !important;
+    border-right: 0 !important;
+    background: rgba(255,255,255,.985) !important;
+    box-shadow: 0 -10px 26px rgba(31,66,118,.09) !important;
+    backdrop-filter: blur(16px);
+  }
+
+  body .sx-inbox .sx-list-head {
+    padding: 14px 14px 10px;
+  }
+
+  body .sx-inbox .sx-list-title {
+    font-size: var(--ui-text-xl, 20px) !important;
+    line-height: var(--ui-leading-xl, 28px) !important;
+  }
+
+  body .sx-inbox .sx-list > .sx-channels-chips {
+    padding: 0 12px 10px;
+  }
+
+  body .sx-inbox .sx-channels-chips .sx-channels-list {
+    display: flex;
+    gap: 7px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  body .sx-inbox .sx-channels-chips .sx-chan {
+    width: auto;
+    min-width: 118px;
+    flex: 0 0 auto;
+  }
+
+  body .sx-inbox .sx-search {
+    margin-inline: 12px;
+  }
+
+  body .sx-inbox .sx-tabs {
+    margin-inline: 12px;
+  }
+
+  body .sx-inbox .sx-convos {
+    padding-inline: 6px;
+  }
+
+  body .sx-inbox .sx-chat-head {
+    min-height: 0;
+    padding: 10px 10px 9px;
+  }
+
+  body .sx-inbox .sx-messages {
+    padding: 14px 10px 18px !important;
+  }
+
+  body .sx-inbox .sx-bubble {
+    max-width: 88% !important;
+    font-size: 13px !important;
+  }
+
+  body .sx-inbox.sx-mv-chat .sx-composer {
+    background: rgba(255,255,255,.99) !important;
+    border-top-color: var(--p02-line) !important;
+  }
+
+  body .sx-inbox .sx-details {
+    background: #fff !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sx-inbox *,
+  .sx-inbox *::before,
+  .sx-inbox *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

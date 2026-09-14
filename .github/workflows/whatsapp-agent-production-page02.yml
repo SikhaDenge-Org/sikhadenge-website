@@ -1,0 +1,164 @@
+name: WhatsApp Agent Page 02 Production
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-production-page02.yml"
+      - "apps/whatsapp-agent-dashboard/app/inbox/page.tsx"
+      - "apps/whatsapp-agent-dashboard/app/page02-inbox-standard-v16.css"
+      - "apps/whatsapp-agent-dashboard/components/inbox/**"
+      - "apps/whatsapp-agent-dashboard/components/navigation/**"
+      - "apps/whatsapp-agent-dashboard/public/sikhadenge-header-safe-320.png"
+      - "apps/whatsapp-agent-dashboard/public/sikhadenge-official-logo.png"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  deploy-page02:
+    if: contains(github.event.head_commit.message, '[production-page02]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      TARGET_SHA: ${{ github.sha }}
+      RUN_ID: page02-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Checkout exact Page 02 release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 0
+
+      - name: Validate target and production secrets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          missing=0
+          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            if [[ -z "${!variable_name:-}" ]]; then
+              printf 'Missing required production secret: %s\n' "$variable_name" >&2
+              missing=1
+            fi
+          done
+          test "$missing" = "0"
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"
+          fi
+          printf 'PASS: PAGE02_TARGET_AND_SECRET_GATE_COMPLETE\n'
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          private_key_file="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$private_key_file"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$private_key_file"
+          fi
+          chmod 600 "$private_key_file"
+          [[ "$SSH_HOST" =~ ^[^[:space:]/]+$ ]]
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          (( SSH_PORT >= 1 && SSH_PORT <= 65535 ))
+          read -r _ supplied_key_type supplied_key_material _ <<< "$SSH_HOST_KEY"
+          test "$supplied_key_type" = "ssh-ed25519"
+          test -n "$supplied_key_material"
+          canonical_host="[$SSH_HOST]:$SSH_PORT"
+          printf '%s %s %s\n' "$canonical_host" "$supplied_key_type" "$supplied_key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$private_key_file" >/dev/null
+          ssh-keygen -F "$canonical_host" -f "$HOME/.ssh/known_hosts" >/dev/null
+          printf 'PASS: PAGE02_PINNED_SSH_CONFIGURED\n'
+
+      - name: Verify pinned SSH transport
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" \
+            'test "$(id -u)" = "0" && printf "PASS: PAGE02_SSH_TRANSPORT_VERIFIED\n"'
+
+      - name: Deploy exact Page 02 release with existing production guardrails
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "TARGET_SHA='$TARGET_SHA' RUN_ID='$RUN_ID' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          LIVE_APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          REPO_ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          RELEASE_BRANCH=release/whatsapp-instagram-agent-flow-20260731
+          RELEASE_REF=refs/remotes/origin/release/whatsapp-instagram-agent-flow-20260731
+          STAGE_ROOT="/tmp/sikhadenge-page02-${RUN_ID}"
+          STAGE_APP="$STAGE_ROOT/apps/whatsapp-agent-dashboard"
+
+          cleanup() {
+            git -C "$LIVE_APP" worktree remove --force "$STAGE_ROOT" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          test -d "$LIVE_APP"
+          test "$(git -C "$LIVE_APP" branch --show-current)" = "$RELEASE_BRANCH"
+          git -C "$LIVE_APP" fetch origin \
+            +refs/heads/release/whatsapp-instagram-agent-flow-20260731:$RELEASE_REF
+          test "$(git -C "$LIVE_APP" rev-parse "$RELEASE_REF")" = "$TARGET_SHA"
+
+          LIVE_SHA="$(git -C "$LIVE_APP" rev-parse HEAD)"
+          printf 'PAGE02_LIVE_SHA_BEFORE=%s\n' "$LIVE_SHA"
+          printf 'PAGE02_TARGET_SHA=%s\n' "$TARGET_SHA"
+          git -C "$LIVE_APP" merge-base --is-ancestor "$LIVE_SHA" "$TARGET_SHA"
+
+          tracked_status="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)"
+          if [[ -n "$tracked_status" ]]; then
+            printf 'PAGE02_TRACKED_DIRTY_STATUS_BEGIN\n'
+            printf '%s\n' "$tracked_status"
+            printf 'PAGE02_TRACKED_DIRTY_STATUS_END\n'
+            printf 'FAIL: PAGE02_PRODUCTION_WORKTREE_NOT_CLEAN\n' >&2
+            exit 61
+          fi
+
+          git -C "$LIVE_APP" worktree add --detach "$STAGE_ROOT" "$TARGET_SHA"
+          ln -s "$LIVE_APP/.env" "$STAGE_APP/.env"
+          cd "$STAGE_APP"
+          npm install --include=dev --no-audit --no-fund --package-lock=false
+
+          LIVE_APP="$LIVE_APP" \
+          STAGE_APP="$STAGE_APP" \
+          RELEASE_SHA="$TARGET_SHA" \
+          RUN_ID="$RUN_ID" \
+          PM2_PROCESS_NAME=sikhadenge-whatsapp-agent \
+          PUBLIC_URL=https://whatsapp.sikhadenge.in \
+          BACKUP_ROOT=/root/sikhadenge-backups \
+          ENV_FILE="$LIVE_APP/.env" \
+          bash "$STAGE_APP/scripts/engageos-production-batch1.sh"
+          REMOTE
+
+      - name: Verify public service after Page 02 deploy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          login_status="$(curl -sS -L -o /tmp/page02-login.html -w '%{http_code}' 'https://whatsapp.sikhadenge.in/login?page02-production-probe=1')"
+          test "$login_status" = "200"
+          logo_status="$(curl -sS -L -o /tmp/page02-logo.png -w '%{http_code}' 'https://whatsapp.sikhadenge.in/sikhadenge-header-safe-320.png?page02-production-probe=1')"
+          test "$logo_status" = "200"
+          test "$(wc -c < /tmp/page02-logo.png | tr -d ' ')" -gt 1000
+          printf 'PASS: PAGE02_PUBLIC_SERVICE_AND_CANONICAL_LOGO_VERIFIED\n'
