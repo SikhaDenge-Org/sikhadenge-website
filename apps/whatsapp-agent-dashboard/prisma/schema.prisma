@@ -469,6 +469,9 @@ model EngageWorkspace {
   outboundWebhookEndpoints EngageOutboundWebhookEndpoint[]
   controlledLaunchState    EngageControlledLaunchState?
   controlledLaunchHistory  EngageControlledLaunchTransition[]
+  emailTemplates            EngageEmailTemplate[]
+  emailTemplateVersions     EngageEmailTemplateVersion[]
+  emailTemplateAssets       EngageEmailTemplateAsset[]
 
   @@index([isActive, createdAt])
 }
@@ -858,4 +861,71 @@ model EngageControlledLaunchTransition {
 
   @@unique([stateId, resultingVersion])
   @@index([workspaceId, createdAt])
+}
+
+model EngageEmailTemplate {
+  id                      String   @id @default(cuid())
+  workspaceId             String
+  name                    String
+  category                String
+  status                  String   @default("DRAFT")
+  currentVersion          Int      @default(1)
+  defaultSenderIdentityId String?
+  createdById             String
+  approvedById            String?
+  approvedAt              DateTime?
+  archivedAt              DateTime?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  workspace EngageWorkspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  versions  EngageEmailTemplateVersion[]
+  assets    EngageEmailTemplateAsset[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, status, category, updatedAt])
+}
+
+model EngageEmailTemplateVersion {
+  id                      String   @id @default(cuid())
+  workspaceId             String
+  templateId              String
+  version                 Int
+  subject                 String
+  preheader               String?
+  document                Json
+  variables               Json
+  defaultSenderIdentityId String?
+  createdById             String
+  approvedById            String?
+  approvedAt              DateTime?
+  createdAt               DateTime @default(now())
+
+  workspace EngageWorkspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  template  EngageEmailTemplate        @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  assets    EngageEmailTemplateAsset[]
+
+  @@unique([templateId, version])
+  @@index([workspaceId, templateId, createdAt])
+}
+
+model EngageEmailTemplateAsset {
+  id          String   @id @default(cuid())
+  workspaceId String
+  templateId  String
+  versionId   String
+  kind        String
+  fileName    String
+  mimeType    String
+  sizeBytes   Int
+  storageKey  String
+  contentId   String?
+  createdAt   DateTime @default(now())
+
+  workspace EngageWorkspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  template  EngageEmailTemplate        @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  version   EngageEmailTemplateVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@unique([versionId, storageKey])
+  @@index([workspaceId, templateId, createdAt])
 }
