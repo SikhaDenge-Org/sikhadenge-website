@@ -60,8 +60,15 @@ for (const viewport of VIEWPORTS) {
     await expect(email).toBeVisible();
     await expect(password).toBeVisible();
     await expect(submit).toBeVisible();
-    await expect(hero).toBeVisible();
-    await expect(heroImage).toBeVisible();
+
+    if (viewport.width <= 620) {
+      await expect(hero).toBeHidden();
+      await expect(heroImage).toBeHidden();
+    } else {
+      await expect(hero).toBeVisible();
+      await expect(heroImage).toBeVisible();
+    }
+
     await expect(legacyTopBrand).toHaveCount(0);
     await expect(panelBrand).toBeVisible();
 
