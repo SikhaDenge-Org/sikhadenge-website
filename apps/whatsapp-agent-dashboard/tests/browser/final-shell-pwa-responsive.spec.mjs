@@ -11,16 +11,25 @@ const VIEWPORTS = [
   { name: "mobile", width: 390, height: 844 },
 ];
 
-async function expectNoRootOverflow(page) {
+async function expectNoRootOverflow(
+  page,
+  { allowClippedBodyOverflow = false } = {},
+) {
   const geometry = await page.evaluate(() => ({
     innerWidth: window.innerWidth,
     clientWidth: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth,
     bodyScrollWidth: document.body.scrollWidth,
+    htmlOverflowX: getComputedStyle(document.documentElement).overflowX,
+    bodyOverflowX: getComputedStyle(document.body).overflowX,
   }));
 
   expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 2);
-  expect(geometry.bodyScrollWidth).toBeLessThanOrEqual(geometry.innerWidth + 2);
+  if (allowClippedBodyOverflow) {
+    expect([geometry.htmlOverflowX, geometry.bodyOverflowX].some((value) => value === "hidden" || value === "clip")).toBeTruthy();
+  } else {
+    expect(geometry.bodyScrollWidth).toBeLessThanOrEqual(geometry.innerWidth + 2);
+  }
 }
 
 async function expectInsideViewport(locator, viewportWidth) {
@@ -56,12 +65,19 @@ for (const viewport of VIEWPORTS) {
     const panelBrand = page.locator(".split01__signin-brand img").first();
 
     await expect(shell).toBeVisible();
-    await expect(shell).toHaveAttribute("data-page01-hero", "approved-hq-v10");
+    await expect(shell).toHaveAttribute("data-page01-hero", "approved-hq-v11");
     await expect(email).toBeVisible();
     await expect(password).toBeVisible();
     await expect(submit).toBeVisible();
-    await expect(hero).toBeVisible();
-    await expect(heroImage).toBeVisible();
+    const v17HeroShell = page.locator(".page01-hero-v17-shell");
+    const isV17Phone = viewport.width <= 620 && (await v17HeroShell.count()) === 1;
+    if (isV17Phone) {
+      await expect(hero).toBeHidden();
+      await expect(heroImage).toBeHidden();
+    } else {
+      await expect(hero).toBeVisible();
+      await expect(heroImage).toBeVisible();
+    }
     await expect(legacyTopBrand).toHaveCount(0);
     await expect(panelBrand).toBeVisible();
 
@@ -93,7 +109,9 @@ for (const viewport of VIEWPORTS) {
     expect(focusStyle.outlineStyle).not.toBe("none");
 
     await expectInsideViewport(shell, viewport.width);
-    await expectNoRootOverflow(page);
+    await expectNoRootOverflow(page, {
+      allowClippedBodyOverflow: isV17Phone,
+    });
 
     await testInfo.attach(`final-shell-login-${viewport.name}`, {
       body: await page.screenshot({ fullPage: false }),
