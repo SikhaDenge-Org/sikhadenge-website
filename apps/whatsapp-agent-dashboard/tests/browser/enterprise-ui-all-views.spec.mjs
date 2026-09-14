@@ -161,8 +161,8 @@ async function validateInbox(page, viewport) {
     const listTitleSize = await page.locator(".sx-list-title").evaluate(
       (node) => Number.parseFloat(getComputedStyle(node).fontSize),
     );
-    expect(listTitleSize).toBeGreaterThanOrEqual(17);
-    expect(listTitleSize).toBeLessThanOrEqual(19);
+    expect(listTitleSize).toBeGreaterThanOrEqual(19);
+    expect(listTitleSize).toBeLessThanOrEqual(21);
 
     const selected = page.locator(".conversation-item.selected");
     await expect(selected).toHaveCount(1);
@@ -184,8 +184,8 @@ async function validateInbox(page, viewport) {
   const listTitleSize = await page.locator(".sx-list-title").evaluate(
     (node) => Number.parseFloat(getComputedStyle(node).fontSize),
   );
-  expect(listTitleSize).toBeGreaterThanOrEqual(17);
-  expect(listTitleSize).toBeLessThanOrEqual(19);
+  expect(listTitleSize).toBeGreaterThanOrEqual(23);
+  expect(listTitleSize).toBeLessThanOrEqual(25);
 
   await expect(page.locator(".conversation-item.selected")).toHaveCount(1);
 }
