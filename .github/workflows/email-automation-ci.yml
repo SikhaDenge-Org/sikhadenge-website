@@ -5,6 +5,9 @@ on:
     paths:
       - "apps/whatsapp-agent-dashboard/modules/email-automation/**"
       - "apps/whatsapp-agent-dashboard/modules/index.ts"
+      - "apps/whatsapp-agent-dashboard/app/api/email/**"
+      - "apps/whatsapp-agent-dashboard/prisma/schema.prisma"
+      - "apps/whatsapp-agent-dashboard/prisma/migrations/**"
       - ".github/workflows/email-automation-ci.yml"
 
 permissions:
@@ -41,6 +44,9 @@ jobs:
 
       - name: Run email template persistence contracts
         run: npx tsx modules/email-automation/tests/template-persistence.test.ts
+
+      - name: Run email asset storage contracts
+        run: npx tsx modules/email-automation/tests/asset-storage.test.ts
 
       - name: Generate Prisma client
         run: npx prisma generate

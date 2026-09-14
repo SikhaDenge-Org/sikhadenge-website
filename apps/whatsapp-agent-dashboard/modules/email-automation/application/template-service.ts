@@ -1,4 +1,4 @@
-﻿import type { EmailTemplateStatus } from "../domain/contracts";
+import type { EmailTemplateStatus } from "../domain/contracts";
 import type { EmailSenderRepository } from "../infrastructure/repositories";
 import type { EmailTemplateDocument } from "../templates/blocks";
 import {
@@ -99,6 +99,13 @@ export class EmailTemplateService {
       const latest = current.versions.find((version) => version.version === current.currentVersion);
       if (!latest) throw new Error("Current email template version is missing.");
       assertEmailTemplateDocument(latest.document);
+      for (const block of latest.document.blocks) {
+        if (block.type !== "IMAGE" || !block.src.startsWith("cid:")) continue;
+        const contentId = block.src.slice(4);
+        if (!latest.assets.some((asset) => asset.kind === "INLINE_IMAGE" && asset.contentId === contentId)) {
+          throw new Error(`Inline image ${block.id} is missing its current-version asset.`);
+        }
+      }
       await this.validateSender(input.workspaceId, latest.defaultSenderIdentityId);
     }
     return this.repository.transitionStatus({

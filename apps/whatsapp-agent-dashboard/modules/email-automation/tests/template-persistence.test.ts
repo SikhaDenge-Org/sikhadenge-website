@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 
 import { EmailTemplateService } from "../application/template-service";
 import type { EmailSenderIdentity } from "../domain/contracts";
@@ -150,6 +150,22 @@ async function run() {
     defaultSenderIdentityId: "sender-1", actorUserId: "user-2",
   }), /does not belong/i);
 
+  const missingAssetRepo = new MemoryTemplates();
+  const missingAssetService = new EmailTemplateService(missingAssetRepo, new MemorySenders([sender()]));
+  const imageDocument: EmailTemplateDocument = {
+    subject: "Image test",
+    preheader: null,
+    variables: [],
+    blocks: [{ id: "hero-image", type: "IMAGE", src: "cid:asset-missing@sikhadenge", alt: "Hero" }],
+  };
+  const imageTemplate = await missingAssetService.create({
+    workspaceId: "workspace-1", name: "Missing image", category: "CUSTOM", document: imageDocument,
+    defaultSenderIdentityId: "sender-1", actorUserId: "user-1",
+  });
+  await missingAssetService.transition({ workspaceId: "workspace-1", templateId: imageTemplate.id, toStatus: "IN_REVIEW", actorUserId: "user-1", now });
+  await assert.rejects(() => missingAssetService.transition({
+    workspaceId: "workspace-1", templateId: imageTemplate.id, toStatus: "APPROVED", actorUserId: "manager-1", now,
+  }), /missing its current-version asset/i);
   console.log("Email automation E2 template persistence contracts: PASS");
 }
 

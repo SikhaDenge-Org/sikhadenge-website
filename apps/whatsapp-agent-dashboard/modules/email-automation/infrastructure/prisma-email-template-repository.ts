@@ -1,4 +1,4 @@
-﻿import { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db/prisma";
 
@@ -172,6 +172,16 @@ export class PrismaEmailTemplateRepository implements EmailTemplateRepository {
   }): Promise<StoredEmailTemplateDetail> {
     const nextVersion = input.expectedCurrentVersion + 1;
     await prisma.$transaction(async (tx) => {
+      const previousVersion = await tx.engageEmailTemplateVersion.findFirst({
+        where: {
+          workspaceId: input.workspaceId,
+          templateId: input.templateId,
+          version: input.expectedCurrentVersion,
+        },
+        include: { assets: true },
+      });
+      if (!previousVersion) throw new Error("Current email template version is missing.");
+
       const updated = await tx.engageEmailTemplate.updateMany({
         where: {
           id: input.templateId,
@@ -187,7 +197,7 @@ export class PrismaEmailTemplateRepository implements EmailTemplateRepository {
       if (updated.count !== 1) {
         throw new Error("Email template draft changed concurrently or is no longer editable.");
       }
-      await tx.engageEmailTemplateVersion.create({
+      const version = await tx.engageEmailTemplateVersion.create({
         data: {
           workspaceId: input.workspaceId,
           templateId: input.templateId,
@@ -200,6 +210,21 @@ export class PrismaEmailTemplateRepository implements EmailTemplateRepository {
           createdById: input.actorUserId,
         },
       });
+      if (previousVersion.assets.length) {
+        await tx.engageEmailTemplateAsset.createMany({
+          data: previousVersion.assets.map((item) => ({
+            workspaceId: input.workspaceId,
+            templateId: input.templateId,
+            versionId: version.id,
+            kind: item.kind,
+            fileName: item.fileName,
+            mimeType: item.mimeType,
+            sizeBytes: item.sizeBytes,
+            storageKey: item.storageKey,
+            contentId: item.contentId,
+          })),
+        });
+      }
     });
     const current = await this.getById({ workspaceId: input.workspaceId, templateId: input.templateId });
     if (!current) throw new Error("Email template disappeared after version creation.");
