@@ -1,0 +1,41 @@
+name: Ops Dispatch Machine Evidence e71d1ee
+
+on:
+  push:
+    branches:
+      - ops/machine-evidence-dispatch-e71d1ee-20260914-2353
+    paths:
+      - ".github/workflows/ops-machine-evidence-dispatch-e71d1ee.yml"
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch-machine-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TARGET_SHA: e71d1ee579c6f72020639230a341e4e008ae9af6
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+      TARGET_WORKFLOW: whatsapp-agent-phase17-stage2-machine-evidence.yml
+    steps:
+      - name: Freeze canonical release and dispatch exact ref
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          current="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/branches/$RELEASE_BRANCH" | jq -r '.commit.sha')"
+          printf 'CURRENT_RELEASE_SHA=%s\nTARGET_RELEASE_SHA=%s\n' "$current" "$TARGET_SHA"
+          test "$current" = "$TARGET_SHA"
+          echo 'PASS: RELEASE_SHA_FROZEN'
+          code="$(curl -sS -o /tmp/dispatch.out -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/$TARGET_WORKFLOW/dispatches" \
+            -d "{\"ref\":\"$RELEASE_BRANCH\"}")"
+          printf 'DISPATCH_HTTP=%s\n' "$code"
+          test "$code" = "204"
+          echo 'PASS: MACHINE_EVIDENCE_WORKFLOW_DISPATCHED'
