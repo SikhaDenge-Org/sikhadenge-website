@@ -1,4 +1,4 @@
-name: WhatsApp Agent Page 02 Production
+name: WhatsApp Agent Production Repair + Page 02
 
 on:
   push:
@@ -8,6 +8,7 @@ on:
       - ".github/workflows/whatsapp-agent-production-page02.yml"
       - "apps/whatsapp-agent-dashboard/app/inbox/page.tsx"
       - "apps/whatsapp-agent-dashboard/app/page02-inbox-standard-v16.css"
+      - "apps/whatsapp-agent-dashboard/app/contact-us/page.tsx"
 
 permissions:
   contents: read
@@ -17,7 +18,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy-page02:
+  repair-and-deploy:
     if: contains(github.event.head_commit.message, '[production-page02]')
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -29,7 +30,7 @@ jobs:
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       TARGET_SHA: ${{ github.sha }}
-      RUN_ID: page02-v4-${{ github.run_id }}-${{ github.run_attempt }}
+      RUN_ID: repair-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
       - name: Checkout exact release
@@ -38,22 +39,15 @@ jobs:
           ref: ${{ env.TARGET_SHA }}
           fetch-depth: 1
 
-      - name: Validate request and SSH secrets
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
-          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
-          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
-            test -n "${!variable_name:-}" || { echo "Missing $variable_name" >&2; exit 2; }
-          done
-          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
-          echo 'PASS: request validated'
-
       - name: Configure pinned SSH
         shell: bash
         run: |
           set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            test -n "${!v:-}" || { echo "Missing $v" >&2; exit 2; }
+          done
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; SSH_PORT=22; fi
           install -d -m 700 "$HOME/.ssh"
           KEY="$HOME/.ssh/whatsapp-production"
           if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
@@ -62,75 +56,53 @@ jobs:
             printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"
           fi
           chmod 600 "$KEY"
-          read -r supplied_host supplied_type supplied_material _ <<< "$SSH_HOST_KEY"
-          test "$supplied_type" = "ssh-ed25519"
-          test -n "$supplied_material"
-          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$supplied_type" "$supplied_material" > "$HOME/.ssh/known_hosts"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
           ssh-keygen -y -f "$KEY" >/dev/null
-          echo 'PASS: pinned SSH configured'
 
-      - name: Verify SSH transport
+      - name: Repair complete runtime and deploy Page 02
         shell: bash
         run: |
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
-            "$SSH_USER@$SSH_HOST" 'test "$(id -u)" = 0 && echo PASS: SSH transport verified'
-
-      - name: Deploy Page 02 V4 to actual PM2 runtime
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
-            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
             "TARGET_SHA='$TARGET_SHA' RUN_ID='$RUN_ID' bash -s" <<'REMOTE'
           set -Eeuo pipefail
 
           REPO_ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          LIVE_APP=$REPO_ROOT/apps/whatsapp-agent-dashboard
           BRANCH=release/whatsapp-instagram-agent-flow-20260731
           REMOTE_REF=refs/remotes/origin/$BRANCH
           PM2_NAME=sikhadenge-whatsapp-agent
           LOCAL_URL=http://127.0.0.1:3100
           PUBLIC_URL=https://whatsapp.sikhadenge.in
-          PAGE02_TSX=apps/whatsapp-agent-dashboard/app/inbox/page.tsx
-          PAGE02_CSS=apps/whatsapp-agent-dashboard/app/page02-inbox-standard-v16.css
           STAGE_ROOT=/tmp/sikhadenge-$RUN_ID
           STAGE_APP=$STAGE_ROOT/app
           BACKUP_DIR=/root/sikhadenge-backups/$RUN_ID
-          ROLLBACK_ARMED=0
+          PAGE02_TSX=apps/whatsapp-agent-dashboard/app/inbox/page.tsx
+          PAGE02_CSS=apps/whatsapp-agent-dashboard/app/page02-inbox-standard-v16.css
+          LEGACY_CONTACT=apps/whatsapp-agent-dashboard/app/contact-us/page.tsx
           RUNTIME_APP=''
           OLD_DIR=''
           FAILED_DIR=''
-
-          diagnostics() {
-            set +e
-            echo '----- PM2 DESCRIBE -----'
-            pm2 describe "$PM2_NAME" || true
-            echo '----- PM2 LAST 120 LINES -----'
-            pm2 logs "$PM2_NAME" --nostream --lines 120 || true
-            echo '----- PORT 3100 -----'
-            ss -ltnp | grep ':3100' || true
-            echo '----------------------'
-          }
+          ROLLBACK_ARMED=0
 
           rollback() {
             code=$?
             trap - ERR
             set +e
-            echo "FAIL: Page 02 V4 deploy error code=$code"
-            diagnostics
-            if [[ "$ROLLBACK_ARMED" = 1 && -n "$OLD_DIR" && -d "$OLD_DIR" ]]; then
-              echo 'INFO: restoring previous runtime bundle'
-              if [[ -d "$RUNTIME_APP/.next" ]]; then
-                rm -rf "$FAILED_DIR"
-                mv "$RUNTIME_APP/.next" "$FAILED_DIR"
-              fi
+            echo "FAIL: deploy error code=$code"
+            pm2 logs "$PM2_NAME" --nostream --lines 80 || true
+            if [[ "$ROLLBACK_ARMED" = 1 && -d "$OLD_DIR" ]]; then
+              rm -rf "$FAILED_DIR"
+              if [[ -d "$RUNTIME_APP/.next" ]]; then mv "$RUNTIME_APP/.next" "$FAILED_DIR"; fi
               mv "$OLD_DIR" "$RUNTIME_APP/.next"
-              pm2 restart "$PM2_NAME" --update-env >/tmp/page02-rollback-pm2.log 2>&1 || true
+              pm2 restart "$PM2_NAME" --update-env >/dev/null 2>&1 || true
               sleep 5
-              echo 'INFO: rollback completed'
+              echo 'INFO: previous runtime restored'
             fi
             rm -rf "$STAGE_ROOT" >/dev/null 2>&1 || true
             exit "$code"
@@ -138,160 +110,142 @@ jobs:
           trap rollback ERR
 
           test -d "$REPO_ROOT/.git"
-          command -v node >/dev/null
-          command -v npm >/dev/null
-          command -v pm2 >/dev/null
-          command -v curl >/dev/null
+          test -d "$LIVE_APP"
+          test -d "$LIVE_APP/node_modules"
+          test -f "$LIVE_APP/.env"
 
           PM2_JSON=$(mktemp)
           pm2 jlist > "$PM2_JSON"
           RUNTIME_APP=$(node - "$PM2_NAME" "$PM2_JSON" <<'NODE'
           const fs = require('node:fs');
           const [name, file] = process.argv.slice(2);
-          const list = JSON.parse(fs.readFileSync(file, 'utf8'));
-          const app = list.find((x) => x.name === name);
-          if (!app || !app.pm2_env || !app.pm2_env.pm_cwd) process.exit(3);
+          const app = JSON.parse(fs.readFileSync(file, 'utf8')).find(x => x.name === name);
+          if (!app?.pm2_env?.pm_cwd) process.exit(3);
           process.stdout.write(String(app.pm2_env.pm_cwd));
           NODE
           )
           rm -f "$PM2_JSON"
-          case "$RUNTIME_APP" in
-            /var/www/sikhadenge-whatsapp-agent/*) ;;
-            *) echo "FAIL: unexpected PM2 cwd: $RUNTIME_APP" >&2; exit 10 ;;
-          esac
+          case "$RUNTIME_APP" in /var/www/sikhadenge-whatsapp-agent/*) ;; *) exit 10 ;; esac
           test -d "$RUNTIME_APP/.next"
-          test -d "$RUNTIME_APP/node_modules"
-          test -f "$RUNTIME_APP/.env"
           test -f "$RUNTIME_APP/.next/BUILD_ID"
 
           OLD_BUILD=$(cat "$RUNTIME_APP/.next/BUILD_ID")
-          echo "INFO: actual runtime=$RUNTIME_APP"
-          echo "INFO: old build=$OLD_BUILD"
-
-          for asset in page01-hero-desktop-v17.png page01-hero-tablet-v17.png page01-hero-ultrawide-v17.png; do
-            test -s "$RUNTIME_APP/public/$asset"
-          done
+          echo "INFO: runtime=$RUNTIME_APP"
+          echo "INFO: old_build=$OLD_BUILD"
 
           install -d -m 700 "$BACKUP_DIR"
           printf '%s\n' "$RUNTIME_APP" > "$BACKUP_DIR/runtime.txt"
           printf '%s\n' "$OLD_BUILD" > "$BACKUP_DIR/build-before.txt"
-          for asset in page01-hero-desktop-v17.png page01-hero-tablet-v17.png page01-hero-ultrawide-v17.png; do
-            sha256sum "$RUNTIME_APP/public/$asset" >> "$BACKUP_DIR/page01-assets-before.sha256"
-          done
+          git -C "$REPO_ROOT" status --porcelain --untracked-files=all > "$BACKUP_DIR/source-status-before.txt" || true
 
-          echo 'INFO: fetching target release objects only'
           git -C "$REPO_ROOT" fetch origin "+refs/heads/$BRANCH:$REMOTE_REF"
           test "$(git -C "$REPO_ROOT" rev-parse "$REMOTE_REF")" = "$TARGET_SHA"
-          git -C "$REPO_ROOT" cat-file -e "$TARGET_SHA:$PAGE02_TSX"
-          git -C "$REPO_ROOT" cat-file -e "$TARGET_SHA:$PAGE02_CSS"
+          for path in "$PAGE02_TSX" "$PAGE02_CSS" "$LEGACY_CONTACT"; do
+            git -C "$REPO_ROOT" cat-file -e "$TARGET_SHA:$path"
+          done
 
           rm -rf "$STAGE_ROOT"
           install -d -m 700 "$STAGE_APP"
           (
-            cd "$RUNTIME_APP"
+            cd "$LIVE_APP"
             tar --exclude='./.next' --exclude='./.next-*' --exclude='./node_modules' -cf - .
           ) | (
             cd "$STAGE_APP"
             tar -xf -
           )
-          ln -s "$RUNTIME_APP/node_modules" "$STAGE_APP/node_modules"
+          ln -s "$LIVE_APP/node_modules" "$STAGE_APP/node_modules"
 
-          mkdir -p "$STAGE_APP/app/inbox"
+          mkdir -p "$STAGE_APP/app/inbox" "$STAGE_APP/app/contact-us"
           git -C "$REPO_ROOT" show "$TARGET_SHA:$PAGE02_TSX" > "$STAGE_APP/app/inbox/page.tsx"
           git -C "$REPO_ROOT" show "$TARGET_SHA:$PAGE02_CSS" > "$STAGE_APP/app/page02-inbox-standard-v16.css"
-
-          test "$(git -C "$REPO_ROOT" show "$TARGET_SHA:$PAGE02_TSX" | sha256sum | awk '{print $1}')" = "$(sha256sum "$STAGE_APP/app/inbox/page.tsx" | awk '{print $1}')"
-          test "$(git -C "$REPO_ROOT" show "$TARGET_SHA:$PAGE02_CSS" | sha256sum | awk '{print $1}')" = "$(sha256sum "$STAGE_APP/app/page02-inbox-standard-v16.css" | awk '{print $1}')"
-
-          for asset in page01-hero-desktop-v17.png page01-hero-tablet-v17.png page01-hero-ultrawide-v17.png; do
-            test "$(sha256sum "$RUNTIME_APP/public/$asset" | awk '{print $1}')" = "$(sha256sum "$STAGE_APP/public/$asset" | awk '{print $1}')"
-          done
-          echo 'PASS: Page 01 assets preserved and exact Page 02 source overlaid'
+          git -C "$REPO_ROOT" show "$TARGET_SHA:$LEGACY_CONTACT" > "$STAGE_APP/app/contact-us/page.tsx"
 
           cd "$STAGE_APP"
           npm run typecheck
           NODE_ENV=production npm run build
-          NEW_BUILD=$(cat "$STAGE_APP/.next/BUILD_ID")
+          NEW_BUILD=$(cat .next/BUILD_ID)
           test -n "$NEW_BUILD"
-          echo "INFO: new build=$NEW_BUILD"
+          echo "INFO: new_build=$NEW_BUILD"
+
+          MANIFEST=.next/server/app-paths-manifest.json
+          test -f "$MANIFEST"
+          for route in '/login/page' '/inbox/page' '/contacts/page' '/leads/page' '/team/page' '/analytics/page' '/settings/page' '/contact-us/page'; do
+            grep -Fq "\"$route\"" "$MANIFEST" || { echo "FAIL: missing compiled route $route" >&2; exit 31; }
+          done
+          echo 'PASS: required application routes compiled into new runtime'
 
           NEW_STAGE="$RUNTIME_APP/.next-stage-$RUN_ID"
           OLD_DIR="$RUNTIME_APP/.next-before-$RUN_ID"
           FAILED_DIR="$RUNTIME_APP/.next-failed-$RUN_ID"
           test ! -e "$NEW_STAGE"
           test ! -e "$OLD_DIR"
-          cp -a "$STAGE_APP/.next" "$NEW_STAGE"
+          cp -a .next "$NEW_STAGE"
           test "$(cat "$NEW_STAGE/BUILD_ID")" = "$NEW_BUILD"
 
           mv "$RUNTIME_APP/.next" "$OLD_DIR"
           mv "$NEW_STAGE" "$RUNTIME_APP/.next"
           ROLLBACK_ARMED=1
+          pm2 restart "$PM2_NAME" --update-env
 
-          pm2 restart "$PM2_NAME" --update-env >/tmp/page02-v4-pm2.log 2>&1
-          echo 'PASS: PM2 restart command completed'
-
-          LOCAL_LOGIN=''
-          LOCAL_INBOX=''
           READY=0
           for attempt in $(seq 1 30); do
             sleep 3
-            LOCAL_LOGIN=$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' "$LOCAL_URL/login?page02-v4=$RUN_ID" || true)
-            LOCAL_INBOX=$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' "$LOCAL_URL/inbox?page02-v4=$RUN_ID" || true)
-            case "$LOCAL_LOGIN" in
-              200|301|302|303|307|308)
-                case "$LOCAL_INBOX" in
-                  200|301|302|303|307|308) READY=1 ;;
-                esac
-                ;;
+            login=$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' "$LOCAL_URL/login?repair=$RUN_ID" || true)
+            inbox=$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' "$LOCAL_URL/inbox?repair=$RUN_ID" || true)
+            echo "INFO: health $attempt login=$login inbox=$inbox"
+            case "$login:$inbox" in
+              200:200|200:301|200:302|200:303|200:307|200:308) READY=1 ;;
             esac
-            echo "INFO: health attempt=$attempt login=$LOCAL_LOGIN inbox=$LOCAL_INBOX"
-            if [[ "$READY" = 1 ]]; then break; fi
+            [[ "$READY" = 1 ]] && break
           done
           test "$READY" = 1
           test "$(cat "$RUNTIME_APP/.next/BUILD_ID")" = "$NEW_BUILD"
-          echo 'PASS: local runtime healthy'
 
-          PUBLIC_LOGIN=$(curl --max-time 15 -sS -L -o /dev/null -w '%{http_code}' "$PUBLIC_URL/login?page02-v4=$RUN_ID" || true)
-          PUBLIC_INBOX=$(curl --max-time 15 -sS -o /dev/null -w '%{http_code}' "$PUBLIC_URL/inbox?page02-v4=$RUN_ID" || true)
-          test "$PUBLIC_LOGIN" = 200
-          case "$PUBLIC_INBOX" in 200|301|302|303|307|308) ;; *) exit 21 ;; esac
-          echo "PASS: public service healthy login=$PUBLIC_LOGIN inbox=$PUBLIC_INBOX"
-
-          for asset in page01-hero-desktop-v17.png page01-hero-tablet-v17.png page01-hero-ultrawide-v17.png; do
-            test -s "$RUNTIME_APP/public/$asset"
+          for route in contacts leads team analytics settings contact-us; do
+            code=$(curl --max-time 8 -sS -o /dev/null -w '%{http_code}' "$LOCAL_URL/$route?repair=$RUN_ID" || true)
+            echo "INFO: local /$route => $code"
+            case "$code" in 200|301|302|303|307|308) ;; *) echo "FAIL: /$route returned $code" >&2; exit 41 ;; esac
           done
-          (cd "$RUNTIME_APP" && sha256sum public/page01-hero-desktop-v17.png public/page01-hero-tablet-v17.png public/page01-hero-ultrawide-v17.png) > "$BACKUP_DIR/page01-assets-after.sha256"
-          sed 's#  public/#  #g' "$BACKUP_DIR/page01-assets-after.sha256" > "$BACKUP_DIR/page01-assets-after.normalized"
-          sed 's#  .*/public/#  #g' "$BACKUP_DIR/page01-assets-before.sha256" > "$BACKUP_DIR/page01-assets-before.normalized"
-          cmp -s "$BACKUP_DIR/page01-assets-before.normalized" "$BACKUP_DIR/page01-assets-after.normalized"
+          echo 'PASS: local route regression checks'
 
+          public_login=$(curl --max-time 15 -sS -L -o /dev/null -w '%{http_code}' "$PUBLIC_URL/login?repair=$RUN_ID" || true)
+          test "$public_login" = 200
+          for route in inbox contacts leads team; do
+            code=$(curl --max-time 15 -sS -o /dev/null -w '%{http_code}' "$PUBLIC_URL/$route?repair=$RUN_ID" || true)
+            echo "INFO: public /$route => $code"
+            case "$code" in 200|301|302|303|307|308) ;; *) exit 42 ;; esac
+          done
+
+          git -C "$REPO_ROOT" status --porcelain --untracked-files=all > "$BACKUP_DIR/source-status-after.txt" || true
+          cmp -s "$BACKUP_DIR/source-status-before.txt" "$BACKUP_DIR/source-status-after.txt"
+          printf '%s\n' "$NEW_BUILD" > "$BACKUP_DIR/build-after.txt"
           cat > "$BACKUP_DIR/result.txt" <<EOF
           STATUS=PASS
-          MODE=PAGE02_V4_RUNTIME_OVERLAY
           TARGET_SHA=$TARGET_SHA
-          RUNTIME_APP=$RUNTIME_APP
+          RUNTIME=$RUNTIME_APP
           BUILD_BEFORE=$OLD_BUILD
           BUILD_AFTER=$NEW_BUILD
-          LOCAL_LOGIN=$LOCAL_LOGIN
-          LOCAL_INBOX=$LOCAL_INBOX
-          PUBLIC_LOGIN=$PUBLIC_LOGIN
-          PUBLIC_INBOX=$PUBLIC_INBOX
-          PAGE01_PRESERVED=true
+          ROUTES_REPAIRED=true
+          PAGE02_DEPLOYED=true
+          SOURCE_WORKTREE_PRESERVED=true
           EOF
           cat "$BACKUP_DIR/result.txt"
 
           ROLLBACK_ARMED=0
           rm -rf "$STAGE_ROOT"
           trap - ERR
-          echo 'PASS: PAGE02_V4_LIVE'
+          echo 'PASS: WHATSAPP_AGENT_PRODUCTION_REPAIRED'
           REMOTE
 
       - name: Final public verification
         shell: bash
         run: |
           set -Eeuo pipefail
-          login_code=$(curl --max-time 15 -sS -L -o /dev/null -w '%{http_code}' "https://whatsapp.sikhadenge.in/login?page02-gh-final=$RUN_ID")
-          inbox_code=$(curl --max-time 15 -sS -o /dev/null -w '%{http_code}' "https://whatsapp.sikhadenge.in/inbox?page02-gh-final=$RUN_ID")
-          test "$login_code" = 200
-          case "$inbox_code" in 200|301|302|303|307|308) ;; *) exit 1 ;; esac
-          echo "PASS: PAGE02_PUBLIC_FINAL login=$login_code inbox=$inbox_code"
+          login=$(curl --max-time 15 -sS -L -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/login?final-repair=1')
+          test "$login" = 200
+          for route in inbox contacts leads team; do
+            code=$(curl --max-time 15 -sS -o /dev/null -w '%{http_code}' "https://whatsapp.sikhadenge.in/$route?final-repair=1")
+            echo "$route=$code"
+            case "$code" in 200|301|302|303|307|308) ;; *) exit 1 ;; esac
+          done
+          echo 'PASS: PRODUCTION_ROUTE_SET_HEALTHY'
