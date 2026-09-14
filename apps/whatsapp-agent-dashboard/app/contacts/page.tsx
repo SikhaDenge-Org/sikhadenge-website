@@ -13,9 +13,9 @@ export default async function ContactsPage() {
   return (
     <DashboardModuleShell
       activeTitle="Contacts"
-      eyebrow="Student CRM"
+      eyebrow="Customer Intelligence"
       title="Contacts"
-      description="Manage learner profiles, consent, ownership, tags, course interest, CSV import and conversation access from one protected directory."
+      description="Unified customer intelligence across WhatsApp, lifecycle, ownership, consent and follow-up signals."
       userName={user.name}
       userRole={user.role}
     >
