@@ -6,6 +6,10 @@ import { buildEmailE1Runtime } from "../infrastructure/runtime";
 import { buildEmailTemplateRuntime } from "../infrastructure/template-runtime";
 import { readEmailAsset } from "../infrastructure/email-template-asset-storage";
 import { renderEmailTemplate } from "../templates/render";
+import {
+  assertAutomationEmailDispatchPolicy,
+  automationRecipientCohortAllowlist,
+} from "./automation-send-policy";
 import { getEmailRuntimePolicy } from "./runtime-policy";
 import { assertManualEmailDispatchPolicy, assertManualEmailRetryAllowed, internalRecipientAllowlist } from "./manual-send-policy";
 
@@ -44,6 +48,7 @@ export type ManualEmailSendInput = {
   workspaceId: string; templateId: string; manualSenderIdentityId?: string | null; automationSenderIdentityId?: string | null;
   to: readonly EmailAddress[]; cc?: readonly EmailAddress[]; bcc?: readonly EmailAddress[]; replyTo?: EmailAddress;
   variables?: Readonly<Record<string, string | null | undefined>>; idempotencyKey: string; actorUserId: string;
+  deliveryContext?: "MANUAL" | "AUTOMATION";
 };
 
 export class ManualEmailSendService {
@@ -67,7 +72,15 @@ export class ManualEmailSendService {
     const connection = await emailRuntime.connections.getById({ workspaceId: input.workspaceId, connectionId: resolved.sender.connectionId });
     if (!connection || connection.status !== "CONNECTED") throw new Error("Resolved email sender connection is not connected.");
 
-    const decision = assertManualEmailDispatchPolicy({ policy: getEmailRuntimePolicy(), recipients: allRecipients, allowlist: internalRecipientAllowlist() });
+    const policy = getEmailRuntimePolicy();
+    const decision = input.deliveryContext === "AUTOMATION"
+      ? assertAutomationEmailDispatchPolicy({
+          policy,
+          recipients: allRecipients,
+          internalAllowlist: internalRecipientAllowlist(),
+          cohortAllowlist: automationRecipientCohortAllowlist(),
+        })
+      : assertManualEmailDispatchPolicy({ policy, recipients: allRecipients, allowlist: internalRecipientAllowlist() });
     const rendered = renderEmailTemplate({ document: version.document, values: input.variables ?? {} });
     const attachments: EmailAttachmentReference[] = [];
     for (const asset of version.assets) {
