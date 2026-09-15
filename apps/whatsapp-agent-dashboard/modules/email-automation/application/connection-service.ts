@@ -64,6 +64,8 @@ export class EmailConnectionService {
       credentials: oauth.credentials,
     });
 
+    const discovered = await adapter.listSenderIdentities(pendingConnection);
+    if (discovered.length === 0) throw new Error("Email provider did not return any sender identities.");
     const connection: EmailConnection = {
       ...pendingConnection,
       status: "CONNECTED",
@@ -71,8 +73,6 @@ export class EmailConnectionService {
       lastVerifiedAt: now,
     };
     await this.deps.connections.save(connection);
-
-    const discovered = await adapter.listSenderIdentities(connection);
     const senders = await this.deps.senders.replaceConnectionSenders({
       workspaceId: input.workspaceId,
       connectionId,

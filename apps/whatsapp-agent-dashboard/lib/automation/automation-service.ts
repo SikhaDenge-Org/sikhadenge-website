@@ -201,8 +201,17 @@ export function validateAutomationFlow(flow: Pick<AutomationFlow, "name" | "node
     if (node.type === "INCOMING_KEYWORD" && !clean(config.keyword, 200)) {
       errors.push("Incoming Keyword trigger requires a keyword.");
     }
-    if (node.type === "SCHEDULE" && !clean(config.schedule, 200)) {
-      errors.push("Schedule trigger requires a schedule value.");
+    if (node.type === "SCHEDULE") {
+      const minutes = Number(config.intervalMinutes);
+      if (!Number.isFinite(minutes) || minutes < 1 || minutes > 10_080) {
+        errors.push("Schedule trigger interval must be between 1 and 10,080 minutes.");
+      }
+    }
+    if (node.type === "NO_REPLY") {
+      const minutes = Number(config.waitMinutes);
+      if (!Number.isFinite(minutes) || minutes < 1 || minutes > 43_200) {
+        errors.push("No Reply trigger wait must be between 1 and 43,200 minutes.");
+      }
     }
     if (node.type === "APPOINTMENT_REMINDER") {
       const minutes = Number(config.reminderMinutesBefore);

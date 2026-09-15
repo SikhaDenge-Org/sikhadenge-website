@@ -1,0 +1,5 @@
+import { NextResponse } from "next/server";
+import { requireEmailManagerAccess, EmailDashboardAccessError } from "@/modules/email-automation/application/dashboard-access";
+import { syncGmailHistory } from "@/modules/email-automation/inbound/gmail-inbound-service";
+export const runtime="nodejs"; export const dynamic="force-dynamic";
+export async function POST(request:Request){try{const a=await requireEmailManagerAccess();const b=await request.json() as Record<string,unknown>;if(typeof b.connectionId!=="string"||typeof b.startHistoryId!=="string")return NextResponse.json({error:"connectionId and startHistoryId are required."},{status:400});return NextResponse.json(await syncGmailHistory({workspaceId:a.workspaceId,connectionId:b.connectionId,startHistoryId:b.startHistoryId}));}catch(e){if(e instanceof EmailDashboardAccessError)return NextResponse.json({error:e.message},{status:e.status});return NextResponse.json({error:e instanceof Error?e.message:"Gmail history sync failed."},{status:400});}}

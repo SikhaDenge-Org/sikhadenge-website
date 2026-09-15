@@ -1,0 +1,5 @@
+import { NextResponse } from "next/server";
+import { requireEmailManagerAccess, EmailDashboardAccessError } from "@/modules/email-automation/application/dashboard-access";
+import { startGmailMailboxWatch } from "@/modules/email-automation/inbound/gmail-inbound-service";
+export const runtime="nodejs"; export const dynamic="force-dynamic";
+export async function POST(request:Request){try{const a=await requireEmailManagerAccess();const b=await request.json() as Record<string,unknown>;if(typeof b.connectionId!=="string")return NextResponse.json({error:"connectionId is required."},{status:400});return NextResponse.json(await startGmailMailboxWatch({workspaceId:a.workspaceId,connectionId:b.connectionId}));}catch(e){if(e instanceof EmailDashboardAccessError)return NextResponse.json({error:e.message},{status:e.status});return NextResponse.json({error:e instanceof Error?e.message:"Gmail watch failed."},{status:400});}}

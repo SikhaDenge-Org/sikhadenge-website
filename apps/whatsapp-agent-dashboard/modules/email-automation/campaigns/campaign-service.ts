@@ -1,0 +1,76 @@
+import { LeadStage, Prisma } from "@prisma/client";
+import { createHash } from "node:crypto";
+import { prisma } from "@/lib/db/prisma";
+import { ManualEmailSendService } from "../application/manual-send-service";
+import { buildEmailReadRuntime } from "../infrastructure/runtime";
+import { buildEmailTemplateRuntime } from "../infrastructure/template-runtime";
+import { createEmailUnsubscribeUrl } from "./unsubscribe";
+
+function clean(value: unknown, max = 500): string { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
+function json(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }
+function int(value: unknown, fallback: number, min: number, max: number): number { const n=Number(value); return Number.isFinite(n)?Math.min(max,Math.max(min,Math.floor(n))):fallback; }
+function list(value: unknown): unknown[] { return Array.isArray(value)?value:[]; }
+function validEmail(value: unknown): string { const v=clean(value,320).toLowerCase(); if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) throw new Error("A valid campaign email address is required."); return v; }
+function key(value: string): string { return createHash("sha256").update(value).digest("hex"); }
+function stringArray(value: unknown, max=100): string[] { return Array.from(new Set(list(value).filter((x):x is string=>typeof x==="string").map(x=>x.trim()).filter(Boolean))).slice(0,max); }
+function purposeValues(value: unknown): string[] { return stringArray(value,20).map(x=>x.toUpperCase()); }
+function senderPool(value: unknown): string[] { return stringArray(value,20); }
+
+type Recipient = { contactId: string | null; email: string; name: string | null };
+
+type SegmentInput = { contactIds?: unknown; stage?: unknown; tag?: unknown; city?: unknown };
+
+async function resolveSegmentRecipients(workspaceId:string,purpose:string,raw:unknown):Promise<Recipient[]> {
+  if(!raw||typeof raw!=="object"||Array.isArray(raw)) return [];
+  const segment=raw as SegmentInput;
+  let candidateIds=stringArray(segment.contactIds,5000);
+  if(candidateIds.length===0 && purpose==="MARKETING") {
+    const events=await prisma.engageCustomerConsentEvent.findMany({where:{workspaceId,channel:"EMAIL",purpose:"MARKETING"},orderBy:{occurredAt:"desc"},take:20000,select:{customerRef:true,state:true}});
+    const latest=new Map<string,string>(); for(const event of events) if(!latest.has(event.customerRef)) latest.set(event.customerRef,event.state);
+    candidateIds=[...latest.entries()].filter(([,state])=>state==="GRANTED").map(([id])=>id).slice(0,5000);
+  }
+  if(candidateIds.length===0) return [];
+  const stage=clean(segment.stage,50).toUpperCase(); if(stage && !Object.values(LeadStage).includes(stage as LeadStage)) throw new Error("Campaign segment stage is invalid.");
+  const tag=clean(segment.tag,60); const city=clean(segment.city,120);
+  const contacts=await prisma.whatsAppContact.findMany({where:{id:{in:candidateIds},email:{not:null},...(city?{city:{contains:city,mode:"insensitive"}}:{}),...(stage?{lead:{is:{stage:stage as LeadStage}}}:{}),...(tag?{conversations:{some:{tags:{some:{tag:{name:{equals:tag,mode:"insensitive"}}}}}}}:{})},select:{id:true,email:true,displayName:true,profileName:true},take:5000});
+  return contacts.flatMap(c=>c.email?[{contactId:c.id,email:c.email.trim().toLowerCase(),name:c.displayName||c.profileName||null}]:[]);
+}
+
+async function assertTemplate(workspaceId:string,templateId:string,templateVersionId:string){const t=await buildEmailTemplateRuntime().service.get({workspaceId,templateId});if(t.status!=="APPROVED")throw new Error("Campaign requires an APPROVED template.");const v=t.versions.find(x=>x.id===templateVersionId&&x.approvedAt);if(!v)throw new Error("Campaign template version must be the pinned approved version.");return v;}
+
+async function validateSenderPool(workspaceId:string,ids:string[]){if(!ids.length)return[];const senders=await buildEmailReadRuntime().senders.listByWorkspace(workspaceId);return ids.map(id=>{const s=senders.find(x=>x.id===id);if(!s||!s.isActive||s.verificationStatus!=="VERIFIED")throw new Error(`Campaign sender ${id} is not verified and active.`);return s;});}
+
+async function assertCampaignKillSwitch(workspaceId:string,campaignId:string){const rows=await prisma.engageKillSwitch.findMany({where:{workspaceId,active:true,deactivatedAt:null,OR:[{scopeType:"WORKSPACE"},{scopeType:"CHANNEL",channel:"EMAIL"},{scopeType:"CAMPAIGN",campaignId}]},select:{blockedActions:true,reason:true}});for(const row of rows){const actions=stringArray(row.blockedActions,50);if(actions.includes("CAMPAIGN_EXECUTION")||actions.includes("OUTBOUND_NEW"))throw new Error(`Campaign execution is blocked by kill switch: ${row.reason}.`);}}
+
+export async function assertEmailBulkRecipientAllowed(input:{workspaceId:string;purpose:string;recipient:Recipient;frequencyCapPerDay:number;connectionId?:string|null}){
+  const now=new Date();
+  const suppressions=await prisma.engageCustomerSuppression.findMany({where:{workspaceId:input.workspaceId,AND:[{OR:[{customerRef:null},{customerRef:input.recipient.contactId??"__none__"}]},{OR:[{channel:null},{channel:"EMAIL"}]},{OR:[{connectionId:null},...(input.connectionId?[{connectionId:input.connectionId}]:[])]},{startsAt:{lte:now}},{OR:[{expiresAt:null},{expiresAt:{gt:now}}]},{OR:[{revokedAt:null},{revokedAt:{gt:now}}]}]},select:{purposes:true,reason:true}});
+  for(const suppression of suppressions){const purposes=purposeValues(suppression.purposes);if(purposes.includes("ALL")||purposes.includes(input.purpose))throw new Error(`Recipient is suppressed: ${suppression.reason}.`);}
+  if(input.purpose==="MARKETING"){
+    if(!input.recipient.contactId)throw new Error("Marketing recipient must map to a workspace contact.");
+    const latest=await prisma.engageCustomerConsentEvent.findFirst({where:{workspaceId:input.workspaceId,customerRef:input.recipient.contactId,channel:"EMAIL",purpose:"MARKETING"},orderBy:{occurredAt:"desc"},select:{state:true}});
+    if(latest?.state!=="GRANTED")throw new Error("Affirmative EMAIL marketing consent is required.");
+  }
+  if(input.recipient.contactId){const since=new Date(Date.now()-86400000);const count=await prisma.engageEmailAnalyticsEvent.count({where:{workspaceId:input.workspaceId,contactId:input.recipient.contactId,eventType:{in:["CAMPAIGN_SENT","SEQUENCE_SENT"]},occurredAt:{gte:since}}});if(count>=input.frequencyCapPerDay)throw new Error("Recipient frequency cap reached.");}
+}
+
+export async function createEmailCampaign(input:{workspaceId:string;actorUserId:string;name:unknown;purpose?:unknown;templateId:unknown;templateVersionId:unknown;senderIdentityId?:unknown;senderIdentityIds?:unknown;throttlePerHour?:unknown;frequencyCapPerDay?:unknown;scheduledAt?:unknown;recipients?:unknown;segment?:unknown}){
+  const name=clean(input.name,160);if(name.length<3)throw new Error("Campaign name is required.");const templateId=clean(input.templateId,100),templateVersionId=clean(input.templateVersionId,100);if(!templateId||!templateVersionId)throw new Error("Pinned approved template is required.");
+  const purpose=clean(input.purpose,30).toUpperCase()==="TRANSACTIONAL"?"TRANSACTIONAL":"MARKETING";const templateVersion=await assertTemplate(input.workspaceId,templateId,templateVersionId);if(purpose==="MARKETING"&&!templateVersion.document.variables.some(v=>v.key==="unsubscribe_url"))throw new Error("Marketing campaign template must declare unsubscribe_url.");const scheduledAt=clean(input.scheduledAt,50)?new Date(clean(input.scheduledAt,50)):null;if(scheduledAt&&Number.isNaN(scheduledAt.getTime()))throw new Error("scheduledAt is invalid.");
+  const pool=senderPool(input.senderIdentityIds);const fallback=clean(input.senderIdentityId,100);if(fallback&&!pool.includes(fallback))pool.unshift(fallback);await validateSenderPool(input.workspaceId,pool);
+  const explicit=list(input.recipients).slice(0,5000).map((v:any)=>({email:validEmail(v?.email),name:clean(v?.name,160)||null,contactId:clean(v?.contactId,100)||null}));const segmented=await resolveSegmentRecipients(input.workspaceId,purpose,input.segment);const seen=new Set<string>();const recipients=[...explicit,...segmented].filter(x=>!seen.has(x.email)&&seen.add(x.email)).slice(0,5000);if(!recipients.length)throw new Error("Campaign requires at least one eligible recipient.");
+  return prisma.$transaction(async tx=>{const campaign=await tx.engageEmailCampaign.create({data:{workspaceId:input.workspaceId,name,status:scheduledAt?"SCHEDULED":"DRAFT",purpose,templateId,templateVersionId,senderIdentityId:fallback||null,senderPool:pool.length?json(pool):Prisma.JsonNull,segment:json({filters:input.segment??null,source:segmented.length?"CRM_SEGMENT":"EXPLICIT_RECIPIENTS",count:recipients.length}),throttlePerHour:int(input.throttlePerHour,100,1,5000),frequencyCapPerDay:int(input.frequencyCapPerDay,1,1,20),scheduledAt,createdById:input.actorUserId}});for(const recipient of recipients)await tx.engageEmailCampaignRecipient.create({data:{workspaceId:input.workspaceId,campaignId:campaign.id,contactId:recipient.contactId,email:recipient.email,name:recipient.name,status:"PENDING",idempotencyKey:`campaign:${campaign.id}:${key(recipient.email).slice(0,40)}`,scheduledAt}});return campaign;});
+}
+
+export async function dispatchEmailCampaignBatch(input:{workspaceId:string;campaignId:string;actorUserId:string;limit?:number}){
+  const campaign=await prisma.engageEmailCampaign.findFirst({where:{id:input.campaignId,workspaceId:input.workspaceId}});if(!campaign)throw new Error("Campaign not found.");if(!["SCHEDULED","ACTIVE"].includes(campaign.status))throw new Error("Campaign must be SCHEDULED or ACTIVE.");if(campaign.scheduledAt&&campaign.scheduledAt>new Date())return{processed:0,failed:0,waiting:true};await assertCampaignKillSwitch(input.workspaceId,campaign.id);
+  const senders=await buildEmailReadRuntime().senders.listByWorkspace(input.workspaceId);const poolIds=senderPool(campaign.senderPool);const pool=poolIds.map(id=>senders.find(s=>s.id===id)).filter((s):s is NonNullable<typeof s>=>Boolean(s&&s.isActive&&s.verificationStatus==="VERIFIED"));if(poolIds.length&&pool.length!==poolIds.length)throw new Error("Campaign sender pool contains an unavailable sender.");
+  const take=Math.min(int(input.limit,Math.max(1,Math.floor(campaign.throttlePerHour/12)),1,100),100);const rows=await prisma.engageEmailCampaignRecipient.findMany({where:{workspaceId:input.workspaceId,campaignId:campaign.id,status:"PENDING",OR:[{scheduledAt:null},{scheduledAt:{lte:new Date()}}]},orderBy:{createdAt:"asc"},take});let processed=0,failed=0;const usage=new Map<string,number>();if(campaign.status==="SCHEDULED")await prisma.engageEmailCampaign.update({where:{id:campaign.id},data:{status:"ACTIVE",startedAt:campaign.startedAt??new Date()}});
+  for(let index=0;index<rows.length;index++){const row=rows[index];try{const sender=pool.length?pool[index%pool.length]:null;await assertEmailBulkRecipientAllowed({workspaceId:input.workspaceId,purpose:campaign.purpose,recipient:{contactId:row.contactId,email:row.email,name:row.name},frequencyCapPerDay:campaign.frequencyCapPerDay,connectionId:sender?.connectionId});if(sender?.dailyLimit){let used=usage.get(sender.id);if(used===undefined){used=await prisma.engageEmailMessage.count({where:{workspaceId:input.workspaceId,senderIdentityId:sender.id,externalRequestSent:true,sentAt:{gte:new Date(Date.now()-86400000)}}});usage.set(sender.id,used);}if(used>=sender.dailyLimit)throw new Error(`Sender daily limit reached for ${sender.fromEmail}.`);}
+    const result=await new ManualEmailSendService().send({workspaceId:input.workspaceId,templateId:campaign.templateId,templateVersionId:campaign.templateVersionId,automationSenderIdentityId:sender?.id??campaign.senderIdentityId,to:[{email:row.email,...(row.name?{name:row.name}:{})}],variables:{contactId:row.contactId??"",campaignName:campaign.name,...(campaign.purpose==="MARKETING"&&row.contactId?{unsubscribe_url:createEmailUnsubscribeUrl({workspaceId:input.workspaceId,contactId:row.contactId,email:row.email})}:{})},idempotencyKey:row.idempotencyKey,actorUserId:input.actorUserId,deliveryContext:"AUTOMATION"});if(sender&&result.message.externalRequestSent)usage.set(sender.id,(usage.get(sender.id)??0)+1);await prisma.$transaction(async tx=>{await tx.engageEmailCampaignRecipient.update({where:{id:row.id},data:{status:result.message.externalRequestSent?"SENT":"DRY_RUN",messageId:result.message.id,sentAt:result.message.externalRequestSent?new Date():null,lastError:null}});await tx.engageEmailAnalyticsEvent.upsert({where:{workspaceId_eventKey:{workspaceId:input.workspaceId,eventKey:key(`campaign|${row.id}|${result.message.id}`)}},update:{},create:{workspaceId:input.workspaceId,messageId:result.message.id,campaignId:campaign.id,contactId:row.contactId,eventType:result.message.externalRequestSent?"CAMPAIGN_SENT":"CAMPAIGN_DRY_RUN",provider:sender?.provider??null,eventKey:key(`campaign|${row.id}|${result.message.id}`),metadata:json({recipient:row.email,senderIdentityId:sender?.id??campaign.senderIdentityId}),occurredAt:new Date()}});});processed++;}catch(error){failed++;await prisma.engageEmailCampaignRecipient.update({where:{id:row.id},data:{status:"FAILED",lastError:error instanceof Error?error.message:"Campaign dispatch failed."}});}}
+  const remaining=await prisma.engageEmailCampaignRecipient.count({where:{campaignId:campaign.id,status:"PENDING"}});if(remaining===0)await prisma.engageEmailCampaign.update({where:{id:campaign.id},data:{status:"COMPLETED",completedAt:new Date()}});return{processed,failed,remaining};
+}
+
+export async function processDueEmailCampaigns(limit=20){const rows=await prisma.engageEmailCampaign.findMany({where:{status:{in:["ACTIVE","SCHEDULED"]},OR:[{scheduledAt:null},{scheduledAt:{lte:new Date()}}]},orderBy:{scheduledAt:"asc"},take:Math.min(Math.max(limit,1),50)});const results=[];for(const campaign of rows){try{results.push({campaignId:campaign.id,...await dispatchEmailCampaignBatch({workspaceId:campaign.workspaceId,campaignId:campaign.id,actorUserId:campaign.createdById})});}catch(error){results.push({campaignId:campaign.id,processed:0,failed:1,remaining:null,error:error instanceof Error?error.message:"Campaign processing failed."});}}return results;}
+export async function listEmailCampaigns(workspaceId:string){return prisma.engageEmailCampaign.findMany({where:{workspaceId},orderBy:{updatedAt:"desc"},take:100,include:{_count:{select:{recipients:true}}}});}
+export async function setCampaignStatus(input:{workspaceId:string;campaignId:string;status:"ACTIVE"|"PAUSED"|"CANCELLED"}){const row=await prisma.engageEmailCampaign.findFirst({where:{id:input.campaignId,workspaceId:input.workspaceId}});if(!row)throw new Error("Campaign not found.");if(row.status==="COMPLETED"||row.status==="CANCELLED")throw new Error("Completed/cancelled campaign cannot be reactivated.");return prisma.engageEmailCampaign.update({where:{id:row.id},data:{status:input.status,pausedAt:input.status==="PAUSED"?new Date():input.status==="ACTIVE"?null:row.pausedAt}});}

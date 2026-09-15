@@ -80,6 +80,9 @@ jobs:
       - name: Run email automation production DRY_RUN activation policy
         run: bash tests/email-automation-production-dryrun-activation-policy.test.sh
 
+      - name: Run email platform finalization contracts
+        run: npx tsx modules/email-automation/tests/platform-finalization.test.ts
+
       - name: Generate Prisma client
         run: npx prisma generate
 

@@ -3,6 +3,7 @@ import { DashboardRole } from "@prisma/client";
 import DashboardModuleShell from "../../components/navigation/DashboardModuleShell";
 import { requireDashboardUser } from "../../lib/auth/session";
 import EmailAutomationQueue from "../../modules/email-automation/ui/EmailAutomationQueue";
+import EmailPlatformOverview from "../../modules/email-automation/ui/EmailPlatformOverview";
 import EmailManualComposer from "../../modules/email-automation/ui/EmailManualComposer";
 import EmailSenderManager from "../../modules/email-automation/ui/EmailSenderManager";
 import EmailTemplateStudio from "../../modules/email-automation/ui/EmailTemplateStudio";
@@ -21,7 +22,7 @@ export default async function EmailControlCenterPage() {
       activeTitle="Integrations"
       eyebrow="Email channel"
       title="Email Automation Control Center"
-      description="Connect and verify Google Workspace sender accounts, manage aliases and choose the workspace default while outbound delivery remains locked behind the E3 gate."
+      description="Operate the full E0�E8 email platform: senders, templates, transactional email, CRM automation, inbound, campaigns, analytics and provider readiness under guarded runtime controls."
       userName={user.name}
       userRole={user.role}
     >

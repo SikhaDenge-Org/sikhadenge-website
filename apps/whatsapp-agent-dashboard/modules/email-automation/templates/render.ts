@@ -106,6 +106,8 @@ function renderBlockHtml(
     }
     case "SPACER":
       return `<div aria-hidden="true" style="height:${block.height}px;line-height:${block.height}px;font-size:1px;">&nbsp;</div>`;
+    case "HTML":
+      return interpolate(block.html, variables);
   }
 }
 
@@ -128,6 +130,8 @@ function renderBlockText(
       return "---";
     case "SPACER":
       return "";
+    case "HTML":
+      return interpolate(block.text, variables).trim();
   }
 }
 

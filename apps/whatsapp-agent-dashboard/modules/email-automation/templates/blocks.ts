@@ -7,6 +7,7 @@ export const EMAIL_TEMPLATE_BLOCK_TYPES = [
   "BUTTON",
   "DIVIDER",
   "SPACER",
+  "HTML",
 ] as const;
 
 export type EmailTemplateBlockType = (typeof EMAIL_TEMPLATE_BLOCK_TYPES)[number];
@@ -57,13 +58,20 @@ export type EmailSpacerBlock = EmailTemplateBlockBase & {
   height: number;
 };
 
+export type EmailHtmlBlock = EmailTemplateBlockBase & {
+  type: "HTML";
+  html: string;
+  text: string;
+};
+
 export type EmailTemplateBlock =
   | EmailHeadingBlock
   | EmailTextBlock
   | EmailImageBlock
   | EmailButtonBlock
   | EmailDividerBlock
-  | EmailSpacerBlock;
+  | EmailSpacerBlock
+  | EmailHtmlBlock;
 
 export type EmailTemplateDocument = {
   subject: string;
