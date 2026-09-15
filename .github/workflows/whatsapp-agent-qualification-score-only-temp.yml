@@ -26,7 +26,7 @@ jobs:
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       PATCH_SHA: f79ef14c7f62172e21dec71c8b37180380cc65bc
-      EXPECTED_RUNTIME_BUILD: ZvzV6QBBngX3s_X5xxUnk
+      EXPECTED_RUNTIME_BUILD: OmTLcqzUvGbgBFh__FF36
       PM2_PROCESS: sikhadenge-whatsapp-agent
 
     steps:
