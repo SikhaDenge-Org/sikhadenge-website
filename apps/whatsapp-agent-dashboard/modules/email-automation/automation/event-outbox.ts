@@ -25,6 +25,7 @@ export type EmailAutomationEventInput = {
   contactId?: string | null;
   leadId?: string | null;
   submissionId?: string | null;
+  availableAt?: Date | null;
   payload: Readonly<Record<string, unknown>>;
 };
 
@@ -69,8 +70,25 @@ export async function enqueueEmailAutomationEvent(
       contactId: input.contactId?.trim() || null,
       leadId: input.leadId?.trim() || null,
       submissionId: input.submissionId?.trim() || null,
+      availableAt: input.availableAt ?? new Date(),
       payload: JSON.parse(JSON.stringify(input.payload)) as Prisma.InputJsonValue,
     },
+  });
+}
+
+export async function supersedePendingEmailAutomationEvents(
+  tx: Prisma.TransactionClient,
+  input: { workspaceId: string; trigger: EmailAutomationTrigger; leadId?: string | null; contactId?: string | null },
+) {
+  return tx.engageEmailAutomationEvent.updateMany({
+    where: {
+      workspaceId: input.workspaceId,
+      trigger: input.trigger,
+      status: "PENDING",
+      ...(input.leadId ? { leadId: input.leadId } : {}),
+      ...(input.contactId ? { contactId: input.contactId } : {}),
+    },
+    data: { status: "PROCESSED", processedAt: new Date(), lastError: null },
   });
 }
 

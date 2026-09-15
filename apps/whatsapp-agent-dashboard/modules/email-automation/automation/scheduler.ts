@@ -5,14 +5,15 @@ import { getEmailRuntimePolicy } from "../application/runtime-policy";
 import { processEmailAutomationEvents } from "./dispatcher";
 
 export async function getEmailAutomationSchedulerHealth() {
+  const now = new Date();
   const staleBefore = new Date(Date.now() - 15 * 60 * 1000);
   const [pending, processing, failed, staleProcessing, oldestPending, workspaces, latestSchedulerRun] = await Promise.all([
-    prisma.engageEmailAutomationEvent.count({ where: { status: "PENDING" } }),
+    prisma.engageEmailAutomationEvent.count({ where: { status: "PENDING", availableAt: { lte: now } } }),
     prisma.engageEmailAutomationEvent.count({ where: { status: "PROCESSING" } }),
     prisma.engageEmailAutomationEvent.count({ where: { status: "FAILED" } }),
     prisma.engageEmailAutomationEvent.count({ where: { status: "PROCESSING", updatedAt: { lt: staleBefore } } }),
-    prisma.engageEmailAutomationEvent.findFirst({ where: { status: "PENDING" }, orderBy: { createdAt: "asc" }, select: { createdAt: true } }),
-    prisma.engageEmailAutomationEvent.findMany({ where: { OR: [{ status: "PENDING" }, { status: "PROCESSING", updatedAt: { lt: staleBefore } }] }, select: { workspaceId: true }, distinct: ["workspaceId"] }),
+    prisma.engageEmailAutomationEvent.findFirst({ where: { status: "PENDING", availableAt: { lte: now } }, orderBy: { availableAt: "asc" }, select: { availableAt: true, createdAt: true } }),
+    prisma.engageEmailAutomationEvent.findMany({ where: { OR: [{ status: "PENDING", availableAt: { lte: now } }, { status: "PROCESSING", updatedAt: { lt: staleBefore } }] }, select: { workspaceId: true }, distinct: ["workspaceId"] }),
     prisma.auditLog.findFirst({
       where: { action: "EMAIL_AUTOMATION_SCHEDULER_RUN", entityType: "EmailAutomationScheduler" },
       orderBy: { createdAt: "desc" },
@@ -30,7 +31,7 @@ export async function getEmailAutomationSchedulerHealth() {
     failed,
     staleProcessing,
     workspacesWithRunnableEvents: workspaces.length,
-    oldestPendingAt: oldestPending?.createdAt ?? null,
+    oldestPendingAt: oldestPending?.availableAt ?? oldestPending?.createdAt ?? null,
     latestSchedulerRun: latestSchedulerRun
       ? { runId: latestSchedulerRun.entityId, createdAt: latestSchedulerRun.createdAt, summary: latestSchedulerRun.after }
       : null,
@@ -41,11 +42,12 @@ export async function processEmailAutomationScheduler(input: {
   workspaceLimit?: number;
   perWorkspaceLimit?: number;
 }) {
+  const now = new Date();
   const staleBefore = new Date(Date.now() - 15 * 60 * 1000);
   const candidates = await prisma.engageEmailAutomationEvent.findMany({
     where: {
       OR: [
-        { status: "PENDING" },
+        { status: "PENDING", availableAt: { lte: now } },
         { status: "PROCESSING", updatedAt: { lt: staleBefore } },
       ],
     },

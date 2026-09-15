@@ -8,7 +8,7 @@ import {
 } from "@prisma/client";
 
 import { prisma } from "../db/prisma";
-import { enqueueEmailAutomationEvent, findActorEmailWorkspaceId } from "../../modules/email-automation/automation/event-outbox";
+import { enqueueEmailAutomationEvent, findActorEmailWorkspaceId, supersedePendingEmailAutomationEvents } from "../../modules/email-automation/automation/event-outbox";
 import {
   priorityBand,
   queuePriorityScore,
@@ -257,11 +257,13 @@ export async function scheduleLeadFollowUp(input: {
 
   const lead = await prisma.lead.findUnique({
     where: { conversationId: input.conversationId },
-    select: { id: true, nextFollowUpAt: true, assignedToId: true },
+    select: { id: true, contactId: true, nextFollowUpAt: true, assignedToId: true },
   });
   if (!lead) throw new Error("Lead was not found for this conversation.");
 
   const reason = cleanReason(input.reason);
+  const followUpChanged = (lead.nextFollowUpAt?.getTime() ?? null) !== (input.followUpAt?.getTime() ?? null);
+  const emailWorkspaceId = followUpChanged ? await findActorEmailWorkspaceId(input.actor.id) : null;
   return prisma.$transaction(async (transaction) => {
     const updated = await transaction.lead.update({
       where: { id: lead.id },
@@ -292,6 +294,24 @@ export async function scheduleLeadFollowUp(input: {
         userAgent: input.context?.userAgent ?? null,
       },
     });
+    if (emailWorkspaceId && followUpChanged) {
+      await supersedePendingEmailAutomationEvents(transaction, {
+        workspaceId: emailWorkspaceId,
+        trigger: "FOLLOW_UP_DUE",
+        leadId: lead.id,
+      });
+      if (input.followUpAt) {
+        await enqueueEmailAutomationEvent(transaction, {
+          workspaceId: emailWorkspaceId,
+          sourceEventId: `lead-follow-up:${lead.id}:${input.followUpAt.toISOString()}`,
+          trigger: "FOLLOW_UP_DUE",
+          contactId: lead.contactId,
+          leadId: lead.id,
+          availableAt: input.followUpAt,
+          payload: { leadId: lead.id, contactId: lead.contactId, followUpAt: input.followUpAt.toISOString(), reason },
+        });
+      }
+    }
     return updated;
   });
 }

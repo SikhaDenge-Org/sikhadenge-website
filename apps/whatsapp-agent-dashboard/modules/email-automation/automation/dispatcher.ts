@@ -84,8 +84,9 @@ export async function processEmailAutomationEvents(input: {
     data: { status: "FAILED", lastError: "Automation processing lease expired after 15 minutes. Requeue is required." },
   });
 
+  const now = new Date();
   const events = await prisma.engageEmailAutomationEvent.findMany({
-    where: { workspaceId: input.workspaceId, status: "PENDING" },
+    where: { workspaceId: input.workspaceId, status: "PENDING", availableAt: { lte: now } },
     orderBy: { createdAt: "asc" },
     take: Math.min(Math.max(input.limit ?? 20, 1), 100),
   });
