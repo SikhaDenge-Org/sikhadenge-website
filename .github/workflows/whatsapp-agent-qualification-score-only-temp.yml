@@ -1,0 +1,208 @@
+name: WhatsApp Agent Qualification Score Only Temp
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-qualification-score-only-temp.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-qualification-score-only
+  cancel-in-progress: false
+
+jobs:
+  deploy-qualification-score-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      PATCH_SHA: f79ef14c7f62172e21dec71c8b37180380cc65bc
+      EXPECTED_RUNTIME_BUILD: ZvzV6QBBngX3s_X5xxUnk
+      PM2_PROCESS: sikhadenge-whatsapp-agent
+
+    steps:
+      - name: Checkout exact qualification patch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PATCH_SHA }}
+
+      - name: Configure pinned SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; SSH_PORT=22; fi
+          install -d -m 700 "$HOME/.ssh"
+          KEY="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"
+          fi
+          chmod 600 "$KEY"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$KEY" >/dev/null
+
+      - name: Wait for production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for attempt in $(seq 1 8); do
+            if ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "$SSH_USER@$SSH_HOST" 'test "$(id -u)" = 0'; then
+              echo "PASS: SSH_READY attempt=$attempt"
+              exit 0
+            fi
+            sleep 8
+          done
+          exit 1
+
+      - name: Upload only qualification score source files
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          REMOTE_PATCH=/tmp/qualification-score-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "rm -rf '$REMOTE_PATCH' && mkdir -p '$REMOTE_PATCH/components/inbox' '$REMOTE_PATCH/app'"
+          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            apps/whatsapp-agent-dashboard/components/inbox/InboxDashboardV2.tsx \
+            "$SSH_USER@$SSH_HOST:$REMOTE_PATCH/components/inbox/InboxDashboardV2.tsx"
+          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            apps/whatsapp-agent-dashboard/app/page02-inbox-structural-v22.css \
+            "$SSH_USER@$SSH_HOST:$REMOTE_PATCH/app/page02-inbox-structural-v22.css"
+          echo "REMOTE_PATCH=$REMOTE_PATCH" >> "$GITHUB_ENV"
+
+      - name: Build isolated candidate and atomically swap compiled runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_RUNTIME_BUILD='$EXPECTED_RUNTIME_BUILD' PM2_PROCESS='$PM2_PROCESS' REMOTE_PATCH='$REMOTE_PATCH' RUN_ID='${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+
+          PM2_JSON=$(mktemp)
+          pm2 jlist > "$PM2_JSON"
+          RUNTIME=$(node - "$PM2_PROCESS" "$PM2_JSON" <<'NODE'
+          const fs=require('node:fs');
+          const [name,file]=process.argv.slice(2);
+          const p=JSON.parse(fs.readFileSync(file,'utf8')).find(x=>x.name===name);
+          if(!p?.pm2_env?.pm_cwd) process.exit(2);
+          process.stdout.write(p.pm2_env.pm_cwd);
+          NODE
+          )
+          STATUS=$(node - "$PM2_PROCESS" "$PM2_JSON" <<'NODE'
+          const fs=require('node:fs');
+          const [name,file]=process.argv.slice(2);
+          const p=JSON.parse(fs.readFileSync(file,'utf8')).find(x=>x.name===name);
+          if(!p) process.exit(2);
+          process.stdout.write(String(p.pm2_env?.status||''));
+          NODE
+          )
+          rm -f "$PM2_JSON"
+
+          test "$STATUS" = online
+          test -f "$RUNTIME/.next/BUILD_ID"
+          CURRENT_BUILD=$(cat "$RUNTIME/.next/BUILD_ID")
+          test "$CURRENT_BUILD" = "$EXPECTED_RUNTIME_BUILD"
+          test -f "$RUNTIME/components/inbox/InboxDashboardV2.tsx"
+          test -f "$RUNTIME/app/page02-inbox-structural-v22.css"
+
+          ROOT=/var/www/sikhadenge-whatsapp-agent/releases
+          CANDIDATE="$ROOT/qualification-score-${RUN_ID}/apps/whatsapp-agent-dashboard"
+          BACKUP="$RUNTIME/.qualification-score-backup-${RUN_ID}"
+          rm -rf "${CANDIDATE%/apps/whatsapp-agent-dashboard}"
+          mkdir -p "$(dirname "$CANDIDATE")" "$BACKUP"
+
+          cp -a "$RUNTIME/." "$CANDIDATE/"
+          cp "$RUNTIME/components/inbox/InboxDashboardV2.tsx" "$BACKUP/InboxDashboardV2.tsx"
+          cp "$RUNTIME/app/page02-inbox-structural-v22.css" "$BACKUP/page02-inbox-structural-v22.css"
+
+          cp "$REMOTE_PATCH/components/inbox/InboxDashboardV2.tsx" "$CANDIDATE/components/inbox/InboxDashboardV2.tsx"
+          cp "$REMOTE_PATCH/app/page02-inbox-structural-v22.css" "$CANDIDATE/app/page02-inbox-structural-v22.css"
+
+          cd "$CANDIDATE"
+          rm -rf .next
+          npm run typecheck
+          npm run build
+          NEW_BUILD=$(cat .next/BUILD_ID)
+          test -n "$NEW_BUILD"
+          test "$NEW_BUILD" != "$EXPECTED_RUNTIME_BUILD"
+
+          ./node_modules/.bin/next start -p 3111 > "/tmp/qualification-score-${RUN_ID}.log" 2>&1 &
+          TEST_PID=$!
+          cleanup_test() { kill "$TEST_PID" >/dev/null 2>&1 || true; }
+          trap cleanup_test EXIT
+          for _ in $(seq 1 20); do
+            CODE=$(curl --max-time 3 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3111/login || true)
+            [[ "$CODE" = 200 ]] && break
+            sleep 1
+          done
+          test "$CODE" = 200
+          INBOX_CODE=$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3111/inbox)
+          case "$INBOX_CODE" in 200|301|302|303|307|308) ;; *) exit 31 ;; esac
+          cleanup_test
+          trap - EXIT
+
+          rollback() {
+            set +e
+            pm2 stop "$PM2_PROCESS" >/dev/null 2>&1
+            rm -rf "$RUNTIME/.next"
+            mv "$BACKUP/.next" "$RUNTIME/.next" 2>/dev/null || true
+            cp "$BACKUP/InboxDashboardV2.tsx" "$RUNTIME/components/inbox/InboxDashboardV2.tsx" 2>/dev/null || true
+            cp "$BACKUP/page02-inbox-structural-v22.css" "$RUNTIME/app/page02-inbox-structural-v22.css" 2>/dev/null || true
+            pm2 restart "$PM2_PROCESS" >/dev/null 2>&1
+            sleep 4
+          }
+
+          mv "$RUNTIME/.next" "$BACKUP/.next"
+          cp "$CANDIDATE/components/inbox/InboxDashboardV2.tsx" "$RUNTIME/components/inbox/InboxDashboardV2.tsx"
+          cp "$CANDIDATE/app/page02-inbox-structural-v22.css" "$RUNTIME/app/page02-inbox-structural-v22.css"
+          mv "$CANDIDATE/.next" "$RUNTIME/.next"
+
+          pm2 restart "$PM2_PROCESS"
+          sleep 5
+
+          set +e
+          LOCAL_LOGIN=$(curl --max-time 15 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/login)
+          LOCAL_INBOX=$(curl --max-time 15 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/inbox)
+          PUBLIC_LOGIN=$(curl --max-time 20 -sS -L -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/login?qualification-score-only=1')
+          PUBLIC_INBOX=$(curl --max-time 20 -sS -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/inbox?qualification-score-only=1')
+          ACTIVE_BUILD=$(cat "$RUNTIME/.next/BUILD_ID" 2>/dev/null)
+          set -e
+
+          if [[ "$LOCAL_LOGIN" != 200 || "$PUBLIC_LOGIN" != 200 || "$ACTIVE_BUILD" != "$NEW_BUILD" ]]; then
+            rollback
+            exit 41
+          fi
+          case "$LOCAL_INBOX" in 200|301|302|303|307|308) ;; *) rollback; exit 42 ;; esac
+          case "$PUBLIC_INBOX" in 200|301|302|303|307|308) ;; *) rollback; exit 43 ;; esac
+
+          pm2 save >/dev/null
+          rm -rf "$REMOTE_PATCH"
+          echo "PASS: QUALIFICATION_SCORE_ONLY_DEPLOYED"
+          echo "OLD_BUILD=$EXPECTED_RUNTIME_BUILD"
+          echo "NEW_BUILD=$NEW_BUILD"
+          echo "RUNTIME=$RUNTIME"
+          echo "LOCAL_LOGIN=$LOCAL_LOGIN LOCAL_INBOX=$LOCAL_INBOX"
+          echo "PUBLIC_LOGIN=$PUBLIC_LOGIN PUBLIC_INBOX=$PUBLIC_INBOX"
+          REMOTE
+
+      - name: Final public health
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          LOGIN=$(curl --max-time 20 -sS -L -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/login?qualification-final=1')
+          INBOX=$(curl --max-time 20 -sS -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/inbox?qualification-final=1')
+          test "$LOGIN" = 200
+          case "$INBOX" in 200|301|302|303|307|308) ;; *) exit 1 ;; esac
+          echo "PASS: PUBLIC_HEALTH login=$LOGIN inbox=$INBOX"
