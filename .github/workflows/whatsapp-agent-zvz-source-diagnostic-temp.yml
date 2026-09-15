@@ -41,37 +41,45 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
           ssh-keygen -y -f "$KEY" >/dev/null
 
-      - name: Inspect live PM2 runtime and preserved ZVZ backups
+      - name: Capture live PM2 runtime and preserved builds
         shell: bash
         run: |
           set -Eeuo pipefail
-          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "$SSH_USER@$SSH_HOST" 'bash -s' > diag.txt <<'REMOTE'
           set -Eeuo pipefail
           NAME=sikhadenge-whatsapp-agent
           J=$(mktemp); pm2 jlist > "$J"
-          ACTIVE=$(node - "$J" <<'NODE'
+          node - "$J" <<'NODE'
           const fs=require('node:fs');
           const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8')).find(x=>x.name==='sikhadenge-whatsapp-agent');
           if(!p?.pm2_env?.pm_cwd) process.exit(2);
           console.log('PM2_STATUS='+String(p.pm2_env.status||''));
-          process.stdout.write(String(p.pm2_env.pm_cwd));
+          console.log('PM2_CWD='+String(p.pm2_env.pm_cwd));
+          console.log('PM2_SCRIPT='+String(p.pm2_env.pm_exec_path||''));
+          NODE
+          LIVE=$(node - "$J" <<'NODE'
+          const fs=require('node:fs');
+          const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8')).find(x=>x.name==='sikhadenge-whatsapp-agent');
+          process.stdout.write(String(p?.pm2_env?.pm_cwd||''));
           NODE
           )
           rm -f "$J"
-          STATUS=$(printf '%s\n' "$ACTIVE" | head -n1)
-          LIVE=$(printf '%s\n' "$ACTIVE" | tail -n1)
-          echo "$STATUS"
-          echo "PM2_CWD=$LIVE"
           echo "SOURCE_HEAD=$(git -C "$LIVE" rev-parse HEAD 2>/dev/null || true)"
           echo "ACTIVE_BUILD=$(cat "$LIVE/.next/BUILD_ID" 2>/dev/null || echo missing)"
           echo "LOGIN=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/login || true)"
           echo "INBOX=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/inbox || true)"
-          echo "ZVZ_BACKUPS_BEGIN"
-          find "$LIVE" -maxdepth 1 -type d -name '.next*' -print0 | while IFS= read -r -d '' d; do
-            bid=$(cat "$d/BUILD_ID" 2>/dev/null || echo missing)
-            if [[ "$bid" = "ZvzV6QBBngX3s_X5xxUnk" || "$d" = "$LIVE/.next" ]]; then
-              printf '%s BUILD_ID=%s\n' "$d" "$bid"
-            fi
+          echo "ZVZ_LOCATIONS_BEGIN"
+          find /var/www/sikhadenge-whatsapp-agent/releases -type f -name BUILD_ID -print0 2>/dev/null | while IFS= read -r -d '' f; do
+            bid=$(cat "$f" 2>/dev/null || true)
+            if [[ "$bid" = "ZvzV6QBBngX3s_X5xxUnk" ]]; then printf '%s\n' "${f%/BUILD_ID}"; fi
           done
-          echo "ZVZ_BACKUPS_END"
+          echo "ZVZ_LOCATIONS_END"
           REMOTE
+          cat diag.txt
+
+      - name: Upload diagnostic evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatsapp-inbox-runtime-diag
+          path: diag.txt
+          retention-days: 1
