@@ -26,3 +26,4 @@ export * from "./infrastructure/prisma-email-template-repository";
 export * from "./infrastructure/template-runtime";
 
 export * from "./automation/event-outbox";
+export * from "./automation/dispatcher";

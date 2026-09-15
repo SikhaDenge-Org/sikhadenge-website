@@ -2,6 +2,8 @@ import { DashboardRole } from "@prisma/client";
 import { NextResponse } from "next/server";
 
 import { getCurrentDashboardUser } from "@/lib/auth/session";
+import { assertAutomationFlowWorkspaceAccess } from "@/lib/automation/automation-service";
+import { loadPersistedWorkspaceSecurityContext } from "@/modules/auth/infrastructure/prisma-authorization";
 import { publishAutomationGraph } from "@/modules/automations/application/graph-version-service";
 
 export const runtime = "nodejs";
@@ -13,6 +15,8 @@ export async function POST(_request: Request, context: { params: { flowId: strin
   if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   if (!ALLOWED.has(user.role)) return NextResponse.json({ error: "Insufficient permission." }, { status: 403 });
   try {
+    const security = await loadPersistedWorkspaceSecurityContext(user.id);
+    await assertAutomationFlowWorkspaceAccess(context.params.flowId, security?.workspace.id ?? null);
     const published = await publishAutomationGraph({ flowId: context.params.flowId, actorId: user.id });
     return NextResponse.json({ published }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

@@ -54,6 +54,9 @@ jobs:
       - name: Run email automation event outbox contracts
         run: npx tsx modules/email-automation/tests/automation-event-outbox.test.ts
 
+      - name: Run email automation dispatcher contracts
+        run: npx tsx modules/email-automation/tests/automation-dispatcher.test.ts
+
       - name: Generate Prisma client
         run: npx prisma generate
 
