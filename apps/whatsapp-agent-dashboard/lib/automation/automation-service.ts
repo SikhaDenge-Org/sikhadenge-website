@@ -212,6 +212,9 @@ export function validateAutomationFlow(flow: Pick<AutomationFlow, "name" | "node
     if (node.type === "SEND_EMAIL" && !clean(config.templateId, 100)) {
       errors.push("Send Email action requires an approved email template ID.");
     }
+    if (node.type === "SEND_EMAIL" && !clean(config.templateVersionId, 100)) {
+      errors.push("Send Email action requires a pinned approved email template version ID.");
+    }
     if ((node.type === "ADD_TAG" || node.type === "REMOVE_TAG") && !clean(config.tag, 100)) {
       errors.push(`${node.label} requires a tag name.`);
     }

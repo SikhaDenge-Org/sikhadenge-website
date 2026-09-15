@@ -45,7 +45,7 @@ function storedVariables(value: Prisma.JsonValue): Readonly<Record<string, strin
 }
 
 export type ManualEmailSendInput = {
-  workspaceId: string; templateId: string; manualSenderIdentityId?: string | null; automationSenderIdentityId?: string | null;
+  workspaceId: string; templateId: string; templateVersionId?: string | null; manualSenderIdentityId?: string | null; automationSenderIdentityId?: string | null;
   to: readonly EmailAddress[]; cc?: readonly EmailAddress[]; bcc?: readonly EmailAddress[]; replyTo?: EmailAddress;
   variables?: Readonly<Record<string, string | null | undefined>>; idempotencyKey: string; actorUserId: string;
   deliveryContext?: "MANUAL" | "AUTOMATION";
@@ -63,8 +63,11 @@ export class ManualEmailSendService {
     const templateRuntime = buildEmailTemplateRuntime();
     const template = await templateRuntime.service.get({ workspaceId: input.workspaceId, templateId: input.templateId });
     if (template.status !== "APPROVED") throw new Error("Manual email requires an APPROVED template.");
-    const version = template.versions.find((item) => item.version === template.currentVersion);
+    const version = input.templateVersionId
+      ? template.versions.find((item) => item.id === input.templateVersionId)
+      : template.versions.find((item) => item.version === template.currentVersion);
     if (!version || !version.approvedAt) throw new Error("Approved email template version is unavailable.");
+    if (input.templateVersionId && version.templateId !== template.id) throw new Error("Pinned email template version does not belong to the selected template.");
 
     const emailRuntime = buildEmailE1Runtime();
     const senders = await emailRuntime.senders.listByWorkspace(input.workspaceId);

@@ -27,7 +27,13 @@ export async function GET() {
     const access = await requireEmailManagerAccess();
     const runtime = buildEmailTemplateRuntime();
     const templates = await runtime.service.list(access.workspaceId);
-    return NextResponse.json({ templates }, { headers: { "Cache-Control": "no-store" } });
+    const enriched = await Promise.all(templates.map(async (template) => {
+      if (template.status !== "APPROVED") return { ...template, approvedVersionId: null };
+      const detail = await runtime.service.get({ workspaceId: access.workspaceId, templateId: template.id });
+      const approvedVersion = detail.versions.find((version) => version.version === detail.currentVersion && version.approvedAt);
+      return { ...template, approvedVersionId: approvedVersion?.id ?? null };
+    }));
+    return NextResponse.json({ templates: enriched }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return errorResponse(error, "Email templates could not be loaded.");
   }

@@ -41,7 +41,7 @@ type Validation = {
   actionCount: number;
 };
 
-type EmailTemplateOption = { id: string; name: string; status: string; currentVersion: number };
+type EmailTemplateOption = { id: string; name: string; status: string; currentVersion: number; approvedVersionId: string | null };
 type EmailSenderOption = {
   id: string;
   fromName: string;
@@ -371,7 +371,7 @@ export default function AutomationFlowBuilder() {
                       <label><span>Node type</span><select value={node.type} onChange={(event) => updateNode(index, { type: event.target.value, label: humanise(event.target.value), config: {} })}>{(node.kind === "TRIGGER" ? triggerTypes : actionTypes).map((type) => <option key={type} value={type}>{humanise(type)}</option>)}</select></label>
                       <label><span>Label</span><input value={node.label} onChange={(event) => updateNode(index, { label: event.target.value })} /></label>
                       {node.type === "SEND_EMAIL" ? <>
-                        <label className="wide"><span>Approved email template</span><select value={String(node.config.templateId ?? "")} onChange={(event) => updateConfig(index, "templateId", event.target.value)}><option value="">Select approved template</option>{emailTemplates.map((template) => <option key={template.id} value={template.id}>{template.name} - v{template.currentVersion}</option>)}</select></label>
+                        <label className="wide"><span>Approved email template</span><select value={String(node.config.templateId ?? "")} onChange={(event) => { const template = emailTemplates.find((item) => item.id === event.target.value); updateNode(index, { config: { ...node.config, templateId: event.target.value, templateVersionId: template?.approvedVersionId ?? "" } }); }}><option value="">Select approved template</option>{emailTemplates.map((template) => <option key={template.id} value={template.id}>{template.name} - v{template.currentVersion}</option>)}</select></label>
                         <label className="wide"><span>Sender identity</span><select value={String(node.config.senderIdentityId ?? "")} onChange={(event) => updateConfig(index, "senderIdentityId", event.target.value)}><option value="">Use template/workspace default</option>{emailSenders.map((sender) => <option key={sender.id} value={sender.id}>{sender.fromName || sender.fromEmail} &lt;{sender.fromEmail}&gt;{sender.isWorkspaceDefault ? " - default" : ""}</option>)}</select></label>
                         {!emailTemplates.length ? <div className="automation-node-note wide">No approved Email templates are available. Approve a template in Email Control Center first.</div> : null}
                       </> : field ? <label className="wide"><span>{field.label}</span><input value={String(node.config[field.key] ?? "")} placeholder={field.placeholder} onChange={(event) => updateConfig(index, field.key, event.target.value)} /></label> : <div className="automation-node-note">No additional configuration required.</div>}
