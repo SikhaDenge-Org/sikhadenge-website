@@ -23,9 +23,13 @@ trap rollback ERR
 APPLY=1 LIVE_APP="$LIVE_APP" ENV_FILE="$ENV_FILE" EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" BACKUP_ROOT="$BACKUP_ROOT" RUN_ID="$RUN_ID" bash scripts/email-automation-dryrun-provision.sh | tee "$BACKUP_DIR/provision.log"
 EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" ENV_FILE="$ENV_FILE" bash scripts/email-automation-production-preflight.sh | tee "$BACKUP_DIR/preflight.log"
 APPLY=1 APP_DIR="$LIVE_APP" ENV_FILE="$ENV_FILE" EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" SERVICE_NAME="$SERVICE_NAME" bash scripts/email-automation-scheduler-activate.sh | tee "$BACKUP_DIR/activate.log"
-systemctl start "${SERVICE_NAME}.service"
+if ! systemctl start "${SERVICE_NAME}.service"; then
+  systemctl status "${SERVICE_NAME}.service" --no-pager > "$BACKUP_DIR/first-run-status.log" 2>&1 || true
+  journalctl -u "${SERVICE_NAME}.service" -n 100 --no-pager > "$BACKUP_DIR/first-run.log" 2>&1 || true
+  fail "first scheduler service run failed"
+fi
 systemctl is-failed --quiet "${SERVICE_NAME}.service" && fail "first scheduler service run failed" || true
-journalctl -u "${SERVICE_NAME}.service" -n 50 --no-pager > "$BACKUP_DIR/first-run.log"
+journalctl -u "${SERVICE_NAME}.service" -n 100 --no-pager > "$BACKUP_DIR/first-run.log" 2>&1 || true
 EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" ENV_FILE="$ENV_FILE" SERVICE_NAME="$SERVICE_NAME" MAX_FAILED_EVENTS="$MAX_FAILED_EVENTS" bash scripts/email-automation-scheduler-verify.sh | tee "$BACKUP_DIR/verify.log"
 systemctl show "${SERVICE_NAME}.timer" --no-pager -p ActiveState -p UnitFileState -p LastTriggerUSec > "$BACKUP_DIR/systemd-timer.txt"
 printf 'RUN_ID=%s\nEXPECTED_RELEASE_SHA=%s\nSTATUS=PASS\nRUNTIME_MODE=DRY_RUN\nEXTERNAL_WRITES=false\nCOMPLETED_UTC=%s\n' "$RUN_ID" "$EXPECTED_RELEASE_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$BACKUP_DIR/activation-result.txt"
