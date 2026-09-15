@@ -5,6 +5,7 @@
 # Retry marker: suppress generated staging package lock on 2026-08-03
 # Email DRY_RUN preflight no-match fix deployment marker: 2026-09-15
 # Email scheduler first-run evidence deployment marker: 2026-09-15
+# Email scheduler CJS compatibility fix deployment marker: 2026-09-15
 name: WhatsApp Agent Production Batch 1
 
 on:
