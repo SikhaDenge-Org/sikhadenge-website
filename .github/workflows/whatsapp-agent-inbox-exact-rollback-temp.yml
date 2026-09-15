@@ -1,4 +1,4 @@
-name: WhatsApp Agent Inbox Exact Rollback Temp
+name: WhatsApp Agent Inbox Exact Known Good Restore Temp
 
 on:
   push:
@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  exact-rollback:
+  exact-restore:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: whatsapp-agent-production
@@ -41,44 +41,63 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
           ssh-keygen -y -f "$KEY" >/dev/null
 
-      - name: Roll back PM2 to exact previous Inbox release
+      - name: Restore exact user-confirmed known-good compiled runtime
         shell: bash
         run: |
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
           set -Eeuo pipefail
           NAME=sikhadenge-whatsapp-agent
-          CURRENT=/var/www/sikhadenge-whatsapp-agent/releases/reconcile-clean-28b813ca-20260915T043800Z/apps/whatsapp-agent-dashboard
-          TARGET=/var/www/sikhadenge-whatsapp-agent/releases/reconcile-28b813ca-20260915T041236Z/apps/whatsapp-agent-dashboard
-          CURRENT_BUILD=OmTLcqzUvGbgBFh__FF36
-          TARGET_BUILD=2tbNXUMrMWDGylG-swIJC
+          CURRENT=/var/www/sikhadenge-whatsapp-agent/releases/reconcile-28b813ca-20260915T041236Z/apps/whatsapp-agent-dashboard
+          TARGET=/var/www/sikhadenge-whatsapp-agent/releases/reconcile-clean-28b813ca-20260915T043800Z/apps/whatsapp-agent-dashboard
+          GOOD_NEXT="$TARGET/.next-before-engageos-github-34950409366-1"
+          CURRENT_BUILD=2tbNXUMrMWDGylG-swIJC
+          GOOD_BUILD=ZvzV6QBBngX3s_X5xxUnk
+          RUN_TAG="${GITHUB_RUN_ID:-manual}-${GITHUB_RUN_ATTEMPT:-1}"
+          TARGET_OLD_NEXT="$TARGET/.next-before-known-good-${RUN_TAG}"
+          TARGET_STAGE_NEXT="$TARGET/.next-stage-known-good-${RUN_TAG}"
 
           test -x "$CURRENT/node_modules/next/dist/bin/next"
           test -x "$TARGET/node_modules/next/dist/bin/next"
           test -f "$CURRENT/.env"
           test -f "$TARGET/.env"
           test "$(cat "$CURRENT/.next/BUILD_ID")" = "$CURRENT_BUILD"
-          test "$(cat "$TARGET/.next/BUILD_ID")" = "$TARGET_BUILD"
+          test -f "$GOOD_NEXT/BUILD_ID"
+          test "$(cat "$GOOD_NEXT/BUILD_ID")" = "$GOOD_BUILD"
+          test ! -e "$TARGET_OLD_NEXT"
+          test ! -e "$TARGET_STAGE_NEXT"
 
           J=$(mktemp); pm2 jlist > "$J"
           ACTIVE_CWD=$(node - "$J" <<'NODE'
           const fs=require('node:fs');
           const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8')).find(x=>x.name==='sikhadenge-whatsapp-agent');
-          if(!p?.pm2_env?.pm_cwd) process.exit(2);
+          if(!p?.pm2_env?.pm_cwd || p.pm2_env?.status!=='online') process.exit(2);
           process.stdout.write(p.pm2_env.pm_cwd);
           NODE
           )
           rm -f "$J"
           test "$ACTIVE_CWD" = "$CURRENT"
 
+          cp -a "$GOOD_NEXT" "$TARGET_STAGE_NEXT"
+          test "$(cat "$TARGET_STAGE_NEXT/BUILD_ID")" = "$GOOD_BUILD"
+
           rollback_current() {
             set +e
             pm2 delete "$NAME" >/dev/null 2>&1
+            if test -d "$TARGET_OLD_NEXT"; then
+              rm -rf "$TARGET/.next" >/dev/null 2>&1
+              mv "$TARGET_OLD_NEXT" "$TARGET/.next" >/dev/null 2>&1
+            fi
+            rm -rf "$TARGET_STAGE_NEXT" >/dev/null 2>&1
             pm2 start "$CURRENT/node_modules/next/dist/bin/next" --name "$NAME" --interpreter /usr/bin/node --cwd "$CURRENT" -- start -p 3100 >/dev/null 2>&1
             sleep 5
             pm2 save >/dev/null 2>&1
           }
           trap 'rollback_current' ERR
+
+          mv "$TARGET/.next" "$TARGET_OLD_NEXT"
+          mv "$TARGET_STAGE_NEXT" "$TARGET/.next"
+          test "$(cat "$TARGET/.next/BUILD_ID")" = "$GOOD_BUILD"
 
           pm2 delete "$NAME"
           pm2 start "$TARGET/node_modules/next/dist/bin/next" --name "$NAME" --interpreter /usr/bin/node --cwd "$TARGET" -- start -p 3100
@@ -94,12 +113,12 @@ jobs:
           )
           rm -f "$J"
           test "$NEW_CWD" = "$TARGET"
-          test "$(cat "$NEW_CWD/.next/BUILD_ID")" = "$TARGET_BUILD"
+          test "$(cat "$NEW_CWD/.next/BUILD_ID")" = "$GOOD_BUILD"
 
           LOCAL_LOGIN=$(curl --max-time 15 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/login)
           LOCAL_INBOX=$(curl --max-time 15 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/inbox)
-          PUBLIC_LOGIN=$(curl --max-time 20 -sS -L -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/login?exact-rollback=1')
-          PUBLIC_INBOX=$(curl --max-time 20 -sS -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/inbox?exact-rollback=1')
+          PUBLIC_LOGIN=$(curl --max-time 20 -sS -L -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/login?known-good-zvz=1')
+          PUBLIC_INBOX=$(curl --max-time 20 -sS -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/inbox?known-good-zvz=1')
           test "$LOCAL_LOGIN" = 200
           test "$PUBLIC_LOGIN" = 200
           case "$LOCAL_INBOX" in 200|301|302|303|307|308) ;; *) exit 41 ;; esac
@@ -107,9 +126,10 @@ jobs:
 
           pm2 save >/dev/null
           trap - ERR
-          echo "PASS: INBOX_EXACT_ROLLBACK_COMPLETE"
-          echo "ACTIVE_BUILD=$TARGET_BUILD"
+          echo "PASS: USER_CONFIRMED_KNOWN_GOOD_RUNTIME_RESTORED"
+          echo "ACTIVE_BUILD=$GOOD_BUILD"
           echo "ACTIVE_CWD=$TARGET"
+          echo "FALLBACK_CWD=$CURRENT"
           echo "LOCAL_LOGIN=$LOCAL_LOGIN LOCAL_INBOX=$LOCAL_INBOX"
           echo "PUBLIC_LOGIN=$PUBLIC_LOGIN PUBLIC_INBOX=$PUBLIC_INBOX"
           REMOTE
