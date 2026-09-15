@@ -1,0 +1,1 @@
+OAuth provisioning workflow added on 2026-09-15. Required production environment secrets: GOOGLE_GMAIL_CLIENT_ID and GOOGLE_GMAIL_CLIENT_SECRET. Runtime remains DRY_RUN with external writes disabled during provisioning.
