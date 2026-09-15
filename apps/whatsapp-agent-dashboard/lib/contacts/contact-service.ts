@@ -8,6 +8,7 @@ import {
 } from "@prisma/client";
 
 import { prisma } from "../db/prisma";
+import { enqueueEmailAutomationEvent, findActorEmailWorkspaceId } from "../../modules/email-automation/automation/event-outbox";
 
 type ContactInput = {
   name: string;
@@ -274,6 +275,7 @@ export async function createContact(input: ContactInput, actorId: string) {
   const consentStatus = normalizeConsent(input.consentStatus);
   const assignedToId = await validateAssignee(input.assignedToId);
   const tagNames = normalizeTags(input.tags);
+  const emailWorkspaceId = await findActorEmailWorkspaceId(actorId);
   const existing = await prisma.whatsAppContact.findFirst({
     where: { OR: [{ phone }, { waId }] },
     select: { id: true },
@@ -310,7 +312,7 @@ export async function createContact(input: ContactInput, actorId: string) {
       },
     });
 
-    await tx.lead.create({
+    const lead = await tx.lead.create({
       data: {
         contactId: contact.id,
         conversationId: conversation.id,
@@ -329,6 +331,27 @@ export async function createContact(input: ContactInput, actorId: string) {
       });
       await tx.conversationTagLink.create({
         data: { conversationId: conversation.id, tagId: tag.id },
+      });
+    }
+
+    if (emailWorkspaceId) {
+      await enqueueEmailAutomationEvent(tx, {
+        workspaceId: emailWorkspaceId,
+        sourceEventId: `crm-contact:${contact.id}`,
+        trigger: "NEW_LEAD",
+        relatedTriggers: ["CONTACT_CREATED"],
+        contactId: contact.id,
+        leadId: lead.id,
+        payload: {
+          contactId: contact.id,
+          leadId: lead.id,
+          name,
+          email: contact.email,
+          phone: contact.phone,
+          source: clean(input.source, 120) || "CRM_MANUAL",
+          interestedCourse: clean(input.interestedCourse, 180),
+          consentStatus,
+        },
       });
     }
 

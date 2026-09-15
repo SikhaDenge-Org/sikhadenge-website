@@ -24,3 +24,5 @@ export * from "./templates/persistence";
 export * from "./application/template-service";
 export * from "./infrastructure/prisma-email-template-repository";
 export * from "./infrastructure/template-runtime";
+
+export * from "./automation/event-outbox";

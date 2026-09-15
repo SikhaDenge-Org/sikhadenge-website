@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 
 import { prisma } from "../db/prisma";
+import { enqueueEmailAutomationEvent, findActorEmailWorkspaceId } from "../../modules/email-automation/automation/event-outbox";
 
 const FORM_EVENT = "engagement_form";
 const SUBMISSION_EVENT = "engagement_submission";
@@ -355,6 +356,7 @@ export async function createFormSubmission(input: {
   for (const field of form.fields.filter((item) => item.required)) {
     if (!values[field.id]) throw new Error(`${field.label} is required.`);
   }
+  const emailWorkspaceId = await findActorEmailWorkspaceId(input.actorId);
   const submission: StoredSubmission = {
     id: randomUUID(),
     formId,
@@ -364,8 +366,8 @@ export async function createFormSubmission(input: {
     createdBy: input.actorId,
     createdAt: new Date().toISOString(),
   };
-  await prisma.$transaction([
-    prisma.webhookEvent.create({
+  await prisma.$transaction(async (tx) => {
+    await tx.webhookEvent.create({
       data: {
         eventKey: `engagement-submission:${submission.id}`,
         eventType: SUBMISSION_EVENT,
@@ -373,8 +375,18 @@ export async function createFormSubmission(input: {
         processedAt: new Date(),
         attemptCount: 1,
       },
-    }),
-    prisma.auditLog.create({
+    });
+    if (emailWorkspaceId) {
+      await enqueueEmailAutomationEvent(tx, {
+        workspaceId: emailWorkspaceId,
+        sourceEventId: `engagement-submission:${submission.id}`,
+        trigger: "FORM_SUBMITTED",
+        contactId: submission.contactId,
+        submissionId: submission.id,
+        payload: { formId, contactId: submission.contactId, values, source: submission.source },
+      });
+    }
+    await tx.auditLog.create({
       data: {
         actorId: input.actorId,
         action: "ENGAGEMENT_FORM_SUBMITTED",
@@ -382,8 +394,8 @@ export async function createFormSubmission(input: {
         entityId: submission.id,
         after: toJson({ formId, contactId: submission.contactId, fieldCount: Object.keys(values).length }),
       },
-    }),
-  ]);
+    });
+  });
   return submission;
 }
 
