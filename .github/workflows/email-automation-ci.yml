@@ -57,6 +57,9 @@ jobs:
       - name: Run email automation dispatcher contracts
         run: npx tsx modules/email-automation/tests/automation-dispatcher.test.ts
 
+      - name: Run email automation scheduler auth contracts
+        run: npx tsx modules/email-automation/tests/automation-scheduler-auth.test.ts
+
       - name: Generate Prisma client
         run: npx prisma generate
 

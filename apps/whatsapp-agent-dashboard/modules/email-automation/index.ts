@@ -27,3 +27,6 @@ export * from "./infrastructure/template-runtime";
 
 export * from "./automation/event-outbox";
 export * from "./automation/dispatcher";
+
+export * from "./automation/scheduler-auth";
+export * from "./automation/scheduler";
