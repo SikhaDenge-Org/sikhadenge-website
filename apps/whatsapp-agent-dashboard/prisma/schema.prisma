@@ -953,6 +953,7 @@ model EngageEmailMessage {
   variables             Json
   attachments           Json
   idempotencyKey        String
+  retryOfMessageId      String?
   providerMessageId     String?
   providerThreadId      String?
   externalRequestSent   Boolean  @default(false)
@@ -967,4 +968,5 @@ model EngageEmailMessage {
   @@unique([workspaceId, idempotencyKey])
   @@index([workspaceId, status, createdAt])
   @@index([workspaceId, templateId, createdAt])
+  @@index([workspaceId, retryOfMessageId, createdAt])
 }
