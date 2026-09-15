@@ -1,4 +1,4 @@
-name: WhatsApp Agent Qualification Score One File Deploy
+name: WhatsApp Agent Live Inbox Forensics Read Only
 
 on:
   push:
@@ -11,13 +11,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: whatsapp-agent-production
+  group: whatsapp-agent-production-readonly
   cancel-in-progress: false
 
 jobs:
-  deploy-score-only:
+  inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 10
     environment: whatsapp-agent-production
     env:
       SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
@@ -25,12 +25,7 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
-      DEPLOY_RUN_ID: score-only-${{ github.run_id }}-${{ github.run_attempt }}
-      ACTIVE_BASE_BUILD: n431ZO3x-YHrTAshe9A52
     steps:
-      - name: Checkout release
-        uses: actions/checkout@v4
-
       - name: Configure pinned SSH
         shell: bash
         run: |
@@ -38,11 +33,7 @@ jobs:
           if [[ -z "${SSH_PORT:-}" ]]; then SSH_PORT=22; echo "SSH_PORT=22" >> "$GITHUB_ENV"; fi
           install -d -m 700 "$HOME/.ssh"
           KEY="$HOME/.ssh/whatsapp-production"
-          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
-            printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"
-          else
-            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"
-          fi
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"; fi
           chmod 600 "$KEY"
           read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
           test "$key_type" = "ssh-ed25519"
@@ -50,18 +41,37 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
           ssh-keygen -y -f "$KEY" >/dev/null
 
-      - name: Execute guarded one-file deploy
+      - name: Inspect live source build and preserved backups only
         shell: bash
         run: |
           set -Eeuo pipefail
-          test -s .github/scripts/whatsapp-score-only-zvz.sh
-          sed "s/^GOOD_BUILD=ZvzV6QBBngX3s_X5xxUnk$/GOOD_BUILD=$ACTIVE_BASE_BUILD/" \
-            .github/scripts/whatsapp-score-only-zvz.sh \
-          | ssh -p "$SSH_PORT" \
-              -i "$HOME/.ssh/whatsapp-production" \
-              -o BatchMode=yes \
-              -o IdentitiesOnly=yes \
-              -o StrictHostKeyChecking=yes \
-              -o ConnectTimeout=15 \
-              "$SSH_USER@$SSH_HOST" \
-              "RUN_ID='$DEPLOY_RUN_ID' bash -s"
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          LIVE=/var/www/sikhadenge-whatsapp-agent/releases/reconcile-clean-28b813ca-20260915T043800Z/apps/whatsapp-agent-dashboard
+          echo "SOURCE_HEAD=$(git -C "$LIVE" rev-parse HEAD 2>/dev/null || true)"
+          echo "ACTIVE_BUILD=$(cat "$LIVE/.next/BUILD_ID" 2>/dev/null || true)"
+          echo "TRACKED_DIRTY_BEGIN"
+          git -C "$LIVE" status --porcelain --untracked-files=no || true
+          echo "TRACKED_DIRTY_END"
+          echo "DIFF_NAMES_BEGIN"
+          git -C "$LIVE" diff HEAD --name-only --no-renames || true
+          echo "DIFF_NAMES_END"
+          echo "DIFF_SHA256=$(git -C "$LIVE" diff HEAD --binary | sha256sum | awk '{print $1}')"
+          echo "BACKUPS_BEGIN"
+          for d in "$LIVE"/.next-before-* "$LIVE"/.next-candidate-*; do
+            if [[ -d "$d" ]]; then
+              printf '%s BUILD_ID=%s MTIME=%s\n' "$d" "$(cat "$d/BUILD_ID" 2>/dev/null || echo missing)" "$(stat -c %y "$d" 2>/dev/null || true)"
+            fi
+          done
+          echo "BACKUPS_END"
+          J=$(mktemp); pm2 jlist > "$J"
+          node - "$J" <<'NODE'
+          const fs=require('node:fs');
+          const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8')).find(x=>x.name==='sikhadenge-whatsapp-agent');
+          console.log('PM2_CWD='+String(p?.pm2_env?.pm_cwd||''));
+          console.log('PM2_STATUS='+String(p?.pm2_env?.status||''));
+          NODE
+          rm -f "$J"
+          echo "LOGIN=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/login || true)"
+          echo "INBOX=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/inbox || true)"
+          REMOTE
