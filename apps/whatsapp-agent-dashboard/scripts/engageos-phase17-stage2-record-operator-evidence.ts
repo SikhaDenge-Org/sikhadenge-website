@@ -12,6 +12,7 @@ import {
   STAGE2_OPERATOR_EVIDENCE_COMMIT_PHRASE,
   validateStage2OperatorEvidenceInput,
 } from "@/modules/release/application/phase17-stage2-operator-evidence-input";
+import { resolvePhase17OperatorRecorderBaseline } from "@/modules/release/application/phase17-stage2-operator-recorder-state";
 
 const WORKSPACE_ID = process.env.PHASE17_WORKSPACE_ID?.trim() || "engagews_default";
 
@@ -84,18 +85,7 @@ async function main() {
   const transitionCount = await prisma.engageControlledLaunchTransition.count({
     where: { workspaceId: WORKSPACE_ID },
   });
-
-  if (
-    !state ||
-    state.stage !== "INTERNAL_TEST_IDENTITIES" ||
-    state.mode !== "SHADOW" ||
-    state.writePolicy !== "NO_EXTERNAL_WRITES" ||
-    state.externalWritesAllowed ||
-    state.version !== 1 ||
-    transitionCount !== 1
-  ) {
-    throw new Error("Operator evidence recorder requires the exact Stage1 SHADOW version-1 baseline.");
-  }
+  const baseline = resolvePhase17OperatorRecorderBaseline(state, transitionCount);
 
   const action = required("PHASE17_OPERATOR_EVIDENCE_ACTION");
   const expectedCandidateId =
@@ -164,6 +154,7 @@ async function main() {
     console.log("PHASE17_OPERATOR_EVIDENCE_MODE=IDEMPOTENT_EXISTING");
     console.log(`PHASE17_OPERATOR_EVIDENCE_ACTION=${evidence.action}`);
     console.log(`PHASE17_OPERATOR_EVIDENCE_LIVE_SHA=${evidence.liveSha}`);
+    console.log(`PHASE17_OPERATOR_EVIDENCE_BASELINE=${baseline}`);
     console.log("PHASE17_OPERATOR_EVIDENCE_ACTOR_ID_VERIFIED=true");
     console.log(`PHASE17_OPERATOR_EVIDENCE_ACTOR_ROLE=${membership.role}`);
     console.log("PASS: PHASE17_OPERATOR_EVIDENCE_ALREADY_RECORDED_EXACTLY");
@@ -173,13 +164,14 @@ async function main() {
   console.log(`PHASE17_OPERATOR_EVIDENCE_MODE=${commitRequested ? "COMMIT" : "DRY_RUN"}`);
   console.log(`PHASE17_OPERATOR_EVIDENCE_ACTION=${evidence.action}`);
   console.log(`PHASE17_OPERATOR_EVIDENCE_LIVE_SHA=${evidence.liveSha}`);
+  console.log(`PHASE17_OPERATOR_EVIDENCE_BASELINE=${baseline}`);
   console.log("PHASE17_OPERATOR_EVIDENCE_ACTOR_ID_VERIFIED=true");
   console.log(`PHASE17_OPERATOR_EVIDENCE_ACTOR_ROLE=${membership.role}`);
   console.log("PHASE17_OPERATOR_EVIDENCE_PROOF_REF_PRESENT=true");
   console.log(`PHASE17_OPERATOR_EVIDENCE_VERIFIED_AT=${evidence.verifiedAt}`);
   console.log("PHASE17_OPERATOR_EVIDENCE_REQUEST_ID_PRESENT=true");
   console.log(`PHASE17_OPERATOR_EVIDENCE_METADATA_KEYS=${Object.keys(evidence.gateMetadata).sort().join(",")}`);
-  console.log(`PHASE17_OPERATOR_EVIDENCE_STAGE1_VERSION=${state.version}`);
+  console.log(`PHASE17_OPERATOR_EVIDENCE_STATE_VERSION=${state?.version ?? "missing"}`);
   console.log(`PHASE17_OPERATOR_EVIDENCE_TRANSITION_COUNT=${transitionCount}`);
 
   if (!commitRequested) {
