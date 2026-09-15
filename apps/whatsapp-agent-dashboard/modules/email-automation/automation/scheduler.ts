@@ -6,16 +6,35 @@ import { processEmailAutomationEvents } from "./dispatcher";
 
 export async function getEmailAutomationSchedulerHealth() {
   const staleBefore = new Date(Date.now() - 15 * 60 * 1000);
-  const [pending, processing, failed, staleProcessing, oldestPending, workspaces] = await Promise.all([
+  const [pending, processing, failed, staleProcessing, oldestPending, workspaces, latestSchedulerRun] = await Promise.all([
     prisma.engageEmailAutomationEvent.count({ where: { status: "PENDING" } }),
     prisma.engageEmailAutomationEvent.count({ where: { status: "PROCESSING" } }),
     prisma.engageEmailAutomationEvent.count({ where: { status: "FAILED" } }),
     prisma.engageEmailAutomationEvent.count({ where: { status: "PROCESSING", updatedAt: { lt: staleBefore } } }),
     prisma.engageEmailAutomationEvent.findFirst({ where: { status: "PENDING" }, orderBy: { createdAt: "asc" }, select: { createdAt: true } }),
     prisma.engageEmailAutomationEvent.findMany({ where: { OR: [{ status: "PENDING" }, { status: "PROCESSING", updatedAt: { lt: staleBefore } }] }, select: { workspaceId: true }, distinct: ["workspaceId"] }),
+    prisma.auditLog.findFirst({
+      where: { action: "EMAIL_AUTOMATION_SCHEDULER_RUN", entityType: "EmailAutomationScheduler" },
+      orderBy: { createdAt: "desc" },
+      select: { entityId: true, createdAt: true, after: true },
+    }),
   ]);
   const policy = getEmailRuntimePolicy();
-  return { runtimeEnabled: policy.runtimeEnabled, automationEnabled: policy.automationEnabled, runtimeMode: policy.mode, externalWritesEnabled: policy.externalWritesEnabled, pending, processing, failed, staleProcessing, workspacesWithRunnableEvents: workspaces.length, oldestPendingAt: oldestPending?.createdAt ?? null };
+  return {
+    runtimeEnabled: policy.runtimeEnabled,
+    automationEnabled: policy.automationEnabled,
+    runtimeMode: policy.mode,
+    externalWritesEnabled: policy.externalWritesEnabled,
+    pending,
+    processing,
+    failed,
+    staleProcessing,
+    workspacesWithRunnableEvents: workspaces.length,
+    oldestPendingAt: oldestPending?.createdAt ?? null,
+    latestSchedulerRun: latestSchedulerRun
+      ? { runId: latestSchedulerRun.entityId, createdAt: latestSchedulerRun.createdAt, summary: latestSchedulerRun.after }
+      : null,
+  };
 }
 
 export async function processEmailAutomationScheduler(input: {

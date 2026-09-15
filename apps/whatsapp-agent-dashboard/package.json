@@ -64,7 +64,8 @@
     "email:automation:scheduler": "tsx scripts/email-automation-scheduler-call.ts",
     "email:automation:preflight": "bash scripts/email-automation-production-preflight.sh",
     "email:automation:activate": "bash scripts/email-automation-scheduler-activate.sh",
-    "email:automation:deactivate": "bash scripts/email-automation-scheduler-deactivate.sh"
+    "email:automation:deactivate": "bash scripts/email-automation-scheduler-deactivate.sh",
+    "email:automation:verify": "bash scripts/email-automation-scheduler-verify.sh"
   },
   "dependencies": {
     "@prisma/client": "^6.12.0",
