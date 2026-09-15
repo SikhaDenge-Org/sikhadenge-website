@@ -1,0 +1,65 @@
+name: WhatsApp Agent Qualification Score Diagnostic Temp
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-qualification-score-diag-temp.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; SSH_PORT=22; fi
+          install -d -m 700 "$HOME/.ssh"
+          KEY="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"; fi
+          chmod 600 "$KEY"
+          read -r _ kt km _ <<< "$SSH_HOST_KEY"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$KEY" >/dev/null
+
+      - name: Read current runtime only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          J=$(mktemp); pm2 jlist > "$J"
+          node - "$J" <<'NODE'
+          const fs=require('node:fs');
+          const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8')).find(x=>x.name==='sikhadenge-whatsapp-agent');
+          if(!p) process.exit(2);
+          console.log('PM2_STATUS='+String(p.pm2_env?.status||''));
+          console.log('PM2_CWD='+String(p.pm2_env?.pm_cwd||''));
+          NODE
+          RUNTIME=$(node - "$J" <<'NODE'
+          const fs=require('node:fs'); const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8')).find(x=>x.name==='sikhadenge-whatsapp-agent'); if(!p?.pm2_env?.pm_cwd) process.exit(2); process.stdout.write(p.pm2_env.pm_cwd);
+          NODE
+          )
+          rm -f "$J"
+          echo "BUILD_ID=$(cat "$RUNTIME/.next/BUILD_ID" 2>/dev/null || true)"
+          echo "HAS_COMPONENT=$(test -f "$RUNTIME/components/inbox/InboxDashboardV2.tsx" && echo yes || echo no)"
+          echo "HAS_V22_CSS=$(test -f "$RUNTIME/app/page02-inbox-structural-v22.css" && echo yes || echo no)"
+          echo "COMPONENT_SHA256=$(sha256sum "$RUNTIME/components/inbox/InboxDashboardV2.tsx" 2>/dev/null | awk '{print $1}')"
+          echo "V22_SHA256=$(sha256sum "$RUNTIME/app/page02-inbox-structural-v22.css" 2>/dev/null | awk '{print $1}')"
+          echo "LOGIN_HTTP=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/login || true)"
+          echo "INBOX_HTTP=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/inbox || true)"
+          REMOTE
