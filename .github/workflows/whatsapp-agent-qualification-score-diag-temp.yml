@@ -1,4 +1,4 @@
-name: WhatsApp Agent Qualification Score Diagnostic Temp
+name: WhatsApp Agent Inbox Rollback Diagnostic Temp
 
 on:
   push:
@@ -36,26 +36,31 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
           ssh-keygen -y -f "$KEY" >/dev/null
 
-      - name: Inspect failed isolated candidate only
+      - name: Read live runtime and available release builds only
         shell: bash
         run: |
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
           set -Eeuo pipefail
-          CANDIDATE=/var/www/sikhadenge-whatsapp-agent/releases/qualification-score-34954543308-1/apps/whatsapp-agent-dashboard
-          LOG=/tmp/qualification-score-34954543308-1.log
-          echo "CANDIDATE_EXISTS=$(test -d "$CANDIDATE" && echo yes || echo no)"
-          echo "CANDIDATE_BUILD=$(cat "$CANDIDATE/.next/BUILD_ID" 2>/dev/null || true)"
-          echo "NEXT_BIN=$(test -x "$CANDIDATE/node_modules/.bin/next" && echo yes || echo no)"
-          echo "ENV_EXISTS=$(test -f "$CANDIDATE/.env" && echo yes || echo no)"
-          echo 'STARTUP_LOG_BEGIN'
-          tail -n 80 "$LOG" 2>/dev/null || true
-          echo 'STARTUP_LOG_END'
           J=$(mktemp); pm2 jlist > "$J"
           RUNTIME=$(node - "$J" <<'NODE'
-          const fs=require('node:fs');const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8')).find(x=>x.name==='sikhadenge-whatsapp-agent');if(!p?.pm2_env?.pm_cwd)process.exit(2);process.stdout.write(p.pm2_env.pm_cwd);
+          const fs=require('node:fs');
+          const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8')).find(x=>x.name==='sikhadenge-whatsapp-agent');
+          if(!p?.pm2_env?.pm_cwd) process.exit(2);
+          console.log('PM2_STATUS='+String(p.pm2_env?.status||''));
+          process.stdout.write(p.pm2_env.pm_cwd);
           NODE
-          ); rm -f "$J"
-          echo "LIVE_BUILD=$(cat "$RUNTIME/.next/BUILD_ID")"
-          echo "LIVE_LOGIN=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/login)"
+          )
+          rm -f "$J"
+          echo "LIVE_RUNTIME=$RUNTIME"
+          echo "LIVE_BUILD=$(cat "$RUNTIME/.next/BUILD_ID" 2>/dev/null || true)"
+          echo "LIVE_LOGIN=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/login || true)"
+          echo "LIVE_INBOX=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/inbox || true)"
+          echo 'RELEASE_BUILDS_BEGIN'
+          find /var/www/sikhadenge-whatsapp-agent/releases -type f -path '*/apps/whatsapp-agent-dashboard/.next/BUILD_ID' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 40 | while read -r ts p; do
+            dir=${p%/.next/BUILD_ID}
+            build=$(cat "$p" 2>/dev/null || true)
+            printf '%s | %s | %s\n' "$ts" "$build" "$dir"
+          done
+          echo 'RELEASE_BUILDS_END'
           REMOTE
