@@ -5,6 +5,7 @@ import {
   AUTOMATION_TRIGGER_TYPES,
   validateAutomationFlow,
 } from "../../../lib/automation/automation-service";
+import { assertAutomationEmailDispatchPolicy } from "../application/automation-send-policy";
 import { resolveEmailSender } from "../domain/sender-resolution";
 
 assert.ok(AUTOMATION_TRIGGER_TYPES.includes("NEW_LEAD"));
@@ -54,5 +55,71 @@ const sender = resolveEmailSender({
   automationSenderIdentityId: "sender-1",
 });
 assert.equal(sender.source, "AUTOMATION_OVERRIDE");
+
+const dryRun = assertAutomationEmailDispatchPolicy({
+  policy: {
+    runtimeEnabled: true,
+    externalWritesEnabled: false,
+    automationEnabled: true,
+    inboundSyncEnabled: false,
+    trackingEnabled: false,
+    mode: "DRY_RUN",
+  },
+  recipients: [{ email: "lead@example.com" }],
+  internalAllowlist: new Set(),
+  cohortAllowlist: new Set(),
+});
+assert.deepEqual(dryRun, { mode: "DRY_RUN", externalRequestAllowed: false });
+
+const limited = assertAutomationEmailDispatchPolicy({
+  policy: {
+    runtimeEnabled: true,
+    externalWritesEnabled: true,
+    automationEnabled: true,
+    inboundSyncEnabled: false,
+    trackingEnabled: false,
+    mode: "LIMITED_COHORT",
+  },
+  recipients: [{ email: "pilot@example.com" }],
+  internalAllowlist: new Set(),
+  cohortAllowlist: new Set(["pilot@example.com"]),
+});
+assert.deepEqual(limited, { mode: "LIMITED_COHORT", externalRequestAllowed: true });
+
+assert.throws(
+  () =>
+    assertAutomationEmailDispatchPolicy({
+      policy: {
+        runtimeEnabled: true,
+        externalWritesEnabled: true,
+        automationEnabled: true,
+        inboundSyncEnabled: false,
+        trackingEnabled: false,
+        mode: "LIMITED_COHORT",
+      },
+      recipients: [{ email: "outside@example.com" }],
+      internalAllowlist: new Set(),
+      cohortAllowlist: new Set(["pilot@example.com"]),
+    }),
+  /not in the email automation cohort allowlist/,
+);
+
+assert.throws(
+  () =>
+    assertAutomationEmailDispatchPolicy({
+      policy: {
+        runtimeEnabled: true,
+        externalWritesEnabled: true,
+        automationEnabled: true,
+        inboundSyncEnabled: false,
+        trackingEnabled: false,
+        mode: "LIVE",
+      },
+      recipients: [{ email: "pilot@example.com" }],
+      internalAllowlist: new Set(["pilot@example.com"]),
+      cohortAllowlist: new Set(["pilot@example.com"]),
+    }),
+  /LIVE is not enabled for E4 automation rollout/,
+);
 
 console.log("Email automation E4 dispatcher contracts: PASS");
