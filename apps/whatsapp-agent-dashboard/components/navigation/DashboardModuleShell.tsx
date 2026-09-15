@@ -1,4 +1,3 @@
-import Link from "next/link";
 import type { ReactNode } from "react";
 
 import LogoutButton from "../auth/LogoutButton";
@@ -103,7 +102,7 @@ function NavigationLink({
   const isActive = activeTitle === item.title;
 
   return (
-    <Link
+    <a
       className={`rail-button sx-navitem ${isActive ? "is-active" : ""} ${className}`.trim()}
       title={item.title}
       aria-label={item.title}
@@ -115,7 +114,7 @@ function NavigationLink({
         <SidebarMenuIcon title={item.title} />
       </span>
       <span className="sx-navlabel">{item.title}</span>
-    </Link>
+    </a>
   );
 }
 
@@ -223,7 +222,7 @@ function ChannelGlyph({ channel, size = 16 }: { channel: ChannelId; size?: numbe
 
 function ChannelLink({ channel }: { channel: ChannelItem }) {
   return (
-    <Link
+    <a
       className={`sx-chan ${channel.connected ? "is-active" : "is-pending"}`}
       href={channel.href}
       aria-label={channel.connected ? `${channel.label} connected` : `Connect ${channel.label}`}
@@ -235,7 +234,7 @@ function ChannelLink({ channel }: { channel: ChannelItem }) {
       ) : (
         <span className="sx-chan-tag">Connect</span>
       )}
-    </Link>
+    </a>
   );
 }
 
@@ -257,7 +256,7 @@ export function DashboardSidebar({
 
   return (
     <aside className="sx-side rail sd-canonical-sidebar" aria-label="Primary navigation">
-        <Link className="brand-mark sx-brand" href="/inbox" aria-label="Open inbox">
+        <a className="brand-mark sx-brand" href="/inbox" aria-label="Open inbox">
           <span className="sx-brand-logo">
             <img src="/sikhadenge-header-safe-320.png" alt="" width={26} height={26} />
           </span>
@@ -265,7 +264,7 @@ export function DashboardSidebar({
             SikhaDenge
             <small>WhatsApp AI</small>
           </span>
-        </Link>
+        </a>
 
         <div className="sx-side-scroll">
           <nav className="sx-nav" aria-label="Core modules">

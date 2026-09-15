@@ -4,6 +4,7 @@ import SidebarNavigationBridge from "../components/navigation/SidebarNavigationB
 import InboxTemplatePickerBridge from "../components/templates/InboxTemplatePickerBridge";
 import InboxComposerDockBridge from "../components/inbox/InboxComposerDockBridge";
 import ServiceWorkerRegistration from "../components/productivity/ServiceWorkerRegistration";
+import ChunkLoadRecovery from "../components/productivity/ChunkLoadRecovery";
 import "./globals.css";
 import "./auth.css";
 import "./inbox.css";
@@ -88,6 +89,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         data-ui-foundation="manrope-v15-hard-lock"
       >
         <ServiceWorkerRegistration />
+        <ChunkLoadRecovery />
         <SidebarNavigationBridge />
         <InboxTemplatePickerBridge />
         <InboxComposerDockBridge />
