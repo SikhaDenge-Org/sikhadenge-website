@@ -111,9 +111,15 @@ export async function processEmailAutomationEvents(input: {
 
     try {
       const triggers = new Set([event.trigger, ...relatedTriggers(event.relatedTriggers)]);
+      const eventPayload = record(event.payload);
+      const targetFlowId = typeof eventPayload.targetFlowId === "string" ? eventPayload.targetFlowId.trim() : "";
+      const targetFlowVersion = Number(eventPayload.targetFlowVersion);
       const matching = flows.filter((flow) => {
         const trigger = flow.nodes.find((node) => node.kind === "TRIGGER");
-        return Boolean(trigger && triggers.has(trigger.type));
+        if (!trigger || !triggers.has(trigger.type)) return false;
+        if (targetFlowId && flow.flowId !== targetFlowId) return false;
+        if (targetFlowId && Number.isFinite(targetFlowVersion) && flow.version !== targetFlowVersion) return false;
+        return true;
       });
       let actionCount = 0;
       for (const flow of matching) {

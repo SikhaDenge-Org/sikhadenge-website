@@ -78,7 +78,7 @@ export async function enqueueEmailAutomationEvent(
 
 export async function supersedePendingEmailAutomationEvents(
   tx: Prisma.TransactionClient,
-  input: { workspaceId: string; trigger: EmailAutomationTrigger; leadId?: string | null; contactId?: string | null },
+  input: { workspaceId: string; trigger: EmailAutomationTrigger; leadId?: string | null; contactId?: string | null; sourceEventIdPrefix?: string | null },
 ) {
   return tx.engageEmailAutomationEvent.updateMany({
     where: {
@@ -87,6 +87,7 @@ export async function supersedePendingEmailAutomationEvents(
       status: "PENDING",
       ...(input.leadId ? { leadId: input.leadId } : {}),
       ...(input.contactId ? { contactId: input.contactId } : {}),
+      ...(input.sourceEventIdPrefix ? { sourceEventId: { startsWith: input.sourceEventIdPrefix } } : {}),
     },
     data: { status: "PROCESSED", processedAt: new Date(), lastError: null },
   });

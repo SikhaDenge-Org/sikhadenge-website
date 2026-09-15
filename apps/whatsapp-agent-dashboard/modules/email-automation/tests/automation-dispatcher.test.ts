@@ -19,6 +19,26 @@ assert.ok(AUTOMATION_TRIGGER_TYPES.includes("APPOINTMENT_CREATED"));
 assert.ok(AUTOMATION_TRIGGER_TYPES.includes("APPOINTMENT_REMINDER"));
 assert.ok(AUTOMATION_ACTION_TYPES.includes("SEND_EMAIL"));
 
+const validReminder = validateAutomationFlow({
+  name: "Appointment reminder",
+  nodes: [
+    { id: "trigger", kind: "TRIGGER", type: "APPOINTMENT_REMINDER", label: "Appointment reminder", config: { reminderMinutesBefore: "60" } },
+    { id: "email", kind: "ACTION", type: "SEND_EMAIL", label: "Reminder email", config: { templateId: "template-1", templateVersionId: "version-1" } },
+    { id: "end", kind: "ACTION", type: "END", label: "End", config: {} },
+  ],
+});
+assert.equal(validReminder.valid, true);
+
+const invalidReminder = validateAutomationFlow({
+  name: "Broken appointment reminder",
+  nodes: [
+    { id: "trigger", kind: "TRIGGER", type: "APPOINTMENT_REMINDER", label: "Appointment reminder", config: { reminderMinutesBefore: "0" } },
+    { id: "end", kind: "ACTION", type: "END", label: "End", config: {} },
+  ],
+});
+assert.equal(invalidReminder.valid, false);
+assert.ok(invalidReminder.errors.some((item) => item.includes("1 and 43,200 minutes")));
+
 const valid = validateAutomationFlow({
   name: "Lead welcome email",
   nodes: [
