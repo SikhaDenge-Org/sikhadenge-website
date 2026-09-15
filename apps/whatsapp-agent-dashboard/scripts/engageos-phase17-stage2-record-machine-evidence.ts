@@ -41,6 +41,10 @@ function metadataObject(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : [];
+}
+
 async function main() {
   const expectedLiveSha = required("PHASE17_EXPECTED_LIVE_SHA");
   const productionRunId = required("PHASE17_PRODUCTION_RUN_ID");
@@ -67,6 +71,7 @@ async function main() {
       mode: true,
       writePolicy: true,
       externalWritesAllowed: true,
+      scope: true,
       version: true,
     },
   });
@@ -74,16 +79,71 @@ async function main() {
     where: { workspaceId: WORKSPACE_ID },
   });
 
-  if (
-    !state ||
-    state.stage !== "INTERNAL_TEST_IDENTITIES" ||
-    state.mode !== "SHADOW" ||
-    state.writePolicy !== "NO_EXTERNAL_WRITES" ||
-    state.externalWritesAllowed ||
-    state.version !== 1 ||
-    transitionCount !== 1
-  ) {
-    throw new Error("Machine evidence recorder requires the exact Stage1 SHADOW version-1 baseline.");
+  if (!state) {
+    throw new Error("Machine evidence recorder requires persisted controlled-launch state.");
+  }
+
+  const scope = metadataObject(state.scope);
+  const connectedAccountIds = stringArray(scope.connectedAccountIds);
+  const instagramAssetIds = stringArray(scope.instagramAssetIds);
+  const automationIds = stringArray(scope.automationIds);
+  const counselorGroupIds = stringArray(scope.counselorGroupIds);
+  const enabledChannels = stringArray(scope.enabledChannels);
+
+  const safeStage1 =
+    state.stage === "INTERNAL_TEST_IDENTITIES" &&
+    state.mode === "SHADOW" &&
+    state.writePolicy === "NO_EXTERNAL_WRITES" &&
+    !state.externalWritesAllowed &&
+    state.version === 1 &&
+    transitionCount === 1 &&
+    Number(scope.maxRealLeads) === 0 &&
+    scope.externalWritesRequested === false &&
+    connectedAccountIds.length === 0 &&
+    instagramAssetIds.length === 0 &&
+    automationIds.length === 0 &&
+    counselorGroupIds.length === 0 &&
+    enabledChannels.length === 0;
+
+  const safeStage2 =
+    state.stage === "ONE_CONNECTED_ACCOUNT" &&
+    state.mode === "SHADOW" &&
+    state.writePolicy === "NO_EXTERNAL_WRITES" &&
+    !state.externalWritesAllowed &&
+    state.version === 2 &&
+    transitionCount === 2 &&
+    Number(scope.maxRealLeads) === 0 &&
+    scope.externalWritesRequested === false &&
+    connectedAccountIds.length === 1 &&
+    instagramAssetIds.length === 0 &&
+    automationIds.length === 0 &&
+    counselorGroupIds.length === 0 &&
+    enabledChannels.length === 1 &&
+    enabledChannels[0] === "whatsapp";
+
+  if (!safeStage1 && !safeStage2) {
+    throw new Error("Machine evidence recorder requires the exact safe Stage1 or Stage2 SHADOW state.");
+  }
+
+  if (safeStage2) {
+    const candidate = await prisma.engageChannelConnection.findFirst({
+      where: { id: connectedAccountIds[0], workspaceId: WORKSPACE_ID },
+      select: { channel: true, status: true, capabilities: true },
+    });
+    const capabilities = metadataObject(candidate?.capabilities);
+    const evidence = metadataObject(capabilities.evidence);
+    if (
+      !candidate ||
+      candidate.channel !== "WHATSAPP" ||
+      candidate.status !== "CONNECTED" ||
+      evidence.permissionsVerified !== true ||
+      typeof evidence.apiVerifiedAt !== "string" ||
+      !evidence.apiVerifiedAt ||
+      typeof evidence.webhookVerifiedAt !== "string" ||
+      !evidence.webhookVerifiedAt
+    ) {
+      throw new Error("Machine evidence recorder requires the exact verified Stage2 WhatsApp connection.");
+    }
   }
 
   const correlationId = `phase17-stage2:${liveSha}`;
@@ -117,7 +177,8 @@ async function main() {
 
   console.log(`PHASE17_MACHINE_EVIDENCE_MODE=${commit ? "COMMIT" : "DRY_RUN"}`);
   console.log(`PHASE17_MACHINE_EVIDENCE_LIVE_SHA=${liveSha}`);
-  console.log(`PHASE17_MACHINE_EVIDENCE_STAGE1_VERSION=${state.version}`);
+  console.log(`PHASE17_MACHINE_EVIDENCE_STAGE=${state.stage}`);
+  console.log(`PHASE17_MACHINE_EVIDENCE_VERSION=${state.version}`);
   console.log(`PHASE17_MACHINE_EVIDENCE_TRANSITION_COUNT=${transitionCount}`);
   console.log(`PHASE17_MACHINE_EVIDENCE_ALLOWED_ACTIONS=${records.map((record) => record.action).join(",")}`);
 

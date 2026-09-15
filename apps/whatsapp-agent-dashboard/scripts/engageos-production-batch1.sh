@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Production rollout marker: Phase17 final Stage2 machine-evidence lock — 2026-09-15
 # Production rollout marker: Page 01 V11 exact-fit local hero — 2026-09-13
 # Production rollout marker: Page 01 V10 stable-head retry — 2026-09-13
 # Production rollout marker: Page 01 canonical HQ V9 single-logo release — 2026-09-13

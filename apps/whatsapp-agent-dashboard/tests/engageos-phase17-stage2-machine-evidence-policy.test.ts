@@ -22,8 +22,17 @@ assert.match(source, /PHASE17_MACHINE_EVIDENCE_COMMIT/);
 assert.match(source, /PHASE17_EXPECTED_LIVE_SHA/);
 assert.match(source, /Tracked production worktree is not clean/);
 assert.match(source, /INTERNAL_TEST_IDENTITIES/);
+assert.match(source, /ONE_CONNECTED_ACCOUNT/);
 assert.match(source, /NO_EXTERNAL_WRITES/);
-assert.match(source, /transitionCount !== 1/);
+assert.match(source, /safeStage1/);
+assert.match(source, /safeStage2/);
+assert.match(source, /transitionCount === 1/);
+assert.match(source, /transitionCount === 2/);
+assert.match(source, /enabledChannels\[0\] === "whatsapp"/);
+assert.match(source, /permissionsVerified !== true/);
+assert.match(source, /apiVerifiedAt/);
+assert.match(source, /webhookVerifiedAt/);
+assert.match(source, /engageChannelConnection\.findFirst/);
 assert.match(source, /engageSecurityAuditEvent\.create/);
 
 const expectedGovernanceActions = {
