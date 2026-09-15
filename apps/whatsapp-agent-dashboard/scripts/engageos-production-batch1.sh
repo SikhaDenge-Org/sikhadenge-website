@@ -186,32 +186,20 @@ test -f "$BACKUP_DIR/source-before.sha"
 test -f "$BACKUP_DIR/build-before.id"
 printf 'PASS: ROLLBACK_ARTIFACTS_PRESERVED\n'
 
-# The application is now independently verified. Stage1 persistence is additive
-# database state and automatic application rollback would not undo it, so failures
-# from this point fail closed without creating a misleading app/DB version split.
+# The application is now independently verified. Controlled-launch persistence is
+# additive database state and automatic application rollback would not undo it, so
+# failures from this point fail closed without creating a misleading app/DB split.
 trap - ERR
 
-printf '===== PHASE17 STAGE1: PERSISTED SHADOW BOOTSTRAP =====\n'
+printf '===== PHASE17: STAGE-AWARE POST-DEPLOY CONTROLLED-LAUNCH GATE =====\n'
+LIVE_APP="$LIVE_APP" \
+STAGE_APP="$STAGE_APP" \
+RELEASE_SHA="$RELEASE_SHA" \
+BACKUP_DIR="$BACKUP_DIR" \
 ENV_FILE="$ENV_FILE" \
-  bash "$STAGE_APP/scripts/engageos-production-phase17-stage1-bootstrap.sh"
-
-printf '===== PHASE17 STAGE1: READ-ONLY READINESS RECHECK =====\n'
-# The workflow intentionally runs the orchestrator from STAGE_APP. That staging
-# worktree can be modified by framework tooling during the isolated build, so the
-# final production cleanliness/SHA gate must execute from the activated LIVE_APP.
-printf 'PHASE17_STAGE1_READINESS_WORKTREE=%s\n' "$LIVE_APP"
-(
-  cd "$LIVE_APP"
-  EXPECTED_RELEASE_SHA="$RELEASE_SHA" \
-    ENV_FILE="$ENV_FILE" \
-    PM2_PROCESS_NAME="$PM2_PROCESS_NAME" \
-    CHECK_HTTP_URL="$PUBLIC_URL" \
-    bash "$STAGE_APP/scripts/engageos-phase17-production-readiness.sh"
-)
-
-printf '===== PHASE17 STAGE1: PERSISTED STATE VERIFICATION =====\n'
-ENV_FILE="$ENV_FILE" \
-  bash "$STAGE_APP/scripts/engageos-production-phase17-stage1-verify.sh"
+PUBLIC_URL="$PUBLIC_URL" \
+PHASE17_WORKSPACE_ID=engagews_default \
+  bash "$STAGE_APP/scripts/engageos-production-phase17-postdeploy-gate.sh"
 
 cat > "$BACKUP_DIR/batch-result.txt" <<EOF
 RUN_ID=$RUN_ID
@@ -220,7 +208,7 @@ STATUS=PASS
 BACKUP_MANIFEST=$BACKUP_DIR/manifest.txt
 MIGRATION_EVIDENCE=$BACKUP_DIR/migration-evidence.txt
 POST_DEPLOY_EVIDENCE=$BACKUP_DIR/post-deploy-evidence.txt
-PHASE17_STAGE1_EVIDENCE=$BACKUP_DIR/phase17-stage1-evidence.txt
+PHASE17_POSTDEPLOY_EVIDENCE=$BACKUP_DIR/phase17-postdeploy-evidence.txt
 COMPLETED_UTC=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 EOF
 chmod 600 "$BACKUP_DIR/batch-result.txt"
