@@ -47,6 +47,16 @@ function findConversationButton(root: HTMLElement, conversationId: string): HTML
   return conversationButtons(root).find((button) => button.dataset.conversationId === conversationId) ?? null;
 }
 
+function setImportantIfChanged(element: HTMLElement, property: string, value: string): void {
+  if (
+    element.style.getPropertyValue(property) === value &&
+    element.style.getPropertyPriority(property) === "important"
+  ) {
+    return;
+  }
+  element.style.setProperty(property, value, "important");
+}
+
 function setChannelGuard(root: HTMLElement, enabled: boolean, label = "Channel"): void {
   const chat = root.querySelector<HTMLElement>(".sx-chat");
   if (!chat) return;
@@ -186,9 +196,11 @@ export default function InboxHardeningBridge() {
             priority: composer.style.getPropertyPriority("pointer-events"),
           };
         }
-        composer.style.setProperty("z-index", DETAILS_COMPOSER_Z_INDEX, "important");
-        composer.style.setProperty("pointer-events", "none", "important");
-        composer.setAttribute("aria-hidden", "true");
+        setImportantIfChanged(composer, "z-index", DETAILS_COMPOSER_Z_INDEX);
+        setImportantIfChanged(composer, "pointer-events", "none");
+        if (composer.getAttribute("aria-hidden") !== "true") {
+          composer.setAttribute("aria-hidden", "true");
+        }
         return;
       }
 
