@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Production rollout marker: Phase17 exact-SHA current-release proof trigger - 2026-09-15
 # Production rollout marker: Phase17 exact-SHA machine evidence paired trigger - 2026-09-15
 # Production rollout marker: Phase17 final Stage2 machine-evidence lock — 2026-09-15
 # Production rollout marker: Page 01 V11 exact-fit local hero — 2026-09-13
