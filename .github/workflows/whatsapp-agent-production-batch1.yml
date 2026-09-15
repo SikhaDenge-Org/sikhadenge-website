@@ -6,6 +6,7 @@
 # Email DRY_RUN preflight no-match fix deployment marker: 2026-09-15
 # Email scheduler first-run evidence deployment marker: 2026-09-15
 # Email scheduler CJS compatibility fix deployment marker: 2026-09-15
+# Email channel sidebar routing deployment marker: 2026-09-15
 name: WhatsApp Agent Production Batch 1
 
 on:

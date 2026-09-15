@@ -1102,14 +1102,8 @@ export default function InboxDashboardV2({
           {CHANNELS.map((channel) => {
             const unread = channelUnread[channel.id];
             const isActive = channelFilter === channel.id;
-            return (
-              <button
-                key={channel.id}
-                type="button"
-                className={`sx-chan ${isActive ? "is-active" : ""} ${channel.connected ? "" : "is-pending"}`}
-                aria-pressed={isActive}
-                onClick={() => setChannelFilter(channel.id)}
-              >
+            const content = (
+              <>
                 <span className="sx-chan-ic"><ChannelGlyph channel={channel.id} /></span>
                 <span className="sx-chan-name">{channel.label}</span>
                 {channel.connected ? (
@@ -1121,6 +1115,31 @@ export default function InboxDashboardV2({
                 ) : (
                   <span className="sx-chan-tag">Connect</span>
                 )}
+              </>
+            );
+
+            if (channel.id === "email") {
+              return (
+                <Link
+                  key={channel.id}
+                  className="sx-chan is-pending"
+                  href="/email"
+                  aria-label="Open Email Automation Control Center"
+                >
+                  {content}
+                </Link>
+              );
+            }
+
+            return (
+              <button
+                key={channel.id}
+                type="button"
+                className={`sx-chan ${isActive ? "is-active" : ""} ${channel.connected ? "" : "is-pending"}`}
+                aria-pressed={isActive}
+                onClick={() => setChannelFilter(channel.id)}
+              >
+                {content}
               </button>
             );
           })}
