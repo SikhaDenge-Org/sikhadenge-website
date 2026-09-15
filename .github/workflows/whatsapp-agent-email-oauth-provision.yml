@@ -1,0 +1,114 @@
+name: WhatsApp Agent Email OAuth Provision
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  email-oauth-provision:
+    if: contains(github.event.head_commit.message, '[email-oauth-provision]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      GMAIL_CLIENT_ID: ${{ secrets.GOOGLE_GMAIL_CLIENT_ID }}
+      GMAIL_CLIENT_SECRET: ${{ secrets.GOOGLE_GMAIL_CLIENT_SECRET }}
+      DEPLOYED_SHA: ${{ github.event.before }}
+    steps:
+      - name: Validate guarded OAuth inputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          missing=0
+          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY GMAIL_CLIENT_ID GMAIL_CLIENT_SECRET; do
+            [[ -n "${!variable_name:-}" ]] || { echo "Missing required production secret: $variable_name" >&2; missing=1; }
+          done
+          test "$missing" = "0"
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Provision Gmail OAuth credentials with fail-closed runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          client_id_b64="$(printf '%s' "$GMAIL_CLIENT_ID" | base64 -w0)"
+          client_secret_b64="$(printf '%s' "$GMAIL_CLIENT_SECRET" | base64 -w0)"
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "DEPLOYED_SHA='$DEPLOYED_SHA' GMAIL_CLIENT_ID_B64='$client_id_b64' GMAIL_CLIENT_SECRET_B64='$client_secret_b64' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ENV_FILE="$APP/.env"
+          test "$(id -u)" = "0"
+          cd "$APP"
+          test "$(git rev-parse HEAD)" = "$DEPLOYED_SHA"
+          test -f "$ENV_FILE"
+          cp -a "$ENV_FILE" "/root/sikhadenge-backups/email-oauth-env-$(date -u +%Y%m%dT%H%M%SZ).before"
+          export GOOGLE_GMAIL_CLIENT_ID="$(printf '%s' "$GMAIL_CLIENT_ID_B64" | base64 -d)"
+          export GOOGLE_GMAIL_CLIENT_SECRET="$(printf '%s' "$GMAIL_CLIENT_SECRET_B64" | base64 -d)"
+          node - "$ENV_FILE" <<'NODE'
+          const fs=require('node:fs'), crypto=require('node:crypto'), path=require('node:path');
+          const file=process.argv[2], original=fs.readFileSync(file,'utf8'), stat=fs.statSync(file);
+          const read=(key)=>{let value='';for(const raw of original.split(/\r?\n/)){const line=raw.trim();if(!line||line.startsWith('#'))continue;const n=line.startsWith('export ')?line.slice(7).trim():line;const i=n.indexOf('=');if(i>0&&n.slice(0,i).trim()===key){value=n.slice(i+1).trim().replace(/^['"]|['"]$/g,'');}}return value;};
+          const desired={
+            GOOGLE_GMAIL_CLIENT_ID:process.env.GOOGLE_GMAIL_CLIENT_ID,
+            GOOGLE_GMAIL_CLIENT_SECRET:process.env.GOOGLE_GMAIL_CLIENT_SECRET,
+            GOOGLE_GMAIL_OAUTH_STATE_SECRET:read('GOOGLE_GMAIL_OAUTH_STATE_SECRET')||crypto.randomBytes(48).toString('base64url'),
+            EMAIL_CREDENTIAL_ENCRYPTION_KEY_B64:read('EMAIL_CREDENTIAL_ENCRYPTION_KEY_B64')||crypto.randomBytes(32).toString('base64'),
+            EMAIL_RUNTIME_ENABLED:'true',
+            EMAIL_AUTOMATION_ENABLED:'true',
+            EMAIL_RUNTIME_MODE:'DRY_RUN',
+            EMAIL_EXTERNAL_WRITES_ENABLED:'false',
+            EMAIL_INBOUND_SYNC_ENABLED:'false'
+          };
+          const keys=new Set(Object.keys(desired));
+          const kept=original.split(/\r?\n/).filter(raw=>{const line=raw.trim();if(!line||line.startsWith('#'))return true;const n=line.startsWith('export ')?line.slice(7).trim():line;const i=n.indexOf('=');return i<1||!keys.has(n.slice(0,i).trim());});
+          while(kept.length&&kept.at(-1)==='')kept.pop();
+          for(const [k,v] of Object.entries(desired))kept.push(`${k}=${v}`);
+          kept.push('');
+          const tmp=path.join(path.dirname(file),`.${path.basename(file)}.${process.pid}.tmp`);
+          fs.writeFileSync(tmp,kept.join('\n'),{mode:stat.mode});fs.chmodSync(tmp,stat.mode);try{fs.chownSync(tmp,stat.uid,stat.gid);}catch{}fs.renameSync(tmp,file);
+NODE
+          chmod 600 "$ENV_FILE"
+          pm2 restart sikhadenge-whatsapp-agent --update-env >/dev/null
+          sleep 3
+          node - "$ENV_FILE" <<'NODE'
+          const fs=require('node:fs');const text=fs.readFileSync(process.argv[2],'utf8');
+          const env={};for(const raw of text.split(/\r?\n/)){const l=raw.trim();if(!l||l.startsWith('#'))continue;const i=l.indexOf('=');if(i>0)env[l.slice(0,i).trim()]=l.slice(i+1).trim().replace(/^['"]|['"]$/g,'');}
+          const ok=Boolean(env.GOOGLE_GMAIL_CLIENT_ID&&env.GOOGLE_GMAIL_CLIENT_SECRET&&env.GOOGLE_GMAIL_OAUTH_STATE_SECRET?.length>=32&&env.EMAIL_CREDENTIAL_ENCRYPTION_KEY_B64&&env.EMAIL_RUNTIME_MODE==='DRY_RUN'&&env.EMAIL_EXTERNAL_WRITES_ENABLED==='false'&&env.EMAIL_INBOUND_SYNC_ENABLED==='false');
+          console.log(`GMAIL_OAUTH_CONFIGURED=${ok?'yes':'no'}`);console.log(`EMAIL_RUNTIME_MODE=${env.EMAIL_RUNTIME_MODE||''}`);console.log(`EMAIL_EXTERNAL_WRITES_ENABLED=${env.EMAIL_EXTERNAL_WRITES_ENABLED||''}`);console.log(`EMAIL_INBOUND_SYNC_ENABLED=${env.EMAIL_INBOUND_SYNC_ENABLED||''}`);if(!ok)process.exit(1);
+NODE
+          pm2 jlist | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const r=JSON.parse(s).find(x=>x.name==='sikhadenge-whatsapp-agent');console.log('PM2_STATUS='+(r?.pm2_env?.status||'missing'));if(r?.pm2_env?.status!=='online')process.exit(1)})"
+          REMOTE
