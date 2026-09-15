@@ -66,7 +66,9 @@
     "email:automation:preflight": "bash scripts/email-automation-production-preflight.sh",
     "email:automation:activate": "bash scripts/email-automation-scheduler-activate.sh",
     "email:automation:deactivate": "bash scripts/email-automation-scheduler-deactivate.sh",
-    "email:automation:verify": "bash scripts/email-automation-scheduler-verify.sh"
+    "email:automation:verify": "bash scripts/email-automation-scheduler-verify.sh",
+    "email:automation:dryrun:provision": "bash scripts/email-automation-dryrun-provision.sh",
+    "email:automation:dryrun:rollback": "bash scripts/email-automation-dryrun-rollback.sh"
   },
   "dependencies": {
     "@prisma/client": "^6.12.0",
