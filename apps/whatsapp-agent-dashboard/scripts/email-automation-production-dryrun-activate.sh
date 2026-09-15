@@ -26,7 +26,8 @@ APPLY=1 APP_DIR="$LIVE_APP" ENV_FILE="$ENV_FILE" EXPECTED_RELEASE_SHA="$EXPECTED
 if ! systemctl start "${SERVICE_NAME}.service"; then
   systemctl status "${SERVICE_NAME}.service" --no-pager > "$BACKUP_DIR/first-run-status.log" 2>&1 || true
   journalctl -u "${SERVICE_NAME}.service" -n 100 --no-pager > "$BACKUP_DIR/first-run.log" 2>&1 || true
-  fail "first scheduler service run failed"
+  printf 'FAIL: first scheduler service run failed\n' >&2
+  false
 fi
 systemctl is-failed --quiet "${SERVICE_NAME}.service" && fail "first scheduler service run failed" || true
 journalctl -u "${SERVICE_NAME}.service" -n 100 --no-pager > "$BACKUP_DIR/first-run.log" 2>&1 || true
