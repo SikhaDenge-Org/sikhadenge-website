@@ -1,3 +1,4 @@
+// Phase17 final exact-SHA freeze after completed emergency last-working rollback — 2026-09-15
 // Phase17 final exact-SHA freeze after runtime audit cleanup — 2026-09-15
 // Phase17 final-lock exact-SHA trigger marker — 2026-09-15
 // Machine Evidence authorized trigger — 2026-09-14
