@@ -432,8 +432,9 @@ export async function createAppointment(input: {
     createdAt: now,
     updatedAt: now,
   };
-  await prisma.$transaction([
-    prisma.webhookEvent.create({
+  const emailWorkspaceId = appointment.contactId ? await findActorEmailWorkspaceId(input.actorId) : null;
+  await prisma.$transaction(async (tx) => {
+    await tx.webhookEvent.create({
       data: {
         eventKey: `engagement-appointment:${appointment.id}`,
         eventType: APPOINTMENT_EVENT,
@@ -441,8 +442,8 @@ export async function createAppointment(input: {
         processedAt: new Date(),
         attemptCount: 1,
       },
-    }),
-    prisma.auditLog.create({
+    });
+    await tx.auditLog.create({
       data: {
         actorId: input.actorId,
         action: "APPOINTMENT_CREATED",
@@ -450,8 +451,17 @@ export async function createAppointment(input: {
         entityId: appointment.id,
         after: toJson({ title, scheduledAt: appointment.scheduledAt, ownerId }),
       },
-    }),
-  ]);
+    });
+    if (emailWorkspaceId && appointment.contactId) {
+      await enqueueEmailAutomationEvent(tx, {
+        workspaceId: emailWorkspaceId,
+        sourceEventId: `engagement-appointment:${appointment.id}`,
+        trigger: "APPOINTMENT_CREATED",
+        contactId: appointment.contactId,
+        payload: { appointmentId: appointment.id, title: appointment.title, scheduledAt: appointment.scheduledAt, ownerId: appointment.ownerId },
+      });
+    }
+  });
   return appointment;
 }
 
@@ -523,8 +533,9 @@ export async function createPaymentRecord(input: {
     createdAt: now,
     updatedAt: now,
   };
-  await prisma.$transaction([
-    prisma.webhookEvent.create({
+  const emailWorkspaceId = payment.contactId ? await findActorEmailWorkspaceId(input.actorId) : null;
+  await prisma.$transaction(async (tx) => {
+    await tx.webhookEvent.create({
       data: {
         eventKey: `engagement-payment:${payment.id}`,
         eventType: PAYMENT_EVENT,
@@ -532,8 +543,8 @@ export async function createPaymentRecord(input: {
         processedAt: new Date(),
         attemptCount: 1,
       },
-    }),
-    prisma.auditLog.create({
+    });
+    await tx.auditLog.create({
       data: {
         actorId: input.actorId,
         action: "PAYMENT_RECORD_CREATED",
@@ -541,8 +552,17 @@ export async function createPaymentRecord(input: {
         entityId: payment.id,
         after: toJson({ reference, amountMinor: payment.amountMinor, status, provider: payment.provider }),
       },
-    }),
-  ]);
+    });
+    if (emailWorkspaceId && payment.contactId && (status === "PENDING" || status === "PAID")) {
+      await enqueueEmailAutomationEvent(tx, {
+        workspaceId: emailWorkspaceId,
+        sourceEventId: `engagement-payment:${payment.id}:created`,
+        trigger: status === "PAID" ? "PAYMENT_PAID" : "PAYMENT_PENDING",
+        contactId: payment.contactId,
+        payload: { paymentId: payment.id, reference: payment.reference, amountMinor: payment.amountMinor, currency: payment.currency, status: payment.status, provider: payment.provider },
+      });
+    }
+  });
   return payment;
 }
 
@@ -567,9 +587,10 @@ export async function updatePaymentRecord(input: {
     providerPaymentId: nullable(input.providerPaymentId, 160) ?? payment.providerPaymentId,
     updatedAt: new Date().toISOString(),
   };
-  await prisma.$transaction([
-    prisma.webhookEvent.update({ where: { id: event.id }, data: { payload: toJson(updated) } }),
-    prisma.auditLog.create({
+  const emailWorkspaceId = payment.contactId && status !== payment.status ? await findActorEmailWorkspaceId(input.actorId) : null;
+  await prisma.$transaction(async (tx) => {
+    await tx.webhookEvent.update({ where: { id: event.id }, data: { payload: toJson(updated) } });
+    await tx.auditLog.create({
       data: {
         actorId: input.actorId,
         action: "PAYMENT_STATUS_UPDATED",
@@ -578,7 +599,16 @@ export async function updatePaymentRecord(input: {
         before: toJson({ status: payment.status }),
         after: toJson({ status, providerPaymentId: updated.providerPaymentId }),
       },
-    }),
-  ]);
+    });
+    if (emailWorkspaceId && payment.contactId && (status === "PENDING" || status === "PAID")) {
+      await enqueueEmailAutomationEvent(tx, {
+        workspaceId: emailWorkspaceId,
+        sourceEventId: `engagement-payment:${payment.id}:status:${payment.updatedAt}:${status}`,
+        trigger: status === "PAID" ? "PAYMENT_PAID" : "PAYMENT_PENDING",
+        contactId: payment.contactId,
+        payload: { paymentId: payment.id, reference: payment.reference, amountMinor: payment.amountMinor, currency: payment.currency, previousStatus: payment.status, status, provider: payment.provider, providerPaymentId: updated.providerPaymentId },
+      });
+    }
+  });
   return updated;
 }
