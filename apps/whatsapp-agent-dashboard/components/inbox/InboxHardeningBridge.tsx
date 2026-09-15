@@ -97,7 +97,7 @@ function setChannelGuard(root: HTMLElement, enabled: boolean, label = "Channel")
 
 export default function InboxHardeningBridge() {
   useEffect(() => {
-    const root = document.querySelector<HTMLElement>(".sx-inbox");
+    const root = document.querySelector<HTMLElement>(".sx-inbox")!;
     if (!root) return;
 
     let switchLocked = false;
