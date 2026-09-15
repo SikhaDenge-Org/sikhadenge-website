@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { assertManualEmailDispatchPolicy } from "../application/manual-send-policy";
+import { assertManualEmailDispatchPolicy, assertManualEmailRetryAllowed } from "../application/manual-send-policy";
 import { buildGmailMime, gmailRawBase64Url } from "../messaging/gmail-mime";
 import type { EmailRuntimePolicy } from "../application/runtime-policy";
 import type { EmailSendRequest } from "../domain/contracts";
@@ -11,6 +11,8 @@ assert.throws(() => assertManualEmailDispatchPolicy({ policy: { ...base, mode: "
 const internal = assertManualEmailDispatchPolicy({ policy: { ...base, mode: "INTERNAL_RECIPIENTS", externalWritesEnabled: true }, recipients: [{ email: "test@sikhadenge.in" }], allowlist: new Set(["test@sikhadenge.in"]) });
 assert.equal(internal.externalRequestAllowed, true);
 assert.throws(() => assertManualEmailDispatchPolicy({ policy: { ...base, mode: "LIVE", externalWritesEnabled: true }, recipients: [{ email: "test@sikhadenge.in" }], allowlist: new Set(["test@sikhadenge.in"]) }), /not enabled/i);
+assert.doesNotThrow(() => assertManualEmailRetryAllowed("FAILED"));
+assert.throws(() => assertManualEmailRetryAllowed("SENT"), /Only FAILED/i);
 
 const request: EmailSendRequest = {
   workspaceId: "workspace-1", connectionId: "connection-1", senderIdentityId: "sender-1", from: { email: "mail@sikhadenge.in", name: "SikhaDenge" },

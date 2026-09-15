@@ -29,3 +29,7 @@ export function assertManualEmailDispatchPolicy(input: {
   }
   return { mode: "INTERNAL_RECIPIENTS", externalRequestAllowed: true };
 }
+
+export function assertManualEmailRetryAllowed(status: string): void {
+  if (status !== "FAILED") throw new Error("Only FAILED manual email messages can be retried.");
+}
