@@ -7,6 +7,7 @@ import {
   STAGE2_OPERATOR_EVIDENCE_COMMIT_PHRASE,
   validateStage2OperatorEvidenceInput,
 } from "@/modules/release/application/phase17-stage2-operator-evidence-input";
+import { resolvePhase17OperatorRecorderBaseline } from "@/modules/release/application/phase17-stage2-operator-recorder-state";
 
 const liveSha = "e9f65a6b853385dad5712c212f51a6f1b9f56a18";
 const candidateId = "cmtv8n9v50001kw3hzm6b2y0b";
@@ -42,6 +43,30 @@ const validMetadata = new Map<string, Record<string, unknown>>([
     windowEndedAt: "2026-09-14T10:30:00.000Z",
   }],
 ]);
+
+assert.equal(resolvePhase17OperatorRecorderBaseline({
+  stage: "INTERNAL_TEST_IDENTITIES",
+  mode: "SHADOW",
+  writePolicy: "NO_EXTERNAL_WRITES",
+  externalWritesAllowed: false,
+  version: 1,
+}, 1), "STAGE1");
+
+assert.equal(resolvePhase17OperatorRecorderBaseline({
+  stage: "ONE_CONNECTED_ACCOUNT",
+  mode: "SHADOW",
+  writePolicy: "NO_EXTERNAL_WRITES",
+  externalWritesAllowed: false,
+  version: 2,
+}, 2), "STAGE2");
+
+assert.throws(() => resolvePhase17OperatorRecorderBaseline({
+  stage: "ONE_CONNECTED_ACCOUNT",
+  mode: "SHADOW",
+  writePolicy: "NO_EXTERNAL_WRITES",
+  externalWritesAllowed: true,
+  version: 2,
+}, 2), /exact Stage1 or Stage2 SHADOW no-external-writes baseline/);
 
 for (const action of STAGE2_OPERATOR_ACTIONS) {
   const metadata = validMetadata.get(action);
