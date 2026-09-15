@@ -92,7 +92,7 @@ if command -v systemctl >/dev/null 2>&1; then
   existing_refs=$((existing_refs + $(systemctl list-timers --all --no-legend 2>/dev/null | grep -ci 'email-automation-scheduler' || true)))
 fi
 if command -v crontab >/dev/null 2>&1; then existing_refs=$((existing_refs + $(crontab -l 2>/dev/null | grep -ci 'email:automation:scheduler\|email-automation-scheduler-call' || true))); fi
-if [[ -d /etc/cron.d ]]; then existing_refs=$((existing_refs + $(grep -RliE 'email:automation:scheduler|email-automation-scheduler-call' /etc/cron.d 2>/dev/null | wc -l | xargs))); fi
+if [[ -d /etc/cron.d ]]; then existing_refs=$((existing_refs + $( (grep -RliE 'email:automation:scheduler|email-automation-scheduler-call' /etc/cron.d 2>/dev/null || true) | wc -l | xargs))); fi
 printf 'EXISTING_SCHEDULER_REFERENCES=%s\n' "$existing_refs"
 [[ "$existing_refs" == "0" ]] && pass "no duplicate scheduler wiring detected" || fail "existing scheduler wiring detected; reconcile before activation"
 printf 'WARNINGS=%s\nFAILURES=%s\n' "$warnings" "$failures"

@@ -3,6 +3,7 @@
 # Retry marker: corrected public ED25519 host key configured on 2026-08-03
 # Retry marker: canonical pinned host entry for alternate SSH port on 2026-08-03
 # Retry marker: suppress generated staging package lock on 2026-08-03
+# Email DRY_RUN preflight no-match fix deployment marker: 2026-09-15
 name: WhatsApp Agent Production Batch 1
 
 on:
