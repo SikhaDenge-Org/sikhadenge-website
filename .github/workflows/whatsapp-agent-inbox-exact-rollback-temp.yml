@@ -1,0 +1,115 @@
+name: WhatsApp Agent Inbox Exact Rollback Temp
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-inbox-exact-rollback-temp.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  exact-rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+    steps:
+      - name: Configure pinned SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; SSH_PORT=22; fi
+          install -d -m 700 "$HOME/.ssh"
+          KEY="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"; fi
+          chmod 600 "$KEY"
+          read -r _ kt km _ <<< "$SSH_HOST_KEY"
+          test "$kt" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$KEY" >/dev/null
+
+      - name: Roll back PM2 to exact previous Inbox release
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          NAME=sikhadenge-whatsapp-agent
+          CURRENT=/var/www/sikhadenge-whatsapp-agent/releases/reconcile-clean-28b813ca-20260915T043800Z/apps/whatsapp-agent-dashboard
+          TARGET=/var/www/sikhadenge-whatsapp-agent/releases/reconcile-28b813ca-20260915T041236Z/apps/whatsapp-agent-dashboard
+          CURRENT_BUILD=OmTLcqzUvGbgBFh__FF36
+          TARGET_BUILD=2tbNXUMrMWDGylG-swIJC
+
+          test -x "$CURRENT/node_modules/next/dist/bin/next"
+          test -x "$TARGET/node_modules/next/dist/bin/next"
+          test -f "$CURRENT/.env"
+          test -f "$TARGET/.env"
+          test "$(cat "$CURRENT/.next/BUILD_ID")" = "$CURRENT_BUILD"
+          test "$(cat "$TARGET/.next/BUILD_ID")" = "$TARGET_BUILD"
+
+          J=$(mktemp); pm2 jlist > "$J"
+          ACTIVE_CWD=$(node - "$J" <<'NODE'
+          const fs=require('node:fs');
+          const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8')).find(x=>x.name==='sikhadenge-whatsapp-agent');
+          if(!p?.pm2_env?.pm_cwd) process.exit(2);
+          process.stdout.write(p.pm2_env.pm_cwd);
+          NODE
+          )
+          rm -f "$J"
+          test "$ACTIVE_CWD" = "$CURRENT"
+
+          rollback_current() {
+            set +e
+            pm2 delete "$NAME" >/dev/null 2>&1
+            pm2 start "$CURRENT/node_modules/next/dist/bin/next" --name "$NAME" --interpreter /usr/bin/node --cwd "$CURRENT" -- start -p 3100 >/dev/null 2>&1
+            sleep 5
+            pm2 save >/dev/null 2>&1
+          }
+          trap 'rollback_current' ERR
+
+          pm2 delete "$NAME"
+          pm2 start "$TARGET/node_modules/next/dist/bin/next" --name "$NAME" --interpreter /usr/bin/node --cwd "$TARGET" -- start -p 3100
+          sleep 5
+
+          J=$(mktemp); pm2 jlist > "$J"
+          NEW_CWD=$(node - "$J" <<'NODE'
+          const fs=require('node:fs');
+          const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8')).find(x=>x.name==='sikhadenge-whatsapp-agent');
+          if(!p?.pm2_env?.pm_cwd || p.pm2_env?.status!=='online') process.exit(2);
+          process.stdout.write(p.pm2_env.pm_cwd);
+          NODE
+          )
+          rm -f "$J"
+          test "$NEW_CWD" = "$TARGET"
+          test "$(cat "$NEW_CWD/.next/BUILD_ID")" = "$TARGET_BUILD"
+
+          LOCAL_LOGIN=$(curl --max-time 15 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/login)
+          LOCAL_INBOX=$(curl --max-time 15 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/inbox)
+          PUBLIC_LOGIN=$(curl --max-time 20 -sS -L -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/login?exact-rollback=1')
+          PUBLIC_INBOX=$(curl --max-time 20 -sS -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/inbox?exact-rollback=1')
+          test "$LOCAL_LOGIN" = 200
+          test "$PUBLIC_LOGIN" = 200
+          case "$LOCAL_INBOX" in 200|301|302|303|307|308) ;; *) exit 41 ;; esac
+          case "$PUBLIC_INBOX" in 200|301|302|303|307|308) ;; *) exit 42 ;; esac
+
+          pm2 save >/dev/null
+          trap - ERR
+          echo "PASS: INBOX_EXACT_ROLLBACK_COMPLETE"
+          echo "ACTIVE_BUILD=$TARGET_BUILD"
+          echo "ACTIVE_CWD=$TARGET"
+          echo "LOCAL_LOGIN=$LOCAL_LOGIN LOCAL_INBOX=$LOCAL_INBOX"
+          echo "PUBLIC_LOGIN=$PUBLIC_LOGIN PUBLIC_INBOX=$PUBLIC_INBOX"
+          REMOTE
