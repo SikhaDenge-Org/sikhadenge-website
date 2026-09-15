@@ -1,0 +1,149 @@
+/*
+ * Inbox 10/10 hardening pass.
+ * Loaded after inbox-enterprise-final.css so edge-device geometry stays
+ * deterministic without reopening the legacy global dashboard styles.
+ */
+
+.sx-inbox[data-inbox-switching="true"] .sx-convo:not(.is-selected) {
+  cursor: progress;
+}
+
+.sx-hardening-channel-guard {
+  position: absolute;
+  left: 50%;
+  bottom: 116px;
+  z-index: 42;
+  width: min(520px, calc(100% - 32px));
+  transform: translateX(-50%);
+  padding: 10px 14px;
+  border: 1px solid #d9e2f5;
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.98);
+  color: #475467;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
+  text-align: center;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.1);
+  pointer-events: none;
+}
+
+@media (max-width: 1439px) {
+  .sx-inbox .sx-details {
+    max-height: 100dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
+@media (max-width: 767px) {
+  :root {
+    --sx-inbox-mobile-nav-base: 64px;
+    --sx-inbox-safe-bottom: env(safe-area-inset-bottom, 0px);
+    --sx-inbox-mobile-nav-total: calc(
+      var(--sx-inbox-mobile-nav-base) + var(--sx-inbox-safe-bottom)
+    );
+  }
+
+  body .sx-inbox > .sx-list,
+  body .sx-inbox > .sx-chat {
+    padding-bottom: var(--sx-inbox-mobile-nav-total) !important;
+  }
+
+  body .sx-inbox > .sx-side {
+    height: var(--sx-inbox-mobile-nav-total) !important;
+    min-height: var(--sx-inbox-mobile-nav-total) !important;
+    max-height: var(--sx-inbox-mobile-nav-total) !important;
+    padding: 4px 4px calc(4px + var(--sx-inbox-safe-bottom)) !important;
+  }
+
+  body .sx-inbox .sx-side-scroll {
+    flex: 1 1 80% !important;
+    width: auto !important;
+    min-width: 0 !important;
+  }
+
+  body .sx-inbox .sx-side-scroll .rail-button {
+    flex: 1 1 0 !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    padding-left: 2px !important;
+    padding-right: 2px !important;
+  }
+
+  body .sx-inbox .sx-side-foot {
+    flex: 0 0 20% !important;
+    width: 20% !important;
+    min-width: 0 !important;
+    max-width: 20% !important;
+    padding-left: 2px !important;
+  }
+
+  body .sx-inbox .sx-side-foot > .sx-navitem {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  body .sx-inbox.sx-mv-chat .sx-composer {
+    bottom: var(--sx-inbox-mobile-nav-total) !important;
+  }
+
+  body .sx-inbox .sx-details {
+    padding-bottom: calc(18px + var(--sx-inbox-safe-bottom)) !important;
+  }
+
+  body .sx-inbox .sx-details-backdrop {
+    bottom: var(--sx-inbox-mobile-nav-total) !important;
+  }
+
+  .sx-hardening-channel-guard {
+    bottom: calc(var(--sx-inbox-mobile-nav-total) + 76px);
+    width: calc(100% - 20px);
+    font-size: 11.5px;
+  }
+}
+
+@media (max-width: 340px) {
+  body .sx-inbox .sx-side .rail-button .sx-navlabel,
+  body .sx-inbox .sx-side-foot .sx-navitem .sx-navlabel {
+    font-size: 8.5px !important;
+    letter-spacing: -0.01em !important;
+  }
+
+  body .sx-inbox .sx-side .rail-button .sx-navbadge {
+    right: 4px !important;
+  }
+
+  body .sx-inbox .sx-list-head {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  body .sx-inbox .sx-search,
+  body .sx-inbox .sx-filter-tabs {
+    min-width: 0;
+  }
+
+  body .sx-inbox .sx-chat-actions {
+    gap: 4px;
+  }
+
+  body .sx-inbox .sx-lead-btn,
+  body .sx-inbox .sx-btn-outline {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}
+
+@media (max-width: 767px) and (max-height: 560px) {
+  .sx-hardening-channel-guard {
+    bottom: calc(var(--sx-inbox-mobile-nav-total) + 66px);
+  }
+
+  body .sx-inbox .sx-chat-head {
+    padding-top: 7px;
+    padding-bottom: 7px;
+  }
+}
