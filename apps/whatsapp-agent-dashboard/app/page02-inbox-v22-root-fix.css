@@ -1,0 +1,38 @@
+/* Page 02 Inbox — V22 root layout contract fix
+ *
+ * V22 wraps list/chat/details inside `.sx-workspace-v22`. The legacy Inbox
+ * root still defines four direct grid columns for sidebar/list/chat/details,
+ * so the wrapper is placed in the old list column and its chat/details are
+ * clipped. This route-local final layer changes the root contract to exactly
+ * two direct children: sidebar + V22 workspace.
+ */
+
+.sx-inbox {
+  grid-template-columns: minmax(232px, 264px) minmax(0, 1fr) !important;
+}
+
+.sx-inbox > .sx-workspace-v22 {
+  grid-column: 2 !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  max-width: none !important;
+}
+
+/* Compact tablet rail + full remaining workspace. */
+@media (min-width: 768px) and (max-width: 1179px) {
+  .sx-inbox {
+    grid-template-columns: 72px minmax(0, 1fr) !important;
+  }
+}
+
+/* The mobile sidebar is fixed as bottom navigation, so the workspace owns the
+ * single document grid column. */
+@media (max-width: 767px) {
+  .sx-inbox {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .sx-inbox > .sx-workspace-v22 {
+    grid-column: 1 !important;
+  }
+}
