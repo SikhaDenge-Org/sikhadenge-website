@@ -29,6 +29,7 @@ const CHANNEL_SLUGS: Record<string, ChannelSlug> = {
 
 const SWITCH_SETTLE_GRACE_MS = 120;
 const SWITCH_TIMEOUT_MS = 8_000;
+const SWITCH_CHECK_MS = 60;
 const DETAILS_COMPOSER_Z_INDEX = "40";
 
 function channelLabel(button: HTMLElement): string {
@@ -102,7 +103,6 @@ export default function InboxHardeningBridge() {
     let switchLocked = false;
     let switchStartedAt = 0;
     let queuedConversationId: string | null = null;
-    let settleFrame = 0;
     let settleTimer = 0;
     let syncFrame = 0;
     let stackingFrame = 0;
@@ -112,6 +112,10 @@ export default function InboxHardeningBridge() {
     function releaseSwitchLock(): void {
       switchLocked = false;
       delete root.dataset.inboxSwitching;
+      if (settleTimer) {
+        window.clearTimeout(settleTimer);
+        settleTimer = 0;
+      }
 
       const queuedId = queuedConversationId;
       queuedConversationId = null;
@@ -123,28 +127,45 @@ export default function InboxHardeningBridge() {
       }
     }
 
+    function recoverFromHungSwitch(): void {
+      const targetId =
+        queuedConversationId ||
+        selectedConversationButton(root)?.dataset.conversationId ||
+        null;
+
+      if (targetId) {
+        window.location.assign(`/inbox?conversation=${encodeURIComponent(targetId)}`);
+        return;
+      }
+
+      window.location.reload();
+    }
+
     function watchSwitchSettlement(): void {
-      if (settleFrame) window.cancelAnimationFrame(settleFrame);
       if (settleTimer) window.clearTimeout(settleTimer);
 
       const check = () => {
-        settleFrame = 0;
+        settleTimer = 0;
         if (!switchLocked) return;
 
         const elapsed = performance.now() - switchStartedAt;
         const loadingText = root.querySelector<HTMLElement>(".sx-messages .sx-center")?.textContent || "";
         const loading = loadingText.includes("Loading conversation");
 
-        if ((!loading && elapsed >= SWITCH_SETTLE_GRACE_MS) || elapsed >= SWITCH_TIMEOUT_MS) {
+        if (!loading && elapsed >= SWITCH_SETTLE_GRACE_MS) {
           releaseSwitchLock();
           return;
         }
 
-        settleFrame = window.requestAnimationFrame(check);
+        if (loading && elapsed >= SWITCH_TIMEOUT_MS) {
+          recoverFromHungSwitch();
+          return;
+        }
+
+        settleTimer = window.setTimeout(check, SWITCH_CHECK_MS);
       };
 
-      settleFrame = window.requestAnimationFrame(check);
-      settleTimer = window.setTimeout(() => releaseSwitchLock(), SWITCH_TIMEOUT_MS + 250);
+      settleTimer = window.setTimeout(check, SWITCH_CHECK_MS);
     }
 
     function queueChannelSync(label: string, reason: "initial" | "user"): void {
@@ -280,8 +301,6 @@ export default function InboxHardeningBridge() {
     }
 
     const mutationObserver = new MutationObserver((mutations) => {
-      if (switchLocked) watchSwitchSettlement();
-
       const detailsMayHaveChanged = mutations.some((mutation) => {
         if (mutation.type !== "attributes") return false;
         const element = mutation.target instanceof HTMLElement ? mutation.target : null;
@@ -316,7 +335,6 @@ export default function InboxHardeningBridge() {
       window.removeEventListener("resize", scheduleDetailsStacking);
       window.removeEventListener("orientationchange", scheduleDetailsStacking);
       window.visualViewport?.removeEventListener("resize", scheduleDetailsStacking);
-      if (settleFrame) window.cancelAnimationFrame(settleFrame);
       if (settleTimer) window.clearTimeout(settleTimer);
       if (syncFrame) window.cancelAnimationFrame(syncFrame);
       if (stackingFrame) window.cancelAnimationFrame(stackingFrame);
