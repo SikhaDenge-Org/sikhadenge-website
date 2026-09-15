@@ -7,6 +7,7 @@ import {
 } from "@prisma/client";
 
 import { prisma } from "../db/prisma";
+import { enqueueEmailAutomationEvent, findActorEmailWorkspaceId } from "../../modules/email-automation/automation/event-outbox";
 
 export type LeadFilters = {
   search?: string;
@@ -320,9 +321,11 @@ export async function updateLead(input: {
   const values = input.values;
   const data: Prisma.LeadUpdateInput = {};
   let assignee: Awaited<ReturnType<typeof validateAssignee>> | undefined;
+  let nextStage: LeadStage | null = null;
 
   if (Object.prototype.hasOwnProperty.call(values, "stage")) {
     const stage = normalizeStage(values.stage);
+    nextStage = stage;
     data.stage = stage;
     const isQualifiedStage =
       stage === LeadStage.QUALIFIED ||
@@ -380,6 +383,9 @@ export async function updateLead(input: {
 
   if (Object.keys(data).length === 0) throw new Error("No lead changes were supplied.");
 
+  const stageChanged = Boolean(nextStage && nextStage !== existing.stage);
+  const emailWorkspaceId = stageChanged ? await findActorEmailWorkspaceId(input.actorId) : null;
+
   const updated = await prisma.$transaction(async (transaction) => {
     const lead = await transaction.lead.update({
       where: { id: existing.id },
@@ -416,6 +422,16 @@ export async function updateLead(input: {
         after: toJson(values),
       },
     });
+    if (emailWorkspaceId && nextStage && nextStage !== existing.stage) {
+      await enqueueEmailAutomationEvent(transaction, {
+        workspaceId: emailWorkspaceId,
+        sourceEventId: `crm-lead:${existing.id}:stage:${existing.updatedAt.toISOString()}:${nextStage}`,
+        trigger: "STAGE_CHANGED",
+        contactId: existing.contactId,
+        leadId: existing.id,
+        payload: { leadId: existing.id, contactId: existing.contactId, previousStage: existing.stage, stage: nextStage },
+      });
+    }
     return lead;
   });
 
@@ -469,9 +485,11 @@ export async function bulkUpdateLeads(input: {
   const values = input.values;
   const data: Prisma.LeadUpdateManyMutationInput = {};
   let assignee: Awaited<ReturnType<typeof validateAssignee>> | undefined;
+  let nextStage: LeadStage | null = null;
 
   if (Object.prototype.hasOwnProperty.call(values, "stage")) {
-    data.stage = normalizeStage(values.stage);
+    nextStage = normalizeStage(values.stage);
+    data.stage = nextStage;
   }
   if (Object.prototype.hasOwnProperty.call(values, "temperature")) {
     data.temperature = normalizeTemperature(values.temperature);
@@ -487,9 +505,11 @@ export async function bulkUpdateLeads(input: {
 
   const leads = await prisma.lead.findMany({
     where: { id: { in: leadIds } },
-    select: { id: true, conversationId: true },
+    select: { id: true, contactId: true, conversationId: true, stage: true, updatedAt: true },
   });
   if (leads.length === 0) throw new Error("Selected leads were not found.");
+  const stageChanges = nextStage ? leads.filter((lead) => lead.stage !== nextStage) : [];
+  const emailWorkspaceId = stageChanges.length ? await findActorEmailWorkspaceId(input.actorId) : null;
 
   const result = await prisma.$transaction(async (transaction) => {
     const updated = await transaction.lead.updateMany({
@@ -510,6 +530,18 @@ export async function bulkUpdateLeads(input: {
         after: toJson({ leadIds: leads.map((lead) => lead.id), values }),
       },
     });
+    if (emailWorkspaceId && nextStage) {
+      for (const lead of stageChanges) {
+        await enqueueEmailAutomationEvent(transaction, {
+          workspaceId: emailWorkspaceId,
+          sourceEventId: `crm-lead:${lead.id}:stage:${lead.updatedAt.toISOString()}:${nextStage}`,
+          trigger: "STAGE_CHANGED",
+          contactId: lead.contactId,
+          leadId: lead.id,
+          payload: { leadId: lead.id, contactId: lead.contactId, previousStage: lead.stage, stage: nextStage, bulk: true },
+        });
+      }
+    }
     return updated.count;
   });
 

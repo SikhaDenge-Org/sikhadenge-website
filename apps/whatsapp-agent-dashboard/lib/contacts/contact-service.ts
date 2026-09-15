@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   AgentMode,
   ConsentStatus,
@@ -388,7 +390,7 @@ export async function updateContact(
 ) {
   const current = await prisma.whatsAppContact.findUnique({
     where: { id: contactId },
-    include: { conversations: { orderBy: { createdAt: "asc" }, take: 1 }, lead: true },
+    include: { conversations: { orderBy: { createdAt: "asc" }, take: 1, include: { tags: { include: { tag: true } } } }, lead: true },
   });
   if (!current) throw new Error("Contact not found.");
 
@@ -401,6 +403,13 @@ export async function updateContact(
       ? normalizeConsent(input.consentStatus)
       : current.consentStatus;
   const tagNames = input.tags !== undefined ? normalizeTags(input.tags) : null;
+  const requestedStage = input.stage !== undefined ? normalizeStage(input.stage) : null;
+  const stageChanged = Boolean(current.lead && requestedStage && requestedStage !== current.lead.stage);
+  const previousTagNames = new Set((current.conversations[0]?.tags ?? []).map(({ tag }) => tag.name.toLocaleLowerCase("en-IN")));
+  const addedTagNames = tagNames ? tagNames.filter((tagName) => !previousTagNames.has(tagName.toLocaleLowerCase("en-IN"))) : [];
+  const addedTagKeys = new Set(addedTagNames.map((tagName) => tagName.toLocaleLowerCase("en-IN")));
+  const emailWorkspaceId = stageChanged || addedTagNames.length ? await findActorEmailWorkspaceId(actorId) : null;
+  const tagOperationId = addedTagNames.length ? randomUUID() : null;
 
   await prisma.$transaction(async (tx) => {
     const updatedContact = await tx.whatsAppContact.update({
@@ -444,6 +453,7 @@ export async function updateContact(
           agentMode: AgentMode.PAUSED,
           source: clean(input.source, 120) || "CRM_MANUAL",
         },
+        include: { tags: { include: { tag: true } } },
       });
     } else {
       await tx.whatsAppConversation.update({
@@ -463,7 +473,7 @@ export async function updateContact(
           ...(input.interestedCourse !== undefined
             ? { interestedCourse: clean(input.interestedCourse, 180) }
             : {}),
-          ...(input.stage !== undefined ? { stage: normalizeStage(input.stage) } : {}),
+          ...(input.stage !== undefined ? { stage: requestedStage! } : {}),
           ...(input.temperature !== undefined
             ? { temperature: normalizeTemperature(input.temperature) }
             : {}),
@@ -475,10 +485,20 @@ export async function updateContact(
           contactId,
           conversationId: conversation.id,
           assignedToId: assignedToId ?? null,
-          stage: normalizeStage(input.stage),
+          stage: requestedStage ?? LeadStage.NEW,
           temperature: normalizeTemperature(input.temperature),
           interestedCourse: clean(input.interestedCourse, 180),
         },
+      });
+    }
+    if (emailWorkspaceId && current.lead && requestedStage && requestedStage !== current.lead.stage) {
+      await enqueueEmailAutomationEvent(tx, {
+        workspaceId: emailWorkspaceId,
+        sourceEventId: `crm-contact:${contactId}:lead-stage:${current.lead.updatedAt.toISOString()}:${requestedStage}`,
+        trigger: "STAGE_CHANGED",
+        contactId,
+        leadId: current.lead.id,
+        payload: { leadId: current.lead.id, contactId, previousStage: current.lead.stage, stage: requestedStage },
       });
     }
 
@@ -493,6 +513,16 @@ export async function updateContact(
         await tx.conversationTagLink.create({
           data: { conversationId: conversation.id, tagId: tag.id },
         });
+        if (emailWorkspaceId && tagOperationId && addedTagKeys.has(tagName.toLocaleLowerCase("en-IN"))) {
+          await enqueueEmailAutomationEvent(tx, {
+            workspaceId: emailWorkspaceId,
+            sourceEventId: `crm-contact-tags:${contactId}:${tagOperationId}:${tag.id}`,
+            trigger: "TAG_ADDED",
+            contactId,
+            leadId: current.lead?.id ?? null,
+            payload: { contactId, conversationId: conversation.id, tagId: tag.id, tagName },
+          });
+        }
       }
     }
 
