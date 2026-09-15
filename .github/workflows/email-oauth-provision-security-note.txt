@@ -1,0 +1,1 @@
+Security note: OAuth secrets must never be committed. The provisioning workflow prints only boolean/config state and preserves DRY_RUN with external writes disabled.
