@@ -60,7 +60,15 @@
     "prisma:migrate": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
-    "question-bank:seed": "tsx prisma/seed-question-bank.ts"
+    "question-bank:seed": "tsx prisma/seed-question-bank.ts",
+    "email:automation:scheduler": "tsx scripts/email-automation-scheduler-call.ts",
+    "email:automation:preflight": "bash scripts/email-automation-production-preflight.sh",
+    "email:automation:activate": "bash scripts/email-automation-scheduler-activate.sh",
+    "email:automation:deactivate": "bash scripts/email-automation-scheduler-deactivate.sh",
+    "email:automation:verify": "bash scripts/email-automation-scheduler-verify.sh",
+    "email:automation:dryrun:provision": "bash scripts/email-automation-dryrun-provision.sh",
+    "email:automation:dryrun:rollback": "bash scripts/email-automation-dryrun-rollback.sh",
+    "email:automation:production:dryrun:activate": "bash scripts/email-automation-production-dryrun-activate.sh"
   },
   "dependencies": {
     "@prisma/client": "^6.12.0",

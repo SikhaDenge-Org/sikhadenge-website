@@ -1,0 +1,5 @@
+import { recordEmailAnalyticsEvent } from "@/modules/email-automation/finalization/platform-service";
+import { openTrackingSignature, verifyTrackingSignature } from "@/modules/email-automation/analytics/tracking";
+export const runtime="nodejs"; export const dynamic="force-dynamic";
+const PIXEL=Uint8Array.from([71,73,70,56,57,97,1,0,1,0,128,0,0,0,0,0,255,255,255,33,249,4,1,0,0,0,0,44,0,0,0,0,1,0,1,0,0,2,2,68,1,0,59]);
+export async function GET(request:Request,{params}:{params:{messageId:string}}){const sig=new URL(request.url).searchParams.get("s")||"";try{if(process.env.EMAIL_TRACKING_ENABLED==="true"&&sig&&verifyTrackingSignature(`open:${params.messageId}`,sig)&&sig===openTrackingSignature(params.messageId))await recordEmailAnalyticsEvent({messageId:params.messageId,eventType:"OPENED"});}catch{}return new Response(PIXEL,{status:200,headers:{"content-type":"image/gif","cache-control":"no-store, max-age=0"}});}

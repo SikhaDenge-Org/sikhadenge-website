@@ -8,6 +8,7 @@ export type ChannelConnectionId = Brand<string, "ChannelConnectionId">;
 
 export const CHANNEL_TYPES = [
   "WHATSAPP",
+  "EMAIL",
   "INSTAGRAM",
   "MESSENGER",
   "FACEBOOK",

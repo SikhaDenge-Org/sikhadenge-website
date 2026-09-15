@@ -1,0 +1,5 @@
+import { NextResponse } from "next/server";
+import { requireEmailManagerAccess, EmailDashboardAccessError } from "@/modules/email-automation/application/dashboard-access";
+import { fetchGmailInboundAttachment } from "@/modules/email-automation/inbound/gmail-inbound-service";
+export const runtime="nodejs"; export const dynamic="force-dynamic";
+export async function GET(_request:Request,{params}:{params:Promise<{messageId:string;attachmentId:string}>}){try{const a=await requireEmailManagerAccess();const p=await params;const file=await fetchGmailInboundAttachment({workspaceId:a.workspaceId,inboundMessageId:p.messageId,attachmentId:p.attachmentId});return new Response(file.bytes,{headers:{"content-type":file.mimeType,"content-disposition":`attachment; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,"cache-control":"private, no-store"}});}catch(e){if(e instanceof EmailDashboardAccessError)return NextResponse.json({error:e.message},{status:e.status});return NextResponse.json({error:e instanceof Error?e.message:"Attachment could not be loaded."},{status:404});}}

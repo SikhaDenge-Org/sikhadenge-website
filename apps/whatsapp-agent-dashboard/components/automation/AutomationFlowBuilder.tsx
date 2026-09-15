@@ -41,9 +41,24 @@ type Validation = {
   actionCount: number;
 };
 
+type EmailTemplateOption = { id: string; name: string; status: string; currentVersion: number; approvedVersionId: string | null };
+type EmailSenderOption = {
+  id: string;
+  fromName: string;
+  fromEmail: string;
+  verificationStatus: string;
+  isActive: boolean;
+  isWorkspaceDefault: boolean;
+};
 const triggerTypes = [
   "INCOMING_KEYWORD",
   "NEW_LEAD",
+  "CONTACT_CREATED",
+  "FORM_SUBMITTED",
+  "PAYMENT_PENDING",
+  "PAYMENT_PAID",
+  "APPOINTMENT_CREATED",
+  "APPOINTMENT_REMINDER",
   "TAG_ADDED",
   "STAGE_CHANGED",
   "FOLLOW_UP_DUE",
@@ -56,6 +71,7 @@ const actionTypes = [
   "SEND_TEXT",
   "SEND_TEMPLATE",
   "SEND_MEDIA",
+  "SEND_EMAIL",
   "ASK_QUESTION",
   "ADD_TAG",
   "REMOVE_TAG",
@@ -92,13 +108,16 @@ function emptyNode(kind: NodeKind): FlowNode {
 
 function configField(type: string) {
   if (type === "INCOMING_KEYWORD") return { key: "keyword", label: "Keyword", placeholder: "demo class" };
-  if (type === "SCHEDULE") return { key: "schedule", label: "Schedule", placeholder: "Every day 09:00 IST" };
+  if (type === "SCHEDULE") return { key: "intervalMinutes", label: "Run every (minutes)", placeholder: "1440" };
+  if (type === "NO_REPLY") return { key: "waitMinutes", label: "No reply wait (minutes)", placeholder: "1440" };
+  if (type === "APPOINTMENT_REMINDER") return { key: "reminderMinutesBefore", label: "Minutes before appointment", placeholder: "60" };
   if (type === "WEBHOOK") return { key: "secretLabel", label: "Webhook label", placeholder: "Website lead form" };
   if (type === "TAG_ADDED" || type === "ADD_TAG" || type === "REMOVE_TAG") return { key: "tag", label: "Tag", placeholder: "Hot Lead" };
   if (type === "STAGE_CHANGED" || type === "UPDATE_STAGE") return { key: "stage", label: "Lead stage", placeholder: "QUALIFIED" };
   if (type === "SEND_TEXT" || type === "ASK_QUESTION") return { key: "text", label: "Message text", placeholder: "Type the approved message…" };
   if (type === "SEND_TEMPLATE") return { key: "templateId", label: "Approved template ID", placeholder: "Template record ID" };
   if (type === "SEND_MEDIA") return { key: "assetId", label: "Media asset ID", placeholder: "Uploaded asset ID" };
+  if (type === "SEND_EMAIL") return { key: "templateId", label: "Approved email template ID", placeholder: "Email template record ID" };
   if (type === "ASSIGN_COUNSELOR") return { key: "counselorId", label: "Counselor ID", placeholder: "Dashboard user ID" };
   if (type === "WAIT") return { key: "minutes", label: "Wait minutes", placeholder: "60" };
   if (type === "CONDITION") return { key: "field", label: "Condition field", placeholder: "lead.stage = QUALIFIED" };
@@ -125,6 +144,8 @@ export default function AutomationFlowBuilder() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(true);
+  const [emailTemplates, setEmailTemplates] = useState<EmailTemplateOption[]>([]);
+  const [emailSenders, setEmailSenders] = useState<EmailSenderOption[]>([]);
 
   const selected = useMemo(
     () => flows.find((flow) => flow.flowId === selectedId) ?? null,
@@ -171,6 +192,25 @@ export default function AutomationFlowBuilder() {
     return () => {
       active = false;
     };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void Promise.all([
+      fetch("/api/email/templates", { cache: "no-store" }).then((response) => readJson<{ templates: EmailTemplateOption[] }>(response)),
+      fetch("/api/email/connections", { cache: "no-store" }).then((response) => readJson<{ senders: EmailSenderOption[] }>(response)),
+    ])
+      .then(([templatePayload, senderPayload]) => {
+        if (!active) return;
+        setEmailTemplates(templatePayload.templates.filter((item) => item.status === "APPROVED"));
+        setEmailSenders(senderPayload.senders.filter((item) => item.isActive && item.verificationStatus === "VERIFIED"));
+      })
+      .catch(() => {
+        if (!active) return;
+        setEmailTemplates([]);
+        setEmailSenders([]);
+      });
+    return () => { active = false; };
   }, []);
 
   function selectFlow(flow: Flow) {
@@ -336,7 +376,11 @@ export default function AutomationFlowBuilder() {
                     <div className="automation-node-grid">
                       <label><span>Node type</span><select value={node.type} onChange={(event) => updateNode(index, { type: event.target.value, label: humanise(event.target.value), config: {} })}>{(node.kind === "TRIGGER" ? triggerTypes : actionTypes).map((type) => <option key={type} value={type}>{humanise(type)}</option>)}</select></label>
                       <label><span>Label</span><input value={node.label} onChange={(event) => updateNode(index, { label: event.target.value })} /></label>
-                      {field ? <label className="wide"><span>{field.label}</span><input value={String(node.config[field.key] ?? "")} placeholder={field.placeholder} onChange={(event) => updateConfig(index, field.key, event.target.value)} /></label> : <div className="automation-node-note">No additional configuration required.</div>}
+                      {node.type === "SEND_EMAIL" ? <>
+                        <label className="wide"><span>Approved email template</span><select value={String(node.config.templateId ?? "")} onChange={(event) => { const template = emailTemplates.find((item) => item.id === event.target.value); updateNode(index, { config: { ...node.config, templateId: event.target.value, templateVersionId: template?.approvedVersionId ?? "" } }); }}><option value="">Select approved template</option>{emailTemplates.map((template) => <option key={template.id} value={template.id}>{template.name} - v{template.currentVersion}</option>)}</select></label>
+                        <label className="wide"><span>Sender identity</span><select value={String(node.config.senderIdentityId ?? "")} onChange={(event) => updateConfig(index, "senderIdentityId", event.target.value)}><option value="">Use template/workspace default</option>{emailSenders.map((sender) => <option key={sender.id} value={sender.id}>{sender.fromName || sender.fromEmail} &lt;{sender.fromEmail}&gt;{sender.isWorkspaceDefault ? " - default" : ""}</option>)}</select></label>
+                        {!emailTemplates.length ? <div className="automation-node-note wide">No approved Email templates are available. Approve a template in Email Control Center first.</div> : null}
+                      </> : field ? <label className="wide"><span>{field.label}</span><input value={String(node.config[field.key] ?? "")} placeholder={field.placeholder} onChange={(event) => updateConfig(index, field.key, event.target.value)} /></label> : <div className="automation-node-note">No additional configuration required.</div>}
                     </div>
                   </div>
                   <div className="automation-node-actions">

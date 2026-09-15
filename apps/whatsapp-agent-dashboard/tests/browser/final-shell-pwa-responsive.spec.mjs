@@ -56,12 +56,19 @@ for (const viewport of VIEWPORTS) {
     const panelBrand = page.locator(".split01__signin-brand img").first();
 
     await expect(shell).toBeVisible();
-    await expect(shell).toHaveAttribute("data-page01-hero", "approved-hq-v10");
+    await expect(shell).toHaveAttribute("data-page01-hero", "approved-hq-v11");
     await expect(email).toBeVisible();
     await expect(password).toBeVisible();
     await expect(submit).toBeVisible();
-    await expect(hero).toBeVisible();
-    await expect(heroImage).toBeVisible();
+
+    if (viewport.width <= 620) {
+      await expect(hero).toBeHidden();
+      await expect(heroImage).toBeHidden();
+    } else {
+      await expect(hero).toBeVisible();
+      await expect(heroImage).toBeVisible();
+    }
+
     await expect(legacyTopBrand).toHaveCount(0);
     await expect(panelBrand).toBeVisible();
 

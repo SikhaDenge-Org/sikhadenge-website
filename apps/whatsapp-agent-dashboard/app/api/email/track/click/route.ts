@@ -1,0 +1,5 @@
+import { NextResponse } from "next/server";
+import { recordEmailAnalyticsEvent } from "@/modules/email-automation/finalization/platform-service";
+import { clickTrackingSignature, verifyTrackingSignature } from "@/modules/email-automation/analytics/tracking";
+export const runtime="nodejs"; export const dynamic="force-dynamic";
+export async function GET(request:Request){const q=new URL(request.url).searchParams,m=q.get("m")||"",u=q.get("u")||"",s=q.get("s")||"";let target:string;try{target=Buffer.from(u,"base64url").toString("utf8");const parsed=new URL(target);if(!["http:","https:"].includes(parsed.protocol))throw new Error("unsafe");if(process.env.EMAIL_TRACKING_ENABLED!=="true"||!verifyTrackingSignature(`click:${m}:${target}`,s)||s!==clickTrackingSignature(m,target))return NextResponse.json({error:"Invalid tracking signature."},{status:403});await recordEmailAnalyticsEvent({messageId:m,eventType:"CLICKED",metadata:{url:target}});return NextResponse.redirect(target,302);}catch{return NextResponse.json({error:"Invalid tracking link."},{status:400});}}

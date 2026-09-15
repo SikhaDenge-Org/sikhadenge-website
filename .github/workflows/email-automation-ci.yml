@@ -1,0 +1,90 @@
+name: Email Automation CI
+
+on:
+  pull_request:
+    paths:
+      - "apps/whatsapp-agent-dashboard/modules/email-automation/**"
+      - "apps/whatsapp-agent-dashboard/modules/index.ts"
+      - "apps/whatsapp-agent-dashboard/app/api/email/**"
+      - "apps/whatsapp-agent-dashboard/app/api/internal/email/**"
+      - "apps/whatsapp-agent-dashboard/scripts/email-automation-*.ts"
+      - "apps/whatsapp-agent-dashboard/scripts/email-automation-*.sh"
+      - "apps/whatsapp-agent-dashboard/tests/email-automation-*.sh"
+      - "apps/whatsapp-agent-dashboard/package.json"
+      - "apps/whatsapp-agent-dashboard/prisma/schema.prisma"
+      - "apps/whatsapp-agent-dashboard/prisma/migrations/**"
+      - ".github/workflows/email-automation-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: email-automation-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  foundation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/whatsapp-agent-dashboard
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run email automation foundation contracts
+        run: npx tsx modules/email-automation/tests/foundation.test.ts
+
+      - name: Run email template studio contracts
+        run: npx tsx modules/email-automation/tests/template-studio.test.ts
+
+      - name: Run email template persistence contracts
+        run: npx tsx modules/email-automation/tests/template-persistence.test.ts
+
+      - name: Run email asset storage contracts
+        run: npx tsx modules/email-automation/tests/asset-storage.test.ts
+
+      - name: Run email manual send contracts
+        run: npx tsx modules/email-automation/tests/manual-send.test.ts
+
+      - name: Run email automation event outbox contracts
+        run: npx tsx modules/email-automation/tests/automation-event-outbox.test.ts
+
+      - name: Run email automation dispatcher contracts
+        run: npx tsx modules/email-automation/tests/automation-dispatcher.test.ts
+
+      - name: Run email automation scheduler auth contracts
+        run: npx tsx modules/email-automation/tests/automation-scheduler-auth.test.ts
+
+      - name: Run email automation production preflight policy
+        run: bash tests/email-automation-production-preflight-policy.test.sh
+
+      - name: Run email automation scheduler activation policy
+        run: bash tests/email-automation-scheduler-activation-policy.test.sh
+
+      - name: Run email automation scheduler post-activation verification policy
+        run: bash tests/email-automation-scheduler-verify-policy.test.sh
+
+      - name: Run email automation DRY_RUN provisioning policy
+        run: bash tests/email-automation-dryrun-provision-policy.test.sh
+
+      - name: Run email automation production DRY_RUN activation policy
+        run: bash tests/email-automation-production-dryrun-activation-policy.test.sh
+
+      - name: Run email platform finalization contracts
+        run: npx tsx modules/email-automation/tests/platform-finalization.test.ts
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Typecheck application
+        run: npm run typecheck

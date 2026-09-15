@@ -2,6 +2,8 @@ import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 
 import { prisma } from "../db/prisma";
+import { listAutomationFlowsForWorkspace } from "../automation/automation-service";
+import { enqueueEmailAutomationEvent, findActorEmailWorkspaceId, supersedePendingEmailAutomationEvents } from "../../modules/email-automation/automation/event-outbox";
 
 const FORM_EVENT = "engagement_form";
 const SUBMISSION_EVENT = "engagement_submission";
@@ -355,6 +357,7 @@ export async function createFormSubmission(input: {
   for (const field of form.fields.filter((item) => item.required)) {
     if (!values[field.id]) throw new Error(`${field.label} is required.`);
   }
+  const emailWorkspaceId = await findActorEmailWorkspaceId(input.actorId);
   const submission: StoredSubmission = {
     id: randomUUID(),
     formId,
@@ -364,8 +367,8 @@ export async function createFormSubmission(input: {
     createdBy: input.actorId,
     createdAt: new Date().toISOString(),
   };
-  await prisma.$transaction([
-    prisma.webhookEvent.create({
+  await prisma.$transaction(async (tx) => {
+    await tx.webhookEvent.create({
       data: {
         eventKey: `engagement-submission:${submission.id}`,
         eventType: SUBMISSION_EVENT,
@@ -373,8 +376,18 @@ export async function createFormSubmission(input: {
         processedAt: new Date(),
         attemptCount: 1,
       },
-    }),
-    prisma.auditLog.create({
+    });
+    if (emailWorkspaceId) {
+      await enqueueEmailAutomationEvent(tx, {
+        workspaceId: emailWorkspaceId,
+        sourceEventId: `engagement-submission:${submission.id}`,
+        trigger: "FORM_SUBMITTED",
+        contactId: submission.contactId,
+        submissionId: submission.id,
+        payload: { formId, contactId: submission.contactId, values, source: submission.source },
+      });
+    }
+    await tx.auditLog.create({
       data: {
         actorId: input.actorId,
         action: "ENGAGEMENT_FORM_SUBMITTED",
@@ -382,8 +395,8 @@ export async function createFormSubmission(input: {
         entityId: submission.id,
         after: toJson({ formId, contactId: submission.contactId, fieldCount: Object.keys(values).length }),
       },
-    }),
-  ]);
+    });
+  });
   return submission;
 }
 
@@ -420,8 +433,18 @@ export async function createAppointment(input: {
     createdAt: now,
     updatedAt: now,
   };
-  await prisma.$transaction([
-    prisma.webhookEvent.create({
+  const emailWorkspaceId = appointment.contactId ? await findActorEmailWorkspaceId(input.actorId) : null;
+  const reminderFlows = emailWorkspaceId
+    ? (await listAutomationFlowsForWorkspace(emailWorkspaceId, false)).filter((flow) => {
+        if (flow.status !== "ACTIVE") return false;
+        const trigger = flow.nodes.find((node) => node.kind === "TRIGGER");
+        if (!trigger || trigger.type !== "APPOINTMENT_REMINDER") return false;
+        const minutes = Number(trigger.config.reminderMinutesBefore);
+        return Number.isFinite(minutes) && minutes >= 1 && minutes <= 43_200;
+      })
+    : [];
+  await prisma.$transaction(async (tx) => {
+    await tx.webhookEvent.create({
       data: {
         eventKey: `engagement-appointment:${appointment.id}`,
         eventType: APPOINTMENT_EVENT,
@@ -429,8 +452,8 @@ export async function createAppointment(input: {
         processedAt: new Date(),
         attemptCount: 1,
       },
-    }),
-    prisma.auditLog.create({
+    });
+    await tx.auditLog.create({
       data: {
         actorId: input.actorId,
         action: "APPOINTMENT_CREATED",
@@ -438,8 +461,42 @@ export async function createAppointment(input: {
         entityId: appointment.id,
         after: toJson({ title, scheduledAt: appointment.scheduledAt, ownerId }),
       },
-    }),
-  ]);
+    });
+    if (emailWorkspaceId && appointment.contactId) {
+      await enqueueEmailAutomationEvent(tx, {
+        workspaceId: emailWorkspaceId,
+        sourceEventId: `engagement-appointment:${appointment.id}`,
+        trigger: "APPOINTMENT_CREATED",
+        contactId: appointment.contactId,
+        payload: { appointmentId: appointment.id, title: appointment.title, scheduledAt: appointment.scheduledAt, ownerId: appointment.ownerId },
+      });
+    }
+    if (emailWorkspaceId && appointment.contactId) {
+      for (const flow of reminderFlows) {
+        const trigger = flow.nodes.find((node) => node.kind === "TRIGGER" && node.type === "APPOINTMENT_REMINDER");
+        const minutes = Number(trigger?.config.reminderMinutesBefore);
+        if (!trigger || !Number.isFinite(minutes) || minutes < 1 || minutes > 43_200) continue;
+        const requestedAt = new Date(scheduledAt.getTime() - minutes * 60_000);
+        const availableAt = requestedAt.getTime() > Date.now() ? requestedAt : new Date();
+        await enqueueEmailAutomationEvent(tx, {
+          workspaceId: emailWorkspaceId,
+          sourceEventId: `engagement-appointment-reminder:${appointment.id}:${flow.flowId}:${flow.version}`,
+          trigger: "APPOINTMENT_REMINDER",
+          contactId: appointment.contactId,
+          availableAt,
+          payload: {
+            appointmentId: appointment.id,
+            title: appointment.title,
+            scheduledAt: appointment.scheduledAt,
+            ownerId: appointment.ownerId,
+            reminderMinutesBefore: minutes,
+            targetFlowId: flow.flowId,
+            targetFlowVersion: flow.version,
+          },
+        });
+      }
+    }
+  });
   return appointment;
 }
 
@@ -458,9 +515,10 @@ export async function updateAppointment(input: {
     throw new Error("Appointment status is invalid.");
   }
   const updated = { ...appointment, status, updatedAt: new Date().toISOString() };
-  await prisma.$transaction([
-    prisma.webhookEvent.update({ where: { id: event.id }, data: { payload: toJson(updated) } }),
-    prisma.auditLog.create({
+  const emailWorkspaceId = appointment.contactId ? await findActorEmailWorkspaceId(input.actorId) : null;
+  await prisma.$transaction(async (tx) => {
+    await tx.webhookEvent.update({ where: { id: event.id }, data: { payload: toJson(updated) } });
+    await tx.auditLog.create({
       data: {
         actorId: input.actorId,
         action: "APPOINTMENT_STATUS_UPDATED",
@@ -469,8 +527,15 @@ export async function updateAppointment(input: {
         before: toJson({ status: appointment.status }),
         after: toJson({ status }),
       },
-    }),
-  ]);
+    });
+    if (emailWorkspaceId && status !== "SCHEDULED") {
+      await supersedePendingEmailAutomationEvents(tx, {
+        workspaceId: emailWorkspaceId,
+        trigger: "APPOINTMENT_REMINDER",
+        sourceEventIdPrefix: `engagement-appointment-reminder:${appointment.id}:`,
+      });
+    }
+  });
   return updated;
 }
 
@@ -511,8 +576,9 @@ export async function createPaymentRecord(input: {
     createdAt: now,
     updatedAt: now,
   };
-  await prisma.$transaction([
-    prisma.webhookEvent.create({
+  const emailWorkspaceId = payment.contactId ? await findActorEmailWorkspaceId(input.actorId) : null;
+  await prisma.$transaction(async (tx) => {
+    await tx.webhookEvent.create({
       data: {
         eventKey: `engagement-payment:${payment.id}`,
         eventType: PAYMENT_EVENT,
@@ -520,8 +586,8 @@ export async function createPaymentRecord(input: {
         processedAt: new Date(),
         attemptCount: 1,
       },
-    }),
-    prisma.auditLog.create({
+    });
+    await tx.auditLog.create({
       data: {
         actorId: input.actorId,
         action: "PAYMENT_RECORD_CREATED",
@@ -529,8 +595,17 @@ export async function createPaymentRecord(input: {
         entityId: payment.id,
         after: toJson({ reference, amountMinor: payment.amountMinor, status, provider: payment.provider }),
       },
-    }),
-  ]);
+    });
+    if (emailWorkspaceId && payment.contactId && (status === "PENDING" || status === "PAID")) {
+      await enqueueEmailAutomationEvent(tx, {
+        workspaceId: emailWorkspaceId,
+        sourceEventId: `engagement-payment:${payment.id}:created`,
+        trigger: status === "PAID" ? "PAYMENT_PAID" : "PAYMENT_PENDING",
+        contactId: payment.contactId,
+        payload: { paymentId: payment.id, reference: payment.reference, amountMinor: payment.amountMinor, currency: payment.currency, status: payment.status, provider: payment.provider },
+      });
+    }
+  });
   return payment;
 }
 
@@ -555,9 +630,10 @@ export async function updatePaymentRecord(input: {
     providerPaymentId: nullable(input.providerPaymentId, 160) ?? payment.providerPaymentId,
     updatedAt: new Date().toISOString(),
   };
-  await prisma.$transaction([
-    prisma.webhookEvent.update({ where: { id: event.id }, data: { payload: toJson(updated) } }),
-    prisma.auditLog.create({
+  const emailWorkspaceId = payment.contactId && status !== payment.status ? await findActorEmailWorkspaceId(input.actorId) : null;
+  await prisma.$transaction(async (tx) => {
+    await tx.webhookEvent.update({ where: { id: event.id }, data: { payload: toJson(updated) } });
+    await tx.auditLog.create({
       data: {
         actorId: input.actorId,
         action: "PAYMENT_STATUS_UPDATED",
@@ -566,7 +642,16 @@ export async function updatePaymentRecord(input: {
         before: toJson({ status: payment.status }),
         after: toJson({ status, providerPaymentId: updated.providerPaymentId }),
       },
-    }),
-  ]);
+    });
+    if (emailWorkspaceId && payment.contactId && (status === "PENDING" || status === "PAID")) {
+      await enqueueEmailAutomationEvent(tx, {
+        workspaceId: emailWorkspaceId,
+        sourceEventId: `engagement-payment:${payment.id}:status:${payment.updatedAt}:${status}`,
+        trigger: status === "PAID" ? "PAYMENT_PAID" : "PAYMENT_PENDING",
+        contactId: payment.contactId,
+        payload: { paymentId: payment.id, reference: payment.reference, amountMinor: payment.amountMinor, currency: payment.currency, previousStatus: payment.status, status, provider: payment.provider, providerPaymentId: updated.providerPaymentId },
+      });
+    }
+  });
   return updated;
 }

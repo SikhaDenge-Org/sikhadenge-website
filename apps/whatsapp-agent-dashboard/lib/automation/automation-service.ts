@@ -11,6 +11,12 @@ const MAX_NODES = 40;
 export const AUTOMATION_TRIGGER_TYPES = [
   "INCOMING_KEYWORD",
   "NEW_LEAD",
+  "CONTACT_CREATED",
+  "FORM_SUBMITTED",
+  "PAYMENT_PENDING",
+  "PAYMENT_PAID",
+  "APPOINTMENT_CREATED",
+  "APPOINTMENT_REMINDER",
   "TAG_ADDED",
   "STAGE_CHANGED",
   "FOLLOW_UP_DUE",
@@ -23,6 +29,7 @@ export const AUTOMATION_ACTION_TYPES = [
   "SEND_TEXT",
   "SEND_TEMPLATE",
   "SEND_MEDIA",
+  "SEND_EMAIL",
   "ASK_QUESTION",
   "ADD_TAG",
   "REMOVE_TAG",
@@ -48,6 +55,7 @@ export type AutomationNode = {
 
 export type AutomationFlow = {
   flowId: string;
+  workspaceId: string | null;
   name: string;
   description: string;
   status: AutomationFlowStatus;
@@ -140,6 +148,7 @@ function parseFlow(value: unknown): AutomationFlow | null {
   if (!flowId || !name) return null;
   return {
     flowId,
+    workspaceId: clean(input.workspaceId, 100) || null,
     name,
     description: clean(input.description, 500),
     status: normalizeStatus(input.status),
@@ -192,8 +201,23 @@ export function validateAutomationFlow(flow: Pick<AutomationFlow, "name" | "node
     if (node.type === "INCOMING_KEYWORD" && !clean(config.keyword, 200)) {
       errors.push("Incoming Keyword trigger requires a keyword.");
     }
-    if (node.type === "SCHEDULE" && !clean(config.schedule, 200)) {
-      errors.push("Schedule trigger requires a schedule value.");
+    if (node.type === "SCHEDULE") {
+      const minutes = Number(config.intervalMinutes);
+      if (!Number.isFinite(minutes) || minutes < 1 || minutes > 10_080) {
+        errors.push("Schedule trigger interval must be between 1 and 10,080 minutes.");
+      }
+    }
+    if (node.type === "NO_REPLY") {
+      const minutes = Number(config.waitMinutes);
+      if (!Number.isFinite(minutes) || minutes < 1 || minutes > 43_200) {
+        errors.push("No Reply trigger wait must be between 1 and 43,200 minutes.");
+      }
+    }
+    if (node.type === "APPOINTMENT_REMINDER") {
+      const minutes = Number(config.reminderMinutesBefore);
+      if (!Number.isFinite(minutes) || minutes < 1 || minutes > 43_200) {
+        errors.push("Appointment Reminder must be between 1 and 43,200 minutes before the appointment.");
+      }
     }
     if ((node.type === "SEND_TEXT" || node.type === "ASK_QUESTION") && !clean(config.text, 4_000)) {
       errors.push(`${node.label} requires message text.`);
@@ -203,6 +227,12 @@ export function validateAutomationFlow(flow: Pick<AutomationFlow, "name" | "node
     }
     if (node.type === "SEND_MEDIA" && !clean(config.assetId, 100)) {
       errors.push("Send Media action requires an uploaded media asset ID.");
+    }
+    if (node.type === "SEND_EMAIL" && !clean(config.templateId, 100)) {
+      errors.push("Send Email action requires an approved email template ID.");
+    }
+    if (node.type === "SEND_EMAIL" && !clean(config.templateVersionId, 100)) {
+      errors.push("Send Email action requires a pinned approved email template version ID.");
     }
     if ((node.type === "ADD_TAG" || node.type === "REMOVE_TAG") && !clean(config.tag, 100)) {
       errors.push(`${node.label} requires a tag name.`);
@@ -226,7 +256,10 @@ export function validateAutomationFlow(flow: Pick<AutomationFlow, "name" | "node
 
   if (flow.nodes.at(-1)?.type !== "END") warnings.push("Add an End node for a clear flow finish.");
   if (actions.some((node) => ["SEND_TEXT", "SEND_TEMPLATE", "SEND_MEDIA"].includes(node.type))) {
-    warnings.push("External message actions remain locked until final Meta cutover.");
+    warnings.push("WhatsApp external message actions remain locked until final Meta cutover.");
+  }
+  if (actions.some((node) => node.type === "SEND_EMAIL")) {
+    warnings.push("Email automation execution remains gated by the Email runtime policy.");
   }
 
   return {
@@ -238,11 +271,12 @@ export function validateAutomationFlow(flow: Pick<AutomationFlow, "name" | "node
   };
 }
 
-async function findFlow(flowId: string) {
+async function findFlow(flowId: string, workspaceId?: string | null) {
   const event = await prisma.webhookEvent.findUnique({ where: { eventKey: eventKey(flowId) } });
   if (!event) throw new Error("Automation flow not found.");
   const flow = parseFlow(event.payload);
   if (!flow) throw new Error("Automation flow payload is invalid.");
+  if (flow.workspaceId && flow.workspaceId !== workspaceId) throw new Error("Automation flow belongs to another workspace.");
   return { event, flow };
 }
 
@@ -255,7 +289,17 @@ export async function listAutomationFlows(limit = MAX_FLOWS) {
   return events.map((event) => parseFlow(event.payload)).filter((flow): flow is AutomationFlow => Boolean(flow));
 }
 
+export async function assertAutomationFlowWorkspaceAccess(flowId: string, workspaceId?: string | null) {
+  await findFlow(flowId, workspaceId);
+}
+
+export async function listAutomationFlowsForWorkspace(workspaceId: string, includeLegacy = true) {
+  const flows = await listAutomationFlows();
+  return flows.filter((flow) => flow.workspaceId === workspaceId || (includeLegacy && flow.workspaceId === null));
+}
+
 export async function createAutomationFlow(input: {
+  workspaceId?: string | null;
   name: unknown;
   description?: unknown;
   nodes?: unknown;
@@ -266,6 +310,7 @@ export async function createAutomationFlow(input: {
   const now = new Date().toISOString();
   const flow: AutomationFlow = {
     flowId: randomUUID(),
+    workspaceId: clean(input.workspaceId, 100) || null,
     name,
     description: clean(input.description, 500),
     status: "DRAFT",
@@ -307,8 +352,9 @@ export async function updateAutomationFlow(input: {
   description?: unknown;
   nodes?: unknown;
   actorId: string;
+  workspaceId?: string | null;
 }) {
-  const { event, flow } = await findFlow(input.flowId);
+  const { event, flow } = await findFlow(input.flowId, input.workspaceId);
   if (flow.status === "ARCHIVED") throw new Error("Archived flows cannot be edited.");
   const updated: AutomationFlow = {
     ...flow,
@@ -343,8 +389,9 @@ export async function setAutomationFlowStatus(input: {
   flowId: string;
   status: unknown;
   actorId: string;
+  workspaceId?: string | null;
 }) {
-  const { event, flow } = await findFlow(input.flowId);
+  const { event, flow } = await findFlow(input.flowId, input.workspaceId);
   const status = normalizeStatus(input.status);
   if (status === "DRAFT" && clean(input.status, 20).toUpperCase() !== "DRAFT") {
     throw new Error("Status must be DRAFT, ACTIVE, PAUSED or ARCHIVED.");
@@ -382,8 +429,9 @@ export async function simulateAutomationFlow(input: {
   flowId: string;
   sample: unknown;
   actorId: string;
+  workspaceId?: string | null;
 }) {
-  const { event, flow } = await findFlow(input.flowId);
+  const { event, flow } = await findFlow(input.flowId, input.workspaceId);
   const validation = validateAutomationFlow(flow);
   if (!validation.valid) throw new Error(`Flow validation failed: ${validation.errors.join(" ")}`);
 
@@ -396,7 +444,7 @@ export async function simulateAutomationFlow(input: {
     result:
       node.kind === "TRIGGER"
         ? "TRIGGER_MATCH_SIMULATED"
-        : ["SEND_TEXT", "SEND_TEMPLATE", "SEND_MEDIA"].includes(node.type)
+        : ["SEND_TEXT", "SEND_TEMPLATE", "SEND_MEDIA", "SEND_EMAIL"].includes(node.type)
           ? "MESSAGE_ACTION_DRY_RUN"
           : "ACTION_SIMULATED",
   }));
