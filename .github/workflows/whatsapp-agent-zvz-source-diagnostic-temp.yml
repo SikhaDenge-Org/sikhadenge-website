@@ -1,4 +1,4 @@
-name: WhatsApp Agent Live Inbox Runtime Diagnostic
+name: WhatsApp Agent Restore Approved ZVZ Inbox
 
 on:
   push:
@@ -11,13 +11,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: whatsapp-agent-production-readonly
+  group: whatsapp-agent-production
   cancel-in-progress: false
 
 jobs:
-  inspect:
+  restore:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     environment: whatsapp-agent-production
     env:
       SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
@@ -41,45 +41,133 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
           ssh-keygen -y -f "$KEY" >/dev/null
 
-      - name: Capture live PM2 runtime and preserved builds
+      - name: Restore approved compiled Inbox build atomically
         shell: bash
         run: |
           set -Eeuo pipefail
-          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "$SSH_USER@$SSH_HOST" 'bash -s' > diag.txt <<'REMOTE'
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "$SSH_USER@$SSH_HOST" 'bash -s' > restore-evidence.txt <<'REMOTE'
           set -Eeuo pipefail
           NAME=sikhadenge-whatsapp-agent
-          J=$(mktemp); pm2 jlist > "$J"
-          node - "$J" <<'NODE'
-          const fs=require('node:fs');
-          const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8')).find(x=>x.name==='sikhadenge-whatsapp-agent');
-          if(!p?.pm2_env?.pm_cwd) process.exit(2);
-          console.log('PM2_STATUS='+String(p.pm2_env.status||''));
-          console.log('PM2_CWD='+String(p.pm2_env.pm_cwd));
-          console.log('PM2_SCRIPT='+String(p.pm2_env.pm_exec_path||''));
-          NODE
+          EXPECTED=ZvzV6QBBngX3s_X5xxUnk
+          PORT=3100
+          ts=$(date -u +%Y%m%dT%H%M%SZ)
+
+          J=$(mktemp)
+          pm2 jlist > "$J"
           LIVE=$(node - "$J" <<'NODE'
           const fs=require('node:fs');
           const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8')).find(x=>x.name==='sikhadenge-whatsapp-agent');
-          process.stdout.write(String(p?.pm2_env?.pm_cwd||''));
+          if(!p?.pm2_env?.pm_cwd || p?.pm2_env?.status!=='online') process.exit(2);
+          process.stdout.write(String(p.pm2_env.pm_cwd));
           NODE
           )
           rm -f "$J"
-          echo "SOURCE_HEAD=$(git -C "$LIVE" rev-parse HEAD 2>/dev/null || true)"
-          echo "ACTIVE_BUILD=$(cat "$LIVE/.next/BUILD_ID" 2>/dev/null || echo missing)"
-          echo "LOGIN=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/login || true)"
-          echo "INBOX=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/inbox || true)"
-          echo "ZVZ_LOCATIONS_BEGIN"
-          find /var/www/sikhadenge-whatsapp-agent/releases -type f -name BUILD_ID -print0 2>/dev/null | while IFS= read -r -d '' f; do
-            bid=$(cat "$f" 2>/dev/null || true)
-            if [[ "$bid" = "ZvzV6QBBngX3s_X5xxUnk" ]]; then printf '%s\n' "${f%/BUILD_ID}"; fi
-          done
-          echo "ZVZ_LOCATIONS_END"
-          REMOTE
-          cat diag.txt
+          test -n "$LIVE"
+          test -d "$LIVE"
+          echo "LIVE=$LIVE"
+          echo "BEFORE_BUILD=$(cat "$LIVE/.next/BUILD_ID" 2>/dev/null || echo missing)"
 
-      - name: Upload diagnostic evidence
+          if [[ "$(cat "$LIVE/.next/BUILD_ID" 2>/dev/null || true)" == "$EXPECTED" ]]; then
+            echo "RESTORE_SKIPPED=already-approved-build"
+            echo "ACTIVE_BUILD=$EXPECTED"
+            echo "PM2_STATUS=online"
+            echo "LOGIN=$(curl --max-time 15 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:${PORT}/login || true)"
+            echo "INBOX=$(curl --max-time 15 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:${PORT}/inbox || true)"
+            exit 0
+          fi
+
+          CANDIDATE=""
+          preferred="$LIVE/.next-before-engageos-github-34950409366-1"
+          if [[ -f "$preferred/BUILD_ID" ]] && [[ "$(cat "$preferred/BUILD_ID")" == "$EXPECTED" ]]; then
+            CANDIDATE="$preferred"
+          fi
+
+          if [[ -z "$CANDIDATE" ]]; then
+            while IFS= read -r -d '' f; do
+              if [[ "$(cat "$f" 2>/dev/null || true)" == "$EXPECTED" ]]; then
+                d=${f%/BUILD_ID}
+                if [[ -f "$d/routes-manifest.json" && -d "$d/server" && -d "$d/static" ]]; then
+                  CANDIDATE="$d"
+                  break
+                fi
+              fi
+            done < <(find /var/www/sikhadenge-whatsapp-agent -type f -name BUILD_ID -print0 2>/dev/null)
+          fi
+
+          if [[ -z "$CANDIDATE" ]]; then
+            echo "FAIL=no-preserved-ZVZ-build" >&2
+            exit 20
+          fi
+          echo "ZVZ_SOURCE=$CANDIDATE"
+          test "$(cat "$CANDIDATE/BUILD_ID")" = "$EXPECTED"
+          test -f "$CANDIDATE/routes-manifest.json"
+          test -d "$CANDIDATE/server"
+          test -d "$CANDIDATE/static"
+
+          STAGE="$LIVE/.next-zvz-stage-$ts"
+          BACKUP="$LIVE/.next-before-zvz-restore-$ts"
+          rm -rf "$STAGE"
+          cp -a "$CANDIDATE" "$STAGE"
+          test "$(cat "$STAGE/BUILD_ID")" = "$EXPECTED"
+          test -f "$STAGE/routes-manifest.json"
+          test -d "$STAGE/server"
+          test -d "$STAGE/static"
+
+          rollback() {
+            rc=$?
+            set +e
+            echo "ROLLBACK_TRIGGERED rc=$rc"
+            pm2 stop "$NAME" >/dev/null 2>&1 || true
+            if [[ -d "$BACKUP" ]]; then
+              rm -rf "$LIVE/.next"
+              mv "$BACKUP" "$LIVE/.next"
+            fi
+            pm2 restart "$NAME" --update-env >/dev/null 2>&1 || true
+            sleep 3
+            echo "ROLLBACK_BUILD=$(cat "$LIVE/.next/BUILD_ID" 2>/dev/null || echo missing)"
+            exit "$rc"
+          }
+          trap rollback ERR
+
+          pm2 stop "$NAME" >/dev/null
+          mv "$LIVE/.next" "$BACKUP"
+          mv "$STAGE" "$LIVE/.next"
+          pm2 restart "$NAME" --update-env >/dev/null
+
+          for i in $(seq 1 20); do
+            status=$(pm2 jlist | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const p=JSON.parse(s).find(x=>x.name==='sikhadenge-whatsapp-agent');process.stdout.write(String(p?.pm2_env?.status||''))})")
+            if [[ "$status" == "online" ]]; then break; fi
+            sleep 1
+          done
+          test "$status" = "online"
+          test "$(cat "$LIVE/.next/BUILD_ID")" = "$EXPECTED"
+
+          login=""
+          inbox=""
+          for i in $(seq 1 15); do
+            login=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:${PORT}/login || true)
+            inbox=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:${PORT}/inbox || true)
+            if [[ "$login" == "200" && "$inbox" == "307" ]]; then break; fi
+            sleep 2
+          done
+          test "$login" = "200"
+          test "$inbox" = "307"
+
+          trap - ERR
+          echo "ACTIVE_BUILD=$(cat "$LIVE/.next/BUILD_ID")"
+          echo "PM2_STATUS=$status"
+          echo "LOGIN=$login"
+          echo "INBOX=$inbox"
+          echo "BACKUP=$BACKUP"
+          echo "RESTORE_RESULT=success"
+          REMOTE
+          cat restore-evidence.txt
+
+      - name: Upload restore evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: whatsapp-inbox-runtime-diag
-          path: diag.txt
-          retention-days: 1
+          name: whatsapp-inbox-zvz-restore-evidence
+          path: restore-evidence.txt
+          if-no-files-found: error
+          retention-days: 2
