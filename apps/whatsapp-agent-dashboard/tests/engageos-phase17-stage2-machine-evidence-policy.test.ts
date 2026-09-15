@@ -1,3 +1,4 @@
+// Phase17 final-lock exact-SHA trigger marker — 2026-09-15
 // Machine Evidence authorized trigger — 2026-09-14
 import assert from "node:assert/strict";
 import fs from "node:fs";
