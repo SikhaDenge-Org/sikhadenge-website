@@ -8,7 +8,7 @@ export default function ServiceWorkerRegistration() {
     let cancelled = false;
     const register = async () => {
       try {
-        const registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+        const registration = await navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" });
         if (!cancelled) void registration.update().catch(() => undefined);
       } catch (error) {
         console.warn("[pwa] service worker registration failed", error);
