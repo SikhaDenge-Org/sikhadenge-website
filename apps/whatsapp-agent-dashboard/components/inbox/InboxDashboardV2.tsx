@@ -1571,12 +1571,29 @@ export default function InboxDashboardV2({
               <button type="button" className="sx-ai-summary-edit" onClick={() => window.location.assign("/leads")}>Edit in lead manager</button>
             </div>
 
-            <div className="sx-score">
-              <div className="sx-score-ring" style={{ ["--sx-score" as string]: `${selectedSummary.lead?.score ?? 0}` }}>
-                <strong>{selectedSummary.lead?.score ?? 0}</strong>
-                <span>/100</span>
+            <div
+              className="sx-score"
+              style={{ ["--sx-score" as string]: `${selectedSummary.lead?.score ?? 0}` }}
+            >
+              <div className="sx-score-topline">
+                <div className="sx-score-value">
+                  <strong>{selectedSummary.lead?.score ?? 0}</strong>
+                  <span>/ 100</span>
+                </div>
+                <span className="sx-score-percent">{selectedSummary.lead?.score ?? 0}%</span>
               </div>
-              <div>
+              <div
+                className="sx-score-meter"
+                aria-label={`Qualification score ${selectedSummary.lead?.score ?? 0} out of 100`}
+              >
+                <span className="sx-score-fill" />
+                <span className="sx-score-knob" />
+              </div>
+              <div className="sx-score-range" aria-hidden="true">
+                <span>1</span>
+                <span>100</span>
+              </div>
+              <div className="sx-score-copy">
                 <strong>Qualification score</strong>
                 <p>Calculated from captured profile and joining intent.</p>
               </div>
