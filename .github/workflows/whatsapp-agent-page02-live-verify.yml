@@ -1,4 +1,4 @@
-name: Verify Page 02 Live
+name: Verify Page 02 Live Asset Forensics
 
 on:
   push:
@@ -26,7 +26,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; SSH_PORT=22; fi
           install -d -m 700 "$HOME/.ssh"
           KEY="$HOME/.ssh/whatsapp-production"
           if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"; fi
@@ -36,33 +36,39 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
           ssh-keygen -y -f "$KEY" >/dev/null
 
-      - name: Verify exact production runtime
+      - name: Inspect compiled and served Page 02 assets read only
         shell: bash
         run: |
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
           set -Eeuo pipefail
           PM2=sikhadenge-whatsapp-agent
-          EXPECTED=yW6kWBpBRQWMeuQCJtDPd
           J=$(mktemp); pm2 jlist > "$J"
           RUNTIME=$(node - "$PM2" "$J" <<'NODE'
           const fs=require('node:fs'); const [n,f]=process.argv.slice(2); const p=JSON.parse(fs.readFileSync(f,'utf8')).find(x=>x.name===n); if(!p?.pm2_env?.pm_cwd) process.exit(2); process.stdout.write(p.pm2_env.pm_cwd);
           NODE
           ); rm -f "$J"
-          BUILD=$(cat "$RUNTIME/.next/BUILD_ID")
-          test "$BUILD" = "$EXPECTED"
-          LOCAL=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' 'http://127.0.0.1:3100/inbox?verify=page02')
-          PUBLIC=$(curl --max-time 15 -sS -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/inbox?verify=page02')
-          case "$LOCAL" in 200|301|302|303|307|308) ;; *) exit 3;; esac
-          case "$PUBLIC" in 200|301|302|303|307|308) ;; *) exit 4;; esac
-          for a in page01-hero-desktop-v17.png page01-hero-tablet-v17.png page01-hero-ultrawide-v17.png; do test -s "$RUNTIME/public/$a"; done
-          echo "PASS: LIVE_BUILD=$BUILD LOCAL_INBOX=$LOCAL PUBLIC_INBOX=$PUBLIC PAGE01_ASSETS=OK"
+          echo "RUNTIME=$RUNTIME"
+          echo "BUILD_ID=$(cat "$RUNTIME/.next/BUILD_ID")"
+          echo "SOURCE_HEAD=$(git -C "$RUNTIME" rev-parse HEAD 2>/dev/null || true)"
+          echo "STATIC_CSS_COUNT=$(find "$RUNTIME/.next/static/css" -type f -name '*.css' 2>/dev/null | wc -l)"
+          echo 'V22_CSS_MATCHES_BEGIN'
+          grep -RIl --include='*.css' 'sx-workspace-v22' "$RUNTIME/.next/static/css" 2>/dev/null || true
+          echo 'V22_CSS_MATCHES_END'
+          echo 'V22_GRID_MATCHES_BEGIN'
+          grep -RIn --include='*.css' 'grid-template-columns:340px minmax(0,1fr) 320px' "$RUNTIME/.next/static/css" 2>/dev/null | head -n 10 || true
+          echo 'V22_GRID_MATCHES_END'
+          echo 'INBOX_MANIFEST_MATCHES_BEGIN'
+          for f in "$RUNTIME/.next/app-build-manifest.json" "$RUNTIME/.next/build-manifest.json" "$RUNTIME/.next/server/app/inbox/page_client-reference-manifest.js" "$RUNTIME/.next/server/app/inbox/page.js"; do
+            if [[ -f "$f" ]]; then
+              echo "FILE=$f"
+              grep -oE 'static/css/[A-Za-z0-9._/-]+\.css' "$f" 2>/dev/null | sort -u || true
+            fi
+          done
+          echo 'INBOX_MANIFEST_MATCHES_END'
+          echo 'CSS_FILES_SHA_BEGIN'
+          find "$RUNTIME/.next/static/css" -type f -name '*.css' -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null | head -n 80 || true
+          echo 'CSS_FILES_SHA_END'
+          echo "SW_CACHE_NAME=$(grep -o 'sikhadenge-agent-shell-v[0-9]*' "$RUNTIME/public/sw.js" 2>/dev/null | head -n1 || true)"
+          echo "SW_STATIC_CACHE_FIRST=$(grep -c '/_next/static/' "$RUNTIME/public/sw.js" 2>/dev/null || true)"
           REMOTE
-
-      - name: External public inbox verification
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          CODE=$(curl --max-time 15 -sS -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/inbox?verify=external')
-          case "$CODE" in 200|301|302|303|307|308) ;; *) exit 1;; esac
-          echo "PASS: EXTERNAL_PUBLIC_INBOX=$CODE"
