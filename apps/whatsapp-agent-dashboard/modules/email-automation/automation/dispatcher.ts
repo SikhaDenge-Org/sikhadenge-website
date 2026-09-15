@@ -33,7 +33,11 @@ function automationPolicyReady(): { ready: boolean; reason: string | null } {
   const policy = getEmailRuntimePolicy();
   if (!policy.runtimeEnabled) return { ready: false, reason: "Email runtime is disabled." };
   if (!policy.automationEnabled) return { ready: false, reason: "Email automation is disabled." };
-  if (policy.mode !== "DRY_RUN" && policy.mode !== "INTERNAL_RECIPIENTS") {
+  if (
+    policy.mode !== "DRY_RUN" &&
+    policy.mode !== "INTERNAL_RECIPIENTS" &&
+    policy.mode !== "LIMITED_COHORT"
+  ) {
     return { ready: false, reason: `Email automation mode ${policy.mode} is not enabled for E4 execution.` };
   }
   return { ready: true, reason: null };
@@ -134,6 +138,7 @@ export async function processEmailAutomationEvents(input: {
             variables,
             idempotencyKey: compactIdempotencyKey(rawKey),
             actorUserId: flow.createdBy || input.actorUserId,
+            deliveryContext: "AUTOMATION",
           });
           actionCount += 1;
           results.push({ eventId: event.id, flowId: flow.flowId, nodeId: node.id, messageId: result.message.id, replayed: result.replayed });
