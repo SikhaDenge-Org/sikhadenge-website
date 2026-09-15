@@ -71,6 +71,9 @@ jobs:
       - name: Run email automation scheduler activation policy
         run: bash tests/email-automation-scheduler-activation-policy.test.sh
 
+      - name: Run email automation scheduler post-activation verification policy
+        run: bash tests/email-automation-scheduler-verify-policy.test.sh
+
       - name: Generate Prisma client
         run: npx prisma generate
 
