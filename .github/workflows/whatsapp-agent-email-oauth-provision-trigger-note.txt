@@ -1,0 +1,1 @@
+Do not place OAuth client secrets in this repository. Provision them only as GitHub Environment secrets under whatsapp-agent-production, then trigger with a fresh commit message containing [email-oauth-provision].
