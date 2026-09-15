@@ -1,0 +1,80 @@
+name: WhatsApp Agent Runtime Audit Temp
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-runtime-audit-temp.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-runtime-audit-temp
+  cancel-in-progress: true
+
+jobs:
+  audit-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+    steps:
+      - name: Configure pinned SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; SSH_PORT=22; fi
+          install -d -m 700 "$HOME/.ssh"
+          KEY="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"; fi
+          chmod 600 "$KEY"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$KEY" >/dev/null
+
+      - name: Audit WhatsApp production runtimes read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          echo '=== NOW ==='
+          date -Is
+          echo '=== PM2 CURRENT ==='
+          pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const a=JSON.parse(s).find(x=>x.name==="sikhadenge-whatsapp-agent"); console.log(JSON.stringify({name:a?.name,status:a?.pm2_env?.status,pm_cwd:a?.pm2_env?.pm_cwd,pid:a?.pid,restart_time:a?.pm2_env?.restart_time},null,2));})'
+          echo '=== CURRENT BUILD ==='
+          CWD=$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const a=JSON.parse(s).find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(a?.pm2_env?.pm_cwd||"");})')
+          test -n "$CWD"
+          printf 'cwd=%s\n' "$CWD"
+          printf 'build='; cat "$CWD/.next/BUILD_ID" || true
+          stat -c 'runtime_mtime=%y path=%n' "$CWD" || true
+
+          echo '=== RELEASE APP RUNTIMES ==='
+          find /var/www/sikhadenge-whatsapp-agent/releases -mindepth 2 -maxdepth 4 -type f -path '*/apps/*/.next/BUILD_ID' -print0 2>/dev/null | while IFS= read -r -d '' f; do
+            app=${f%/.next/BUILD_ID}
+            printf 'BUILD=%s\tMTIME=%s\tAPP=%s\n' "$(cat "$f" 2>/dev/null || echo '?')" "$(stat -c '%y' "$f" 2>/dev/null || echo '?')" "$app"
+          done | sort -k2
+
+          echo '=== HIDDEN/BACKUP APP RUNTIMES ==='
+          find /var/www/sikhadenge-whatsapp-agent -type f -path '*/.whatsapp-agent-dashboard*/.next/BUILD_ID' -print0 2>/dev/null | while IFS= read -r -d '' f; do
+            app=${f%/.next/BUILD_ID}
+            printf 'BUILD=%s\tMTIME=%s\tAPP=%s\n' "$(cat "$f" 2>/dev/null || echo '?')" "$(stat -c '%y' "$f" 2>/dev/null || echo '?')" "$app"
+          done | sort -k2
+
+          echo '=== ROOT DEPLOY BACKUPS ==='
+          if [ -d /root/sikhadenge-backups ]; then
+            find /root/sikhadenge-backups -maxdepth 2 -type f \( -name 'build-before.txt' -o -name 'build-after.txt' -o -name 'runtime.txt' -o -name 'result.txt' \) -print0 2>/dev/null | sort -z | while IFS= read -r -d '' f; do echo "--- $f"; cat "$f" || true; done
+          fi
+
+          echo '=== RELEASE DIRECTORY TIMES ==='
+          find /var/www/sikhadenge-whatsapp-agent/releases -mindepth 1 -maxdepth 1 -type d -printf '%TY-%Tm-%TdT%TH:%TM:%TS %p\n' 2>/dev/null | sort
+          REMOTE
