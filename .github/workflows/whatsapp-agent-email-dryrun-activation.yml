@@ -1,0 +1,107 @@
+name: WhatsApp Agent Email DRY_RUN Activation
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  email-dryrun-activation:
+    if: contains(github.event.head_commit.message, '[email-dryrun-activate]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      DEPLOYED_SHA: ${{ github.event.before }}
+      ACTIVATION_RUN_ID: email-dryrun-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Validate trigger and production secrets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          missing=0
+          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            [[ -n "${!variable_name:-}" ]] || { echo "Missing production secret: $variable_name" >&2; missing=1; }
+          done
+          test "$missing" = "0"
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Activate email automation in DRY_RUN
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "DEPLOYED_SHA='$DEPLOYED_SHA' RUN_ID='$ACTIVATION_RUN_ID' bash -s" <<'REMOTE' | tee email-dryrun-activation.log
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          test "$(id -u)" = "0"
+          cd "$APP"
+          test "$(git rev-parse HEAD)" = "$DEPLOYED_SHA"
+          APPLY=1 \
+          LIVE_APP="$APP" \
+          ENV_FILE="$APP/.env" \
+          EXPECTED_RELEASE_SHA="$DEPLOYED_SHA" \
+          RUN_ID="$RUN_ID" \
+          MAX_FAILED_EVENTS=0 \
+          bash scripts/email-automation-production-dryrun-activate.sh
+          printf 'GMAIL_CLIENT_CONFIGURED=%s\n' "$(node -e 'process.stdout.write(process.env.GOOGLE_GMAIL_CLIENT_ID?"yes":"no")')"
+          printf 'GMAIL_INBOUND_SYNC_ENABLED=%s\n' "$(node -e 'process.stdout.write(process.env.EMAIL_INBOUND_SYNC_ENABLED||"false")')"
+          REMOTE
+
+      - name: Collect activation evidence
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p email-dryrun-evidence
+          for file_name in activation-result.txt provision.log preflight.log activate.log first-run.log verify.log systemd-timer.txt; do
+            scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+              -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+              "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${ACTIVATION_RUN_ID}/${file_name}" \
+              "email-dryrun-evidence/${file_name}" >/dev/null 2>&1 || true
+          done
+          chmod -R go-rwx email-dryrun-evidence 2>/dev/null || true
+
+      - name: Upload activation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatsapp-agent-email-dryrun-${{ env.ACTIVATION_RUN_ID }}
+          path: |
+            email-dryrun-activation.log
+            email-dryrun-evidence
+          if-no-files-found: error
+          retention-days: 14
