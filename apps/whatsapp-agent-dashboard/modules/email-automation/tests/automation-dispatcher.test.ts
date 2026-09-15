@@ -11,6 +11,10 @@ import { resolveEmailSender } from "../domain/sender-resolution";
 assert.ok(AUTOMATION_TRIGGER_TYPES.includes("NEW_LEAD"));
 assert.ok(AUTOMATION_TRIGGER_TYPES.includes("CONTACT_CREATED"));
 assert.ok(AUTOMATION_TRIGGER_TYPES.includes("FORM_SUBMITTED"));
+assert.ok(AUTOMATION_TRIGGER_TYPES.includes("PAYMENT_PENDING"));
+assert.ok(AUTOMATION_TRIGGER_TYPES.includes("PAYMENT_PAID"));
+assert.ok(AUTOMATION_TRIGGER_TYPES.includes("APPOINTMENT_CREATED"));
+assert.ok(AUTOMATION_TRIGGER_TYPES.includes("APPOINTMENT_REMINDER"));
 assert.ok(AUTOMATION_ACTION_TYPES.includes("SEND_EMAIL"));
 
 const valid = validateAutomationFlow({
