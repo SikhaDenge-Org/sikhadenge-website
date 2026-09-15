@@ -1,3 +1,4 @@
+# Trigger 2 — run after workflow registration
 name: WhatsApp Agent Score Linear ZVZ Deploy Temp
 
 on:
