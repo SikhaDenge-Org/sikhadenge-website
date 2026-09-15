@@ -351,3 +351,155 @@
   body .sx-inbox .sx-chat-phone { max-width: 116px; }
   body .sx-inbox .sx-switch i { width: 36px; }
 }
+
+/* Qualification score — full-width linear progress treatment.
+   Scoped to the existing Inbox score card only; no other Inbox UI is changed. */
+.sx-inbox .sx-score {
+  display: block;
+  margin-top: 16px;
+  padding: 16px;
+  overflow: hidden;
+  border: 1px solid #dbe7fb;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 92% 8%, rgba(59, 109, 246, 0.07), transparent 30%),
+    linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+  box-shadow: 0 10px 28px rgba(54, 93, 170, 0.07);
+}
+
+.sx-inbox .sx-score-ring {
+  --sx-track-y: 62px;
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  height: 100px;
+  padding: 0;
+  border-radius: 0;
+  counter-reset: sx-score-value var(--sx-score);
+  background: none;
+  box-shadow: none;
+}
+
+.sx-inbox .sx-score-ring::before {
+  content: "";
+  position: absolute;
+  top: calc(var(--sx-track-y) - 4px);
+  left: clamp(6px, calc((var(--sx-score) * 1%) - 9px), calc(100% - 18px));
+  width: 18px;
+  height: 18px;
+  border: 4px solid #fff;
+  border-radius: 50%;
+  background: #2563eb;
+  box-shadow: 0 3px 11px rgba(37, 99, 235, 0.34);
+  z-index: 3;
+}
+
+.sx-inbox .sx-score-ring::after {
+  content: counter(sx-score-value) "%";
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 52px;
+  padding: 6px 10px;
+  border: 1px solid #dce8ff;
+  border-radius: 999px;
+  background: #eef5ff;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1;
+  text-align: center;
+}
+
+.sx-inbox .sx-score-ring strong {
+  position: static;
+  z-index: 1;
+  display: inline;
+  color: #13213d;
+  font-size: 30px;
+  font-weight: 750;
+  line-height: 1;
+  letter-spacing: -0.035em;
+}
+
+.sx-inbox .sx-score-ring strong::before,
+.sx-inbox .sx-score-ring strong::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: var(--sx-track-y);
+  height: 10px;
+  border-radius: 999px;
+}
+
+.sx-inbox .sx-score-ring strong::before {
+  width: 100%;
+  background: linear-gradient(90deg, #edf2f8 0%, #e8edf5 100%);
+}
+
+.sx-inbox .sx-score-ring strong::after {
+  width: calc(var(--sx-score) * 1%);
+  background: linear-gradient(90deg, #3b6df6 0%, #22c9df 100%);
+  box-shadow: 0 3px 10px rgba(59, 109, 246, 0.13);
+}
+
+.sx-inbox .sx-score-ring span {
+  position: static;
+  z-index: 1;
+  display: inline;
+  color: #8796b2;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.sx-inbox .sx-score-ring span::before,
+.sx-inbox .sx-score-ring span::after {
+  position: absolute;
+  top: 78px;
+  color: #8d9bb5;
+  font-size: 10.5px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.sx-inbox .sx-score-ring span::before {
+  content: "1";
+  left: 0;
+}
+
+.sx-inbox .sx-score-ring span::after {
+  content: "100";
+  right: 0;
+}
+
+.sx-inbox .sx-score > div:last-child {
+  width: 100%;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.sx-inbox .sx-score > div:last-child > strong {
+  display: block;
+  color: #13213d;
+  font-size: 15px;
+  font-weight: 750;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+.sx-inbox .sx-score > div:last-child > p {
+  max-width: 100%;
+  margin-top: 6px;
+  color: #7b8ba8;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (max-width: 380px) {
+  .sx-inbox .sx-score { padding: 14px; }
+  .sx-inbox .sx-score-ring strong { font-size: 28px; }
+  .sx-inbox .sx-score-ring span { font-size: 17px; }
+}
