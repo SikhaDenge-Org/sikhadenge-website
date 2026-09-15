@@ -2,6 +2,7 @@ import { DashboardRole } from "@prisma/client";
 
 import DashboardModuleShell from "../../components/navigation/DashboardModuleShell";
 import { requireDashboardUser } from "../../lib/auth/session";
+import EmailAutomationQueue from "../../modules/email-automation/ui/EmailAutomationQueue";
 import EmailManualComposer from "../../modules/email-automation/ui/EmailManualComposer";
 import EmailSenderManager from "../../modules/email-automation/ui/EmailSenderManager";
 import EmailTemplateStudio from "../../modules/email-automation/ui/EmailTemplateStudio";
@@ -27,6 +28,7 @@ export default async function EmailControlCenterPage() {
       <EmailSenderManager />
       <EmailTemplateStudio />
       <EmailManualComposer />
+      <EmailAutomationQueue />
     </DashboardModuleShell>
   );
 }
