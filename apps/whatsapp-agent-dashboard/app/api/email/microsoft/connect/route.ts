@@ -1,0 +1,5 @@
+import { NextResponse } from "next/server";
+import { requireEmailManagerAccess, EmailDashboardAccessError } from "@/modules/email-automation/application/dashboard-access";
+import { buildEmailE1Runtime, emailMicrosoftOAuthRedirectUri } from "@/modules/email-automation/infrastructure/runtime";
+export const runtime="nodejs"; export const dynamic="force-dynamic";
+export async function POST(){try{const a=await requireEmailManagerAccess();const runtime=buildEmailE1Runtime();const oauth=await runtime.service.startOAuth({workspaceId:a.workspaceId,provider:"MICROSOFT_365",redirectUri:emailMicrosoftOAuthRedirectUri()});return NextResponse.json({provider:oauth.provider,authorizationUrl:oauth.authorizationUrl},{headers:{"Cache-Control":"no-store"}});}catch(e){if(e instanceof EmailDashboardAccessError)return NextResponse.json({error:e.message},{status:e.status});return NextResponse.json({error:e instanceof Error?e.message:"Microsoft 365 OAuth is not configured."},{status:503});}}

@@ -1,0 +1,17 @@
+import assert from "node:assert/strict";
+import type { EmailSenderIdentity } from "../domain/contracts";
+import { renderEmailTemplate } from "../templates/render";
+import { assertEmailTemplateDocument } from "../templates/validation";
+import { microsoftEmailProviderConfigFromEnv } from "../providers/microsoft/config";
+import { emailProviderFailoverPolicyFromEnv, selectFailoverSender } from "../providers/routing/failover-policy";
+import { createEmailUnsubscribeToken, verifyEmailUnsubscribeToken } from "../campaigns/unsubscribe";
+
+const htmlDoc={subject:"Hello {{name}}",preheader:null,variables:[{key:"name",label:"Name",required:true}],blocks:[{id:"html",type:"HTML" as const,html:"<div><strong>Hello {{name}}</strong></div>",text:"Hello {{name}}"}]};
+assertEmailTemplateDocument(htmlDoc);const rendered=renderEmailTemplate({document:htmlDoc,values:{name:"Ankit"}});assert.match(rendered.html,/Hello Ankit/);
+assert.throws(()=>assertEmailTemplateDocument({...htmlDoc,blocks:[{id:"bad",type:"HTML" as const,html:"<script>alert(1)</script>",text:"bad"}]}),/unsafe html/i);
+assert.throws(()=>microsoftEmailProviderConfigFromEnv({} as unknown as NodeJS.ProcessEnv),/not configured/i);
+assert.equal(microsoftEmailProviderConfigFromEnv({MICROSOFT_EMAIL_CLIENT_ID:"id",MICROSOFT_EMAIL_CLIENT_SECRET:"secret",MICROSOFT_EMAIL_TENANT_ID:"tenant",MICROSOFT_EMAIL_OAUTH_STATE_SECRET:"x".repeat(32)} as unknown as NodeJS.ProcessEnv).tenantId,"tenant");
+process.env.EMAIL_UNSUBSCRIBE_SECRET="u".repeat(32);const token=createEmailUnsubscribeToken({workspaceId:"w1",contactId:"c1",email:"User@Example.com",expiresAt:new Date(Date.now()+60000)});assert.equal(verifyEmailUnsubscribeToken(token).email,"user@example.com");assert.throws(()=>verifyEmailUnsubscribeToken(token.slice(0,-1)+(token.endsWith("a")?"b":"a")),/signature|malformed/i);
+const sender=(id:string,provider:EmailSenderIdentity["provider"],verified=true):EmailSenderIdentity=>({id,workspaceId:"w",connectionId:id+"-c",provider,fromName:id,fromEmail:id+"@example.com",replyToEmail:null,externalSenderId:null,verificationStatus:verified?"VERIFIED":"FAILED",isProviderDefault:false,isWorkspaceDefault:false,isActive:true,dailyLimit:null});
+const primary=sender("g","GOOGLE_GMAIL"),microsoft=sender("m","MICROSOFT_365"),bad=sender("bad","MICROSOFT_365",false);assert.equal(selectFailoverSender({policy:emailProviderFailoverPolicyFromEnv({} as unknown as NodeJS.ProcessEnv),primary,senders:[microsoft]}),null);const policy=emailProviderFailoverPolicyFromEnv({EMAIL_PROVIDER_FAILOVER_ENABLED:"true",EMAIL_PROVIDER_FAILOVER_ORDER:"GOOGLE_GMAIL,MICROSOFT_365"} as unknown as NodeJS.ProcessEnv);assert.equal(selectFailoverSender({policy,primary,senders:[bad,microsoft]})?.id,"m");
+console.log("email platform finalization contracts: ok");

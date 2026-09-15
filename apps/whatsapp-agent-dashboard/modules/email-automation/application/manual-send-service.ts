@@ -12,6 +12,7 @@ import {
 } from "./automation-send-policy";
 import { getEmailRuntimePolicy } from "./runtime-policy";
 import { assertManualEmailDispatchPolicy, assertManualEmailRetryAllowed, internalRecipientAllowlist } from "./manual-send-policy";
+import { instrumentEmailHtml } from "../analytics/tracking";
 
 const KEY = /^[A-Za-z0-9._:-]{8,128}$/;
 function json(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }
@@ -39,6 +40,17 @@ function storedReplyTo(value: Prisma.JsonValue | null): EmailAddress | undefined
   return typeof row.email === "string" ? addresses([{ email: row.email, ...(typeof row.name === "string" ? { name: row.name } : {}) }], true)[0] : undefined;
 }
 
+function applyContentOverrides(rendered: { subject:string; preheader?:string; html:string; text:string; variables:Readonly<Record<string,string>> }, input: ManualEmailSendInput) {
+  if (input.deliveryContext === "AUTOMATION" && (input.subjectOverride || input.htmlOverride || input.textOverride)) throw new Error("Automation email content overrides are not allowed.");
+  const subject = input.subjectOverride?.trim() || rendered.subject;
+  const html = input.htmlOverride?.trim() || rendered.html;
+  const text = input.textOverride?.trim() || rendered.text;
+  if (!subject || subject.length > 200) throw new Error("Manual email subject override must be 1-200 characters.");
+  if (html.length > 200_000 || text.length > 100_000) throw new Error("Manual email content override exceeds the allowed size.");
+  if (/<\s*(script|iframe|object|embed|form|meta|base)\b/iu.test(html) || /\son[a-z]+\s*=/iu.test(html) || /javascript\s*:/iu.test(html)) throw new Error("Manual email HTML override contains unsafe HTML.");
+  return { ...rendered, subject, html, text };
+}
+
 function storedVariables(value: Prisma.JsonValue): Readonly<Record<string, string>> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, typeof item === "string" ? item : String(item ?? "")]));
@@ -48,6 +60,7 @@ export type ManualEmailSendInput = {
   workspaceId: string; templateId: string; templateVersionId?: string | null; manualSenderIdentityId?: string | null; automationSenderIdentityId?: string | null;
   to: readonly EmailAddress[]; cc?: readonly EmailAddress[]; bcc?: readonly EmailAddress[]; replyTo?: EmailAddress;
   variables?: Readonly<Record<string, string | null | undefined>>; idempotencyKey: string; actorUserId: string;
+  subjectOverride?: string | null; htmlOverride?: string | null; textOverride?: string | null; providerThreadId?: string | null;
   deliveryContext?: "MANUAL" | "AUTOMATION";
 };
 
@@ -84,7 +97,7 @@ export class ManualEmailSendService {
           cohortAllowlist: automationRecipientCohortAllowlist(),
         })
       : assertManualEmailDispatchPolicy({ policy, recipients: allRecipients, allowlist: internalRecipientAllowlist() });
-    const rendered = renderEmailTemplate({ document: version.document, values: input.variables ?? {} });
+    const rendered = applyContentOverrides(renderEmailTemplate({ document: version.document, values: input.variables ?? {} }), input);
     const attachments: EmailAttachmentReference[] = [];
     for (const asset of version.assets) {
       const data = await readEmailAsset(asset.storageKey);
@@ -109,13 +122,16 @@ export class ManualEmailSendService {
       throw error;
     }
     if (!decision.externalRequestAllowed) return { message: created, replayed: false };
+    const outboundRendered = getEmailRuntimePolicy().trackingEnabled
+      ? { ...rendered, html: instrumentEmailHtml({ messageId: created.id, html: rendered.html, appUrl: process.env.APP_URL || '' }) }
+      : rendered;
 
     await prisma.engageEmailMessage.update({ where: { id: created.id }, data: { status: "SENDING" } });
     try {
       const result = await emailRuntime.providers.get(connection.provider).sendMessage({
         workspaceId: input.workspaceId, connectionId: connection.id, senderIdentityId: resolved.sender.id,
         from: { email: resolved.sender.fromEmail, ...(resolved.sender.fromName ? { name: resolved.sender.fromName } : {}) },
-        to, cc, bcc, ...(replyTo ? { replyTo } : {}), rendered, attachments, idempotencyKey,
+        to, cc, bcc, ...(replyTo ? { replyTo } : {}), rendered: outboundRendered, attachments, idempotencyKey, ...(input.providerThreadId?.trim() ? { providerThreadId: input.providerThreadId.trim() } : {}),
       });
       const message = await prisma.engageEmailMessage.update({ where: { id: created.id }, data: {
         status: result.status, providerMessageId: result.providerMessageId, providerThreadId: result.providerThreadId,
@@ -175,10 +191,13 @@ export class ManualEmailSendService {
       throw error;
     }
     if (!decision.externalRequestAllowed) return { message: created, replayed: false };
+    const outboundRendered = getEmailRuntimePolicy().trackingEnabled
+      ? { ...rendered, html: instrumentEmailHtml({ messageId: created.id, html: rendered.html, appUrl: process.env.APP_URL || '' }) }
+      : rendered;
 
     await prisma.engageEmailMessage.update({ where: { id: created.id }, data: { status: "SENDING" } });
     try {
-      const result = await emailRuntime.providers.get(connection.provider).sendMessage({ workspaceId: input.workspaceId, connectionId: connection.id, senderIdentityId: sender.id, from: { email: sender.fromEmail, ...(sender.fromName ? { name: sender.fromName } : {}) }, to, cc, bcc, ...(replyTo ? { replyTo } : {}), rendered, attachments, idempotencyKey });
+      const result = await emailRuntime.providers.get(connection.provider).sendMessage({ workspaceId: input.workspaceId, connectionId: connection.id, senderIdentityId: sender.id, from: { email: sender.fromEmail, ...(sender.fromName ? { name: sender.fromName } : {}) }, to, cc, bcc, ...(replyTo ? { replyTo } : {}), rendered: outboundRendered, attachments, idempotencyKey });
       const message = await prisma.engageEmailMessage.update({ where: { id: created.id }, data: { status: result.status, providerMessageId: result.providerMessageId, providerThreadId: result.providerThreadId, externalRequestSent: result.externalRequestSent, sentAt: result.status === "SENT" ? new Date() : null } });
       return { message, replayed: false };
     } catch (error) {

@@ -476,6 +476,13 @@ model EngageWorkspace {
 
   emailMessages             EngageEmailMessage[]
   emailAutomationEvents     EngageEmailAutomationEvent[]
+  emailInboundMessages      EngageEmailInboundMessage[]
+  emailCampaigns            EngageEmailCampaign[]
+  emailCampaignRecipients   EngageEmailCampaignRecipient[]
+  emailSequences            EngageEmailSequence[]
+  emailSequenceEnrollments  EngageEmailSequenceEnrollment[]
+  emailAnalyticsEvents      EngageEmailAnalyticsEvent[]
+  emailAutomationTasks      EngageEmailAutomationTask[]
 @@index([isActive, createdAt])
 }
 
@@ -998,4 +1005,166 @@ model EngageEmailAutomationEvent {
   @@index([workspaceId, status, createdAt])
   @@index([workspaceId, trigger, createdAt])
   @@index([contactId, createdAt])
+}
+
+model EngageEmailInboundMessage {
+  id                String   @id @default(cuid())
+  workspaceId       String
+  connectionId      String?
+  provider          String
+  providerMessageId String
+  providerThreadId  String?
+  contactId         String?
+  fromAddress       String
+  toRecipients      Json
+  ccRecipients      Json
+  replyTo           Json?
+  subject           String
+  snippet           String?
+  bodyText          String?
+  bodyHtml          String?
+  attachments       Json
+  classification    String   @default("INBOUND")
+  receivedAt        DateTime
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  workspace EngageWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, provider, providerMessageId])
+  @@index([workspaceId, providerThreadId, receivedAt])
+  @@index([workspaceId, contactId, receivedAt])
+}
+
+model EngageEmailCampaign {
+  id                 String   @id @default(cuid())
+  workspaceId        String
+  name               String
+  status             String   @default("DRAFT")
+  purpose            String   @default("MARKETING")
+  templateId         String
+  templateVersionId  String
+  senderIdentityId   String?
+  senderPool         Json?
+  segment            Json
+  throttlePerHour    Int      @default(100)
+  frequencyCapPerDay Int      @default(1)
+  scheduledAt        DateTime?
+  startedAt          DateTime?
+  pausedAt           DateTime?
+  completedAt        DateTime?
+  createdById        String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  workspace  EngageWorkspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  recipients EngageEmailCampaignRecipient[]
+
+  @@index([workspaceId, status, scheduledAt])
+}
+
+model EngageEmailCampaignRecipient {
+  id             String   @id @default(cuid())
+  workspaceId    String
+  campaignId     String
+  contactId      String?
+  email          String
+  name           String?
+  status         String   @default("PENDING")
+  idempotencyKey String
+  messageId      String?
+  scheduledAt    DateTime?
+  sentAt         DateTime?
+  lastError      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  workspace EngageWorkspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaign  EngageEmailCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, email])
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, campaignId, status, scheduledAt])
+}
+
+model EngageEmailSequence {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  status      String   @default("DRAFT")
+  purpose     String   @default("TRANSACTIONAL")
+  steps       Json
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace   EngageWorkspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  enrollments EngageEmailSequenceEnrollment[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, status, updatedAt])
+}
+
+model EngageEmailSequenceEnrollment {
+  id          String   @id @default(cuid())
+  workspaceId String
+  sequenceId  String
+  contactId   String?
+  email       String
+  name        String?
+  status      String   @default("ACTIVE")
+  currentStep Int      @default(0)
+  nextRunAt   DateTime
+  lastError   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace EngageWorkspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sequence  EngageEmailSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+
+  @@unique([sequenceId, email])
+  @@index([workspaceId, status, nextRunAt])
+}
+
+model EngageEmailAutomationTask {
+  id          String   @id @default(cuid())
+  workspaceId String
+  contactId   String?
+  leadId      String?
+  title       String
+  description String?
+  status      String   @default("OPEN")
+  dueAt       DateTime?
+  assignedToId String?
+  sourceFlowId String?
+  sourceEventId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace EngageWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status, dueAt])
+  @@index([workspaceId, contactId, createdAt])
+}
+
+model EngageEmailAnalyticsEvent {
+  id               String   @id @default(cuid())
+  workspaceId      String
+  messageId        String?
+  campaignId       String?
+  inboundMessageId String?
+  contactId        String?
+  eventType        String
+  provider         String?
+  eventKey         String
+  metadata         Json?
+  occurredAt       DateTime
+  createdAt        DateTime @default(now())
+
+  workspace EngageWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, eventKey])
+  @@index([workspaceId, eventType, occurredAt])
+  @@index([workspaceId, campaignId, occurredAt])
+  @@index([workspaceId, contactId, occurredAt])
 }

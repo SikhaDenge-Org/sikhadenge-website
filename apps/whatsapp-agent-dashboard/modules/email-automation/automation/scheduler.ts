@@ -1,11 +1,16 @@
 import { randomUUID } from "node:crypto";
 
 import { prisma } from "@/lib/db/prisma";
+import { listAutomationFlows } from "@/lib/automation/automation-service";
+import { enqueueEmailAutomationEvent } from "./event-outbox";
+import { processDueEmailCampaigns } from "../campaigns/campaign-service";
+import { processDueEmailSequences } from "../finalization/platform-service";
 import { getEmailRuntimePolicy } from "../application/runtime-policy";
 import { processEmailAutomationEvents } from "./dispatcher";
 
 export async function getEmailAutomationSchedulerHealth() {
   const now = new Date();
+  const scheduledMaterialized = await materializeScheduledAutomationEvents(now);
   const staleBefore = new Date(Date.now() - 15 * 60 * 1000);
   const [pending, processing, failed, staleProcessing, oldestPending, workspaces, latestSchedulerRun] = await Promise.all([
     prisma.engageEmailAutomationEvent.count({ where: { status: "PENDING", availableAt: { lte: now } } }),
@@ -38,11 +43,34 @@ export async function getEmailAutomationSchedulerHealth() {
   };
 }
 
+async function materializeScheduledAutomationEvents(now: Date) {
+  const flows = (await listAutomationFlows()).filter((flow) => flow.workspaceId && flow.status === "ACTIVE");
+  let materialized = 0;
+  for (const flow of flows) {
+    const trigger = flow.nodes.find((node) => node.kind === "TRIGGER" && node.type === "SCHEDULE");
+    if (!trigger || !flow.workspaceId) continue;
+    const intervalMinutes = Number(trigger.config.intervalMinutes);
+    if (!Number.isFinite(intervalMinutes) || intervalMinutes < 1 || intervalMinutes > 10_080) continue;
+    const intervalMs = Math.floor(intervalMinutes) * 60_000;
+    const bucket = Math.floor(now.getTime() / intervalMs) * intervalMs;
+    const sourceEventId = `schedule:${flow.flowId}:v${flow.version}:${bucket}`;
+    try {
+      await prisma.$transaction(async (tx) => enqueueEmailAutomationEvent(tx, {
+        workspaceId: flow.workspaceId!, sourceEventId, trigger: "SCHEDULE", availableAt: new Date(bucket),
+        payload: { targetFlowId: flow.flowId, targetFlowVersion: flow.version, intervalMinutes: Math.floor(intervalMinutes), scheduledBucket: new Date(bucket).toISOString() },
+      }));
+      materialized += 1;
+    } catch (error) { if (!(error instanceof Error) || !/unique|duplicate/i.test(error.message)) throw error; }
+  }
+  return materialized;
+}
+
 export async function processEmailAutomationScheduler(input: {
   workspaceLimit?: number;
   perWorkspaceLimit?: number;
 }) {
   const now = new Date();
+  const scheduledMaterialized = await materializeScheduledAutomationEvents(now);
   const staleBefore = new Date(Date.now() - 15 * 60 * 1000);
   const candidates = await prisma.engageEmailAutomationEvent.findMany({
     where: {
@@ -66,8 +94,14 @@ export async function processEmailAutomationScheduler(input: {
     });
     results.push({ workspaceId: candidate.workspaceId, ...result });
   }
+  const campaignResults = await processDueEmailCampaigns(20);
+  const sequenceResults = await processDueEmailSequences(50);
   const summary = {
     workspacesScanned: candidates.length,
+    scheduledMaterialized,
+    campaignRuns: campaignResults.length,
+    campaignResults,
+    sequenceResults,
     processed: results.reduce((sum, item) => sum + item.processed, 0),
     failed: results.reduce((sum, item) => sum + item.failed, 0),
     skipped: results.reduce((sum, item) => sum + item.skipped, 0),

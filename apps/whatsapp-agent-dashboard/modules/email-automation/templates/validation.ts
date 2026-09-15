@@ -20,6 +20,8 @@ function blockText(block: EmailTemplateBlock): readonly string[] {
       return [block.src, block.alt, block.linkUrl ?? ""];
     case "BUTTON":
       return [block.label, block.url];
+    case "HTML":
+      return [block.html, block.text];
     case "DIVIDER":
     case "SPACER":
       return [];
@@ -88,6 +90,12 @@ function assertBlock(block: EmailTemplateBlock): void {
       if (!Number.isInteger(block.height) || block.height < 0 || block.height > 120) {
         throw new Error(`Spacer block ${block.id} height must be an integer between 0 and 120.`);
       }
+      return;
+    case "HTML":
+      if (!block.html.trim()) throw new Error(`HTML block ${block.id} requires HTML.`);
+      if (block.html.length > 200_000) throw new Error(`HTML block ${block.id} exceeds 200000 characters.`);
+      if (block.text.length > 100_000) throw new Error(`HTML block ${block.id} plain text exceeds 100000 characters.`);
+      if (/<\s*(script|iframe|object|embed|form|meta|base)\b/iu.test(block.html) || /\son[a-z]+\s*=/iu.test(block.html) || /javascript\s*:/iu.test(block.html)) throw new Error(`HTML block ${block.id} contains unsafe HTML.`);
       return;
   }
 }

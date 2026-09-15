@@ -87,7 +87,7 @@ export class GmailEmailProviderAdapter implements EmailProviderAdapter {
     url.searchParams.set("access_type", "offline");
     url.searchParams.set("include_granted_scopes", "true");
     url.searchParams.set("prompt", "consent");
-    url.searchParams.set("scope", gmailScopesForPhase({ inboundEnabled: false }).join(" "));
+    url.searchParams.set("scope", gmailScopesForPhase({ inboundEnabled: process.env.EMAIL_INBOUND_SYNC_ENABLED === "true" }).join(" "));
     url.searchParams.set("state", state);
 
     return {
@@ -243,6 +243,8 @@ export class GmailEmailProviderAdapter implements EmailProviderAdapter {
   private async accessToken(connection: EmailConnection): Promise<string> {
     return this.accessTokenFor(connection.workspaceId, connection.id);
   }
+
+  async getAccessTokenForConnection(workspaceId: string, connectionId: string): Promise<string> { return this.accessTokenFor(workspaceId, connectionId); }
 
   private async accessTokenFor(workspaceId: string, connectionId: string): Promise<string> {
     const stored = await this.credentials.loadOAuthCredentials({ workspaceId, connectionId });
