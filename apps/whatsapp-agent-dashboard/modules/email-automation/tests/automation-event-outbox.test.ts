@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { buildEmailAutomationEventKey, EMAIL_EVENT_STATUS } from "../automation/event-outbox";
+import { assertEmailAutomationEventRequeueAllowed, buildEmailAutomationEventKey, EMAIL_EVENT_STATUS } from "../automation/event-outbox";
 import { buildEmailAutomationIdempotencyKey } from "../automation/contracts";
 
 assert.equal(
@@ -24,3 +24,6 @@ assert.throws(
   /sourceEventId is required/i,
 );
 console.log("Email automation E4 event outbox contracts: PASS");
+assert.doesNotThrow(() => assertEmailAutomationEventRequeueAllowed("FAILED", 0, 5));
+assert.throws(() => assertEmailAutomationEventRequeueAllowed("PENDING", 1, 5), /Only FAILED/);
+assert.throws(() => assertEmailAutomationEventRequeueAllowed("FAILED", 5, 5), /retry limit/);

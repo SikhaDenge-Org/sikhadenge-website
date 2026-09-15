@@ -76,7 +76,13 @@ export async function processEmailAutomationEvents(input: {
   limit?: number;
 }) {
   const policy = automationPolicyReady();
-  if (!policy.ready) return { processed: 0, failed: 0, skipped: 0, paused: true, reason: policy.reason, results: [] as unknown[] };
+  if (!policy.ready) return { processed: 0, failed: 0, skipped: 0, recovered: 0, paused: true, reason: policy.reason, results: [] as unknown[] };
+
+  const staleBefore = new Date(Date.now() - 15 * 60 * 1000);
+  const recovered = await prisma.engageEmailAutomationEvent.updateMany({
+    where: { workspaceId: input.workspaceId, status: "PROCESSING", updatedAt: { lt: staleBefore } },
+    data: { status: "FAILED", lastError: "Automation processing lease expired after 15 minutes. Requeue is required." },
+  });
 
   const events = await prisma.engageEmailAutomationEvent.findMany({
     where: { workspaceId: input.workspaceId, status: "PENDING" },
@@ -161,5 +167,5 @@ export async function processEmailAutomationEvents(input: {
     }
   }
 
-  return { processed, failed, skipped, paused: false, reason: null, results };
+  return { processed, failed, skipped, recovered: recovered.count, paused: false, reason: null, results };
 }

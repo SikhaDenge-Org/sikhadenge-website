@@ -6,6 +6,17 @@ import type { EmailAutomationTrigger } from "./contracts";
 export const EMAIL_EVENT_STATUS = ["PENDING", "PROCESSING", "PROCESSED", "FAILED"] as const;
 export type EmailAutomationEventStatus = (typeof EMAIL_EVENT_STATUS)[number];
 
+export function assertEmailAutomationEventRequeueAllowed(
+  status: string,
+  attemptCount: number,
+  maxAttempts = 5,
+): void {
+  const limit = Math.min(Math.max(maxAttempts, 1), 20);
+  if (status !== "FAILED") throw new Error("Only FAILED email automation events can be requeued.");
+  if (!Number.isInteger(attemptCount) || attemptCount < 0) throw new Error("Email automation attempt count is invalid.");
+  if (attemptCount >= limit) throw new Error(`Email automation event reached the retry limit of ${limit} attempts.`);
+}
+
 export type EmailAutomationEventInput = {
   workspaceId: string;
   sourceEventId: string;
@@ -72,5 +83,35 @@ export async function listEmailAutomationEvents(input: {
     where: { workspaceId: input.workspaceId, ...(input.status ? { status: input.status } : {}) },
     orderBy: { createdAt: "desc" },
     take: Math.min(Math.max(input.take ?? 50, 1), 200),
+  });
+}
+export async function requeueFailedEmailAutomationEvent(input: {
+  workspaceId: string;
+  eventId: string;
+  actorUserId: string;
+  maxAttempts?: number;
+}) {
+  const maxAttempts = Math.min(Math.max(input.maxAttempts ?? 5, 1), 20);
+  return prisma.$transaction(async (tx) => {
+    const event = await tx.engageEmailAutomationEvent.findFirst({
+      where: { id: input.eventId, workspaceId: input.workspaceId },
+    });
+    if (!event) throw new Error("Email automation event not found.");
+    assertEmailAutomationEventRequeueAllowed(event.status, event.attemptCount, maxAttempts);
+    const updated = await tx.engageEmailAutomationEvent.update({
+      where: { id: event.id },
+      data: { status: "PENDING", lastError: null, processedAt: null },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: input.actorUserId,
+        action: "EMAIL_AUTOMATION_EVENT_REQUEUED",
+        entityType: "EngageEmailAutomationEvent",
+        entityId: event.id,
+        before: { status: event.status, attemptCount: event.attemptCount, lastError: event.lastError },
+        after: { status: updated.status, attemptCount: updated.attemptCount, maxAttempts },
+      },
+    });
+    return updated;
   });
 }
