@@ -36,7 +36,7 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
           ssh-keygen -y -f "$KEY" >/dev/null
 
-      - name: Compare Inbox sources across rollback candidates only
+      - name: Inspect Inbox delta and PM2 metadata only
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -45,20 +45,26 @@ jobs:
           ROOT=/var/www/sikhadenge-whatsapp-agent/releases
           CUR="$ROOT/reconcile-clean-28b813ca-20260915T043800Z/apps/whatsapp-agent-dashboard"
           PREV="$ROOT/reconcile-28b813ca-20260915T041236Z/apps/whatsapp-agent-dashboard"
-          OLD="$ROOT/sa1-mirror-20260912-140636-a07df047/apps/whatsapp-agent-dashboard"
-          for d in "$CUR" "$PREV" "$OLD"; do
-            echo "RELEASE=$d"
-            echo "BUILD=$(cat "$d/.next/BUILD_ID" 2>/dev/null || true)"
-            for f in components/inbox/InboxDashboardV2.tsx app/inbox/page.tsx app/layout.tsx app/page02-inbox-structural-v22.css app/page02-inbox-futuristic-v20.css app/page02-inbox-enforce-v21.css app/page02-right-intelligence-v19.css; do
-              if test -f "$d/$f"; then printf '%s  %s\n' "$(sha256sum "$d/$f" | awk '{print $1}')" "$f"; else printf 'MISSING  %s\n' "$f"; fi
-            done
-          done
-          echo 'CUR_VS_PREV_BEGIN'
-          diff -qr "$CUR/components/inbox" "$PREV/components/inbox" 2>/dev/null | head -n 80 || true
-          diff -qr "$CUR/app/inbox" "$PREV/app/inbox" 2>/dev/null | head -n 80 || true
-          echo 'CUR_VS_PREV_END'
-          echo 'CUR_VS_OLD_BEGIN'
-          diff -qr "$CUR/components/inbox" "$OLD/components/inbox" 2>/dev/null | head -n 80 || true
-          diff -qr "$CUR/app/inbox" "$OLD/app/inbox" 2>/dev/null | head -n 80 || true
-          echo 'CUR_VS_OLD_END'
+          echo 'COMPONENT_DIFF_BEGIN'
+          diff -u "$PREV/components/inbox/InboxDashboardV2.tsx" "$CUR/components/inbox/InboxDashboardV2.tsx" | head -n 260 || true
+          echo 'COMPONENT_DIFF_END'
+          echo 'LAYOUT_DIFF_BEGIN'
+          diff -u "$PREV/app/layout.tsx" "$CUR/app/layout.tsx" | head -n 220 || true
+          echo 'LAYOUT_DIFF_END'
+          J=$(mktemp); pm2 jlist > "$J"
+          node - "$J" <<'NODE'
+          const fs=require('node:fs');
+          const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8')).find(x=>x.name==='sikhadenge-whatsapp-agent');
+          if(!p) process.exit(2);
+          console.log('PM2_CWD='+String(p.pm2_env?.pm_cwd||''));
+          console.log('PM2_SCRIPT='+String(p.pm2_env?.pm_exec_path||''));
+          console.log('PM2_ARGS='+JSON.stringify(p.pm2_env?.args||[]));
+          console.log('PM2_INTERPRETER='+String(p.pm2_env?.exec_interpreter||''));
+          console.log('PM2_STATUS='+String(p.pm2_env?.status||''));
+          NODE
+          rm -f "$J"
+          echo "CUR_BUILD=$(cat "$CUR/.next/BUILD_ID")"
+          echo "PREV_BUILD=$(cat "$PREV/.next/BUILD_ID")"
+          echo "PREV_ENV=$(test -f "$PREV/.env" && echo yes || echo no)"
+          echo "PREV_NEXT=$(test -x "$PREV/node_modules/.bin/next" && echo yes || echo no)"
           REMOTE
