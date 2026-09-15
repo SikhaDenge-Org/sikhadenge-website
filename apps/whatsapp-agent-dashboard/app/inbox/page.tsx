@@ -1,4 +1,5 @@
 import InboxDashboardV2 from "../../components/inbox/InboxDashboardV2";
+import InboxHardeningBridge from "../../components/inbox/InboxHardeningBridge";
 import CoreWorkflowShortcuts from "../../components/navigation/CoreWorkflowShortcuts";
 import { requireDashboardUser } from "../../lib/auth/session";
 import {
@@ -8,6 +9,7 @@ import {
 import "../inbox-rebuild.css";
 import "../core-workflows-refinement.css";
 import "../inbox-enterprise-final.css";
+import "../inbox-hardening-final.css";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +39,7 @@ export default async function InboxPage({
   return (
     <>
       <CoreWorkflowShortcuts />
+      <InboxHardeningBridge />
       <InboxDashboardV2
         initialConversations={conversations}
         initialConversation={initialConversation}
