@@ -69,8 +69,8 @@ const navItems: ReadonlyArray<NavItem> = [
 
 const channels: ReadonlyArray<ChannelItem> = [
   { id: "whatsapp", label: "WhatsApp", connected: true, href: "/inbox" },
-  { id: "instagram", label: "Instagram", connected: false, href: "/integrations" },
-  { id: "messenger", label: "Messenger", connected: false, href: "/integrations" },
+  { id: "instagram", label: "Instagram", connected: true, href: "/inbox" },
+  { id: "messenger", label: "Messenger", connected: true, href: "/inbox" },
   { id: "telegram", label: "Telegram", connected: false, href: "/integrations" },
   { id: "linkedin", label: "LinkedIn", connected: false, href: "/integrations" },
   { id: "twitter", label: "X / Twitter", connected: false, href: "/integrations" },
@@ -239,15 +239,15 @@ function ChannelLink({ channel }: { channel: ChannelItem }) {
   );
 }
 
-export default function DashboardModuleShell({
+export function DashboardSidebar({
   activeTitle,
-  eyebrow,
-  title,
-  description,
   userName,
   userRole,
-  children,
-}: DashboardModuleShellProps) {
+}: {
+  activeTitle: SidebarMenuTitle;
+  userName: string;
+  userRole: string;
+}) {
   const initials = userName
     .split(/\s+/)
     .slice(0, 2)
@@ -256,13 +256,7 @@ export default function DashboardModuleShell({
     .toUpperCase();
 
   return (
-    <div className="sx-module">
-      <CoreWorkflowShortcuts />
-      <a className="sx-skip-link" href="#dashboard-main">
-        Skip to dashboard content
-      </a>
-
-      <aside className="sx-side rail" aria-label="Primary navigation">
+    <aside className="sx-side rail sd-canonical-sidebar" aria-label="Primary navigation">
         <Link className="brand-mark sx-brand" href="/inbox" aria-label="Open inbox">
           <span className="sx-brand-logo">
             <img src="/sikhadenge-header-safe-320.png" alt="" width={26} height={26} />
@@ -322,6 +316,26 @@ export default function DashboardModuleShell({
           </div>
         </div>
       </aside>
+  );
+}
+
+export default function DashboardModuleShell({
+  activeTitle,
+  eyebrow,
+  title,
+  description,
+  userName,
+  userRole,
+  children,
+}: DashboardModuleShellProps) {
+  return (
+    <div className="sx-module">
+      <CoreWorkflowShortcuts />
+      <a className="sx-skip-link" href="#dashboard-main">
+        Skip to dashboard content
+      </a>
+
+      <DashboardSidebar activeTitle={activeTitle} userName={userName} userRole={userRole} />
 
       <main id="dashboard-main" className="sx-workspace" tabIndex={-1}>
         <header className="sx-workspace-head">
@@ -383,3 +397,5 @@ export default function DashboardModuleShell({
     </div>
   );
 }
+
+

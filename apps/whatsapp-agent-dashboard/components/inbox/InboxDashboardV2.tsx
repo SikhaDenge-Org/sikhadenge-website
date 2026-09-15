@@ -15,6 +15,7 @@ import {
   restoreLocalDraft,
 } from "../../modules/productivity/application/local-draft-store";
 import MetaConnectionStatus from "../navigation/MetaConnectionStatus";
+import { DashboardSidebar } from "../navigation/DashboardModuleShell";
 import LogoutButton from "../auth/LogoutButton";
 
 type ConversationFilter = "ALL" | "UNREAD" | "HOT";
@@ -1133,74 +1134,7 @@ export default function InboxDashboardV2({
     <main
       className={`sx-inbox sx-mv-${mobileView.toLowerCase()} ${mobileDetailsOpen ? "sx-details-open" : ""}`}
     >
-      {/* LEFT NAVIGATION — keeps the .rail / nav / .rail-button / .brand-mark hooks intact */}
-      <aside className="rail sx-side" aria-label="Primary navigation">
-        <Link className="brand-mark sx-brand" href="/inbox" aria-label="Open inbox">
-          <span className="sx-brand-logo">
-            <img src="/sikhadenge-header-safe-320.png" alt="" width={26} height={26} />
-          </span>
-          <span className="sx-brand-name">
-            SikhaDenge
-            <small>WhatsApp AI</small>
-          </span>
-        </Link>
-
-        <div className="sx-side-scroll">
-          <nav className="sx-nav">
-            {NAV_ITEMS.filter(([title]) => PRIMARY_NAV.has(title)).map(([title, href]) => (
-              <Link
-                key={title}
-                className={`rail-button sx-navitem ${title === "Inbox" ? "active is-active" : ""}`}
-                title={title}
-                aria-label={title}
-                aria-current={title === "Inbox" ? "page" : undefined}
-                href={href}
-              >
-                <span className="sx-navic"><Ic name={navIconFor(title)} /></span>
-                <span className="sx-navlabel">{title}</span>
-                {title === "Inbox" && metrics.unread > 0 ? (
-                  <span className="sx-navbadge">{metrics.unread}</span>
-                ) : null}
-              </Link>
-            ))}
-          </nav>
-
-          {renderChannels("rail")}
-
-          <div className="sx-side-group">
-            <p className="sx-side-label">Manage</p>
-            <nav className="sx-nav">
-              {NAV_ITEMS.filter(([title]) => !PRIMARY_NAV.has(title)).map(([title, href]) => (
-                <Link
-                  key={title}
-                  className="rail-button sx-navitem"
-                  title={title}
-                  aria-label={title}
-                  href={href}
-                >
-                  <span className="sx-navic"><Ic name={navIconFor(title)} /></span>
-                  <span className="sx-navlabel">{title}</span>
-                </Link>
-              ))}
-            </nav>
-          </div>
-        </div>
-
-        <div className="sx-side-foot">
-          <Link className="rail-button sx-navitem" title="Settings" aria-label="Settings" href="/settings">
-            <span className="sx-navic"><Ic name="settings" /></span>
-            <span className="sx-navlabel">Settings</span>
-          </Link>
-          <div className="sx-account">
-            <span className="sx-acc-avatar">{initials(userName)}</span>
-            <span className="sx-acc-copy">
-              <strong>{userName}</strong>
-              <small>{userRole}</small>
-            </span>
-            <LogoutButton />
-          </div>
-        </div>
-      </aside>
+      <DashboardSidebar activeTitle="Inbox" userName={userName} userRole={userRole} />
 
       <div className="sx-workspace-v22" data-ui-version="22">
       {/* CONVERSATION LIST COLUMN */}
