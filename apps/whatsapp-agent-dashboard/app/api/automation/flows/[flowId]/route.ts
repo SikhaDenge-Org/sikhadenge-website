@@ -2,6 +2,7 @@ import { DashboardRole } from "@prisma/client";
 import { NextResponse } from "next/server";
 
 import { getCurrentDashboardUser } from "../../../../../lib/auth/session";
+import { loadPersistedWorkspaceSecurityContext } from "../../../../../modules/auth/infrastructure/prisma-authorization";
 import { updateAutomationFlow } from "../../../../../lib/automation/automation-service";
 
 export const runtime = "nodejs";
@@ -24,12 +25,14 @@ export async function PATCH(
 
   try {
     const payload = (await request.json()) as Record<string, unknown>;
+    const security = await loadPersistedWorkspaceSecurityContext(user.id);
     const result = await updateAutomationFlow({
       flowId: context.params.flowId,
       name: payload.name,
       description: payload.description,
       nodes: payload.nodes,
       actorId: user.id,
+      workspaceId: security?.workspace.id ?? null,
     });
     return NextResponse.json(result);
   } catch (error) {

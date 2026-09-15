@@ -44,6 +44,8 @@ type Validation = {
 const triggerTypes = [
   "INCOMING_KEYWORD",
   "NEW_LEAD",
+  "CONTACT_CREATED",
+  "FORM_SUBMITTED",
   "TAG_ADDED",
   "STAGE_CHANGED",
   "FOLLOW_UP_DUE",
@@ -56,6 +58,7 @@ const actionTypes = [
   "SEND_TEXT",
   "SEND_TEMPLATE",
   "SEND_MEDIA",
+  "SEND_EMAIL",
   "ASK_QUESTION",
   "ADD_TAG",
   "REMOVE_TAG",
@@ -99,6 +102,7 @@ function configField(type: string) {
   if (type === "SEND_TEXT" || type === "ASK_QUESTION") return { key: "text", label: "Message text", placeholder: "Type the approved message…" };
   if (type === "SEND_TEMPLATE") return { key: "templateId", label: "Approved template ID", placeholder: "Template record ID" };
   if (type === "SEND_MEDIA") return { key: "assetId", label: "Media asset ID", placeholder: "Uploaded asset ID" };
+  if (type === "SEND_EMAIL") return { key: "templateId", label: "Approved email template ID", placeholder: "Email template record ID" };
   if (type === "ASSIGN_COUNSELOR") return { key: "counselorId", label: "Counselor ID", placeholder: "Dashboard user ID" };
   if (type === "WAIT") return { key: "minutes", label: "Wait minutes", placeholder: "60" };
   if (type === "CONDITION") return { key: "field", label: "Condition field", placeholder: "lead.stage = QUALIFIED" };

@@ -41,7 +41,7 @@ function storedVariables(value: Prisma.JsonValue): Readonly<Record<string, strin
 }
 
 export type ManualEmailSendInput = {
-  workspaceId: string; templateId: string; manualSenderIdentityId?: string | null;
+  workspaceId: string; templateId: string; manualSenderIdentityId?: string | null; automationSenderIdentityId?: string | null;
   to: readonly EmailAddress[]; cc?: readonly EmailAddress[]; bcc?: readonly EmailAddress[]; replyTo?: EmailAddress;
   variables?: Readonly<Record<string, string | null | undefined>>; idempotencyKey: string; actorUserId: string;
 };
@@ -63,7 +63,7 @@ export class ManualEmailSendService {
 
     const emailRuntime = buildEmailE1Runtime();
     const senders = await emailRuntime.senders.listByWorkspace(input.workspaceId);
-    const resolved = resolveEmailSender({ availableSenders: senders, manualSenderIdentityId: input.manualSenderIdentityId, templateSenderIdentityId: version.defaultSenderIdentityId });
+    const resolved = resolveEmailSender({ availableSenders: senders, manualSenderIdentityId: input.manualSenderIdentityId, automationSenderIdentityId: input.automationSenderIdentityId, templateSenderIdentityId: version.defaultSenderIdentityId });
     const connection = await emailRuntime.connections.getById({ workspaceId: input.workspaceId, connectionId: resolved.sender.connectionId });
     if (!connection || connection.status !== "CONNECTED") throw new Error("Resolved email sender connection is not connected.");
 
