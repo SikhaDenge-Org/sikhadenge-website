@@ -68,6 +68,9 @@ jobs:
       - name: Run email automation production preflight policy
         run: bash tests/email-automation-production-preflight-policy.test.sh
 
+      - name: Run email automation scheduler activation policy
+        run: bash tests/email-automation-scheduler-activation-policy.test.sh
+
       - name: Generate Prisma client
         run: npx prisma generate
 
