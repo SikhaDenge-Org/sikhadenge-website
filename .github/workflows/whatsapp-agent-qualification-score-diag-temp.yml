@@ -36,20 +36,36 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
           ssh-keygen -y -f "$KEY" >/dev/null
 
-      - name: Compare complete source tree excluding generated runtime only
+      - name: Inventory every preserved Next build and known-good candidates read-only
         shell: bash
         run: |
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
           set -Eeuo pipefail
-          ROOT=/var/www/sikhadenge-whatsapp-agent/releases
-          CUR="$ROOT/reconcile-clean-28b813ca-20260915T043800Z/apps/whatsapp-agent-dashboard"
-          PREV="$ROOT/reconcile-28b813ca-20260915T041236Z/apps/whatsapp-agent-dashboard"
-          echo "CUR_BUILD=$(cat "$CUR/.next/BUILD_ID")"
-          echo "PREV_BUILD=$(cat "$PREV/.next/BUILD_ID")"
-          echo 'SOURCE_DIFF_BEGIN'
-          diff -qr --exclude=.next --exclude=node_modules --exclude=.env --exclude='*.log' --exclude='.qualification-score-backup-*' "$PREV" "$CUR" 2>/dev/null | head -n 220 || true
-          echo 'SOURCE_DIFF_END'
-          echo "CUR_LOGIN=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/login || true)"
-          echo "CUR_INBOX=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/inbox || true)"
+          ROOT=/var/www/sikhadenge-whatsapp-agent
+          J=$(mktemp); pm2 jlist > "$J"
+          ACTIVE_CWD=$(node - "$J" <<'NODE'
+          const fs=require('node:fs');
+          const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8')).find(x=>x.name==='sikhadenge-whatsapp-agent');
+          if(!p?.pm2_env?.pm_cwd) process.exit(2);
+          process.stdout.write(p.pm2_env.pm_cwd);
+          NODE
+          )
+          rm -f "$J"
+          echo "ACTIVE_CWD=$ACTIVE_CWD"
+          echo "ACTIVE_BUILD=$(cat "$ACTIVE_CWD/.next/BUILD_ID" 2>/dev/null || true)"
+          echo 'ALL_BUILD_IDS_BEGIN'
+          find "$ROOT" -type f -name BUILD_ID 2>/dev/null | while read -r p; do
+            case "$p" in */node_modules/*) continue ;; esac
+            build=$(cat "$p" 2>/dev/null || true)
+            dir=${p%/BUILD_ID}
+            printf '%s | %s | %s\n' "$build" "$(stat -c '%y' "$p" 2>/dev/null || true)" "$dir"
+          done | sort -k2,3r | head -n 120
+          echo 'ALL_BUILD_IDS_END'
+          echo 'KNOWN_GOOD_SEARCH_BEGIN'
+          grep -Rsl 'ZvzV6QBBngX3s_X5xxUnk' "$ROOT" /root/sikhadenge-backups 2>/dev/null | head -n 80 || true
+          echo 'KNOWN_GOOD_SEARCH_END'
+          echo 'ROLLBACK_MANIFESTS_BEGIN'
+          find /root/sikhadenge-backups -maxdepth 3 -type f \( -name 'deploy-state.txt' -o -name 'build-before.id' -o -name 'source-before.sha' \) -print 2>/dev/null | sort | tail -n 120 | while read -r p; do echo "FILE=$p"; cat "$p" 2>/dev/null | head -n 30; done
+          echo 'ROLLBACK_MANIFESTS_END'
           REMOTE
