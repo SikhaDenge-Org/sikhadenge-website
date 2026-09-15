@@ -1,4 +1,4 @@
-name: WhatsApp Agent UI V2 Reconcile Deploy
+name: WhatsApp Agent Qualification Score Only Guarded Deploy
 
 on:
   push:
@@ -15,10 +15,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  reconcile-and-deploy:
-    if: contains(github.event.head_commit.message, '[production-reconcile-deploy]')
+  score-only:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 35
     environment: whatsapp-agent-production
     env:
       SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
@@ -26,179 +25,92 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
-      TARGET_SHA: ${{ github.sha }}
-      PRODUCTION_RUN_ID: ui-v2-${{ github.run_id }}-${{ github.run_attempt }}
-
     steps:
-      - name: Checkout exact release
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ env.TARGET_SHA }}
-          fetch-depth: 0
-
-      - name: Validate target and production secrets
+      - name: Configure pinned SSH
         shell: bash
         run: |
           set -Eeuo pipefail
-          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
-          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
-          missing=0
-          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
-            if [[ -z "${!variable_name:-}" ]]; then
-              printf 'Missing required production secret: %s\n' "$variable_name" >&2
-              missing=1
-            fi
-          done
-          test "$missing" = "0"
-          if [[ -z "${SSH_PORT:-}" ]]; then
-            printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"
-          fi
-          printf 'PASS: TARGET_AND_SECRET_GATE_COMPLETE\n'
-
-      - name: Configure pinned SSH identity
-        shell: bash
-        run: |
-          set -Eeuo pipefail
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; SSH_PORT=22; fi
           install -d -m 700 "$HOME/.ssh"
-          private_key_file="$HOME/.ssh/whatsapp-production"
-          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
-            printf '%s\n' "$SSH_PRIVATE_KEY" > "$private_key_file"
-          else
-            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$private_key_file"
-          fi
-          chmod 600 "$private_key_file"
-          [[ "$SSH_HOST" =~ ^[^[:space:]/]+$ ]]
-          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
-          (( SSH_PORT >= 1 && SSH_PORT <= 65535 ))
-          read -r _ supplied_key_type supplied_key_material _ <<< "$SSH_HOST_KEY"
-          test "$supplied_key_type" = "ssh-ed25519"
-          test -n "$supplied_key_material"
-          printf '%s %s\n' "$supplied_key_type" "$supplied_key_material" | ssh-keygen -lf - -E sha256 >/dev/null
-          canonical_host="[$SSH_HOST]:$SSH_PORT"
-          printf '%s %s %s\n' "$canonical_host" "$supplied_key_type" "$supplied_key_material" > "$HOME/.ssh/known_hosts"
+          KEY="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"; fi
+          chmod 600 "$KEY"
+          read -r _ kt km _ <<< "$SSH_HOST_KEY"
+          test "$kt" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
-          ssh-keygen -y -f "$private_key_file" >/dev/null
-          ssh-keygen -F "$canonical_host" -f "$HOME/.ssh/known_hosts" >/dev/null
-          printf 'PASS: PINNED_SSH_IDENTITY_CONFIGURED\n'
+          ssh-keygen -y -f "$KEY" >/dev/null
 
-      - name: Verify pinned SSH transport
+      - name: Patch one CSS file, build, smoke, activate
         shell: bash
         run: |
           set -Eeuo pipefail
-          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
-            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
-            "$SSH_USER@$SSH_HOST" \
-            'test "$(id -u)" = "0" && printf "PASS: PINNED_SSH_TRANSPORT_VERIFIED\n"'
-
-      - name: Hash-lock live reconciliation and run guarded deployment
-        shell: bash
-        run: |
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
           set -Eeuo pipefail
-          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
-            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-            "$SSH_USER@$SSH_HOST" \
-            "TARGET_SHA='$TARGET_SHA' RUN_ID='$PRODUCTION_RUN_ID' bash -s" <<'REMOTE'
-          set -Eeuo pipefail
+          BASE_SHA=28b813ca9936fe0b9d3874f7ebf6b0dfeef0b242
+          GOOD_BUILD=ZvzV6QBBngX3s_X5xxUnk
+          NAME=sikhadenge-whatsapp-agent
+          REPO=/var/www/sikhadenge-whatsapp-agent/source
+          LIVE=/var/www/sikhadenge-whatsapp-agent/releases/reconcile-clean-28b813ca-20260915T043800Z/apps/whatsapp-agent-dashboard
+          TAG="score-only-${GITHUB_RUN_ID:-manual}-${GITHUB_RUN_ATTEMPT:-1}"
+          STAGE_ROOT="/tmp/$TAG"
+          STAGE="$STAGE_ROOT/apps/whatsapp-agent-dashboard"
+          CSS_REL=apps/whatsapp-agent-dashboard/app/page02-right-intelligence-v19.css
+          CSS="$STAGE_ROOT/$CSS_REL"
+          OLD="$LIVE/.next-before-$TAG"
+          NEW="$LIVE/.next-candidate-$TAG"
+          LOG="/tmp/$TAG.log"
 
-          LIVE_APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
-          REPO_ROOT=/var/www/sikhadenge-whatsapp-agent/source
-          RELEASE_BRANCH=release/whatsapp-instagram-agent-flow-20260731
-          RELEASE_REF=refs/remotes/origin/release/whatsapp-instagram-agent-flow-20260731
-          EXPECTED_LIVE_SHA=6cf48dfe8fcd3f14d498dfeb3d1ea70d1be37a8e
-          EXPECTED_PATCH_SHA256=668679fbccc7eed4b189e8ba4f95f3abbb49db19428765e43b6ed0c6558f739a
-          STAGE_ROOT="/tmp/sikhadenge-ui-v2-production-${RUN_ID}"
-          STAGE_APP="$STAGE_ROOT/apps/whatsapp-agent-dashboard"
-          BACKUP_DIR="/root/sikhadenge-backups/${RUN_ID}"
+          cleanup(){ git -C "$REPO" worktree remove --force "$STAGE_ROOT" >/dev/null 2>&1 || true; rm -f "$LOG" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
 
-          cleanup_stage() {
-            git -C "$LIVE_APP" worktree remove --force "$STAGE_ROOT" >/dev/null 2>&1 || true
-          }
-          trap cleanup_stage EXIT
+          test "$(git -C "$LIVE" rev-parse HEAD)" = "$BASE_SHA"
+          test "$(cat "$LIVE/.next/BUILD_ID")" = "$GOOD_BUILD"
+          test -x "$LIVE/node_modules/next/dist/bin/next"
+          test -f "$LIVE/.env"
+          J=$(mktemp); pm2 jlist > "$J"
+          ACTIVE=$(node - "$J" <<'NODE'
+          const fs=require('node:fs');const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8')).find(x=>x.name==='sikhadenge-whatsapp-agent');if(!p?.pm2_env?.pm_cwd||p.pm2_env.status!=='online')process.exit(2);process.stdout.write(p.pm2_env.pm_cwd);
+          NODE
+          ); rm -f "$J"; test "$ACTIVE" = "$LIVE"
 
-          test -d "$LIVE_APP"
-          test "$(git -C "$LIVE_APP" branch --show-current)" = "$RELEASE_BRANCH"
-          git -C "$LIVE_APP" fetch origin \
-            +refs/heads/release/whatsapp-instagram-agent-flow-20260731:$RELEASE_REF
-          test "$(git -C "$LIVE_APP" rev-parse "$RELEASE_REF")" = "$TARGET_SHA"
-          test "$(git -C "$LIVE_APP" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
-          git -C "$LIVE_APP" merge-base --is-ancestor "$EXPECTED_LIVE_SHA" "$TARGET_SHA"
+          git -C "$REPO" worktree add --detach "$STAGE_ROOT" "$BASE_SHA"
+          ln -s "$LIVE/.env" "$STAGE/.env"
+          ln -s "$LIVE/node_modules" "$STAGE/node_modules"
 
-          expected_dirty_paths=(
-            apps/whatsapp-agent-dashboard/app/api/analytics/overview/route.ts
-            apps/whatsapp-agent-dashboard/app/api/conversations/route.ts
-            apps/whatsapp-agent-dashboard/app/globals.css
-            apps/whatsapp-agent-dashboard/app/inbox/page.tsx
-            apps/whatsapp-agent-dashboard/app/layout.tsx
-            apps/whatsapp-agent-dashboard/components/inbox/InboxDashboardV2.tsx
-            apps/whatsapp-agent-dashboard/lib/inbox/conversation-repository.ts
-            apps/whatsapp-agent-dashboard/next-env.d.ts
-            apps/whatsapp-agent-dashboard/package.json
-            apps/whatsapp-agent-dashboard/scripts/masterclass-flow-worker.ts
-          )
+          cat >> "$CSS" <<'CSS'
 
-          actual_dirty_paths="$(git -C "$REPO_ROOT" diff HEAD --name-only --no-renames | LC_ALL=C sort)"
-          expected_dirty_list="$(printf '%s\n' "${expected_dirty_paths[@]}" | LC_ALL=C sort)"
+/* Qualification Score linear reference-only override — scope: .sx-score only */
+.sx-inbox > .sx-details > .sx-score{display:block!important;min-height:154px!important;padding:16px!important}
+.sx-inbox > .sx-details > .sx-score::after{display:none!important}
+.sx-inbox > .sx-details > .sx-score .sx-score-ring{position:relative!important;display:flex!important;align-items:flex-start!important;width:100%!important;height:88px!important;margin:0!important;border-radius:0!important;background:none!important;box-shadow:none!important;filter:none!important;counter-reset:sxqualscore var(--sx-score,0)}
+.sx-inbox > .sx-details > .sx-score .sx-score-ring::before{content:""!important;position:absolute!important;inset:auto!important;left:0!important;right:0!important;top:50px!important;width:auto!important;height:10px!important;border:0!important;border-radius:999px!important;background:#e8eef6!important;box-shadow:inset 0 1px 2px rgba(41,72,116,.06)!important}
+.sx-inbox > .sx-details > .sx-score .sx-score-ring::after{content:""!important;position:absolute!important;inset:auto!important;left:0!important;top:50px!important;width:calc(var(--sx-score,0)*1%)!important;height:10px!important;border-radius:999px!important;background:linear-gradient(90deg,#3279ff 0%,#1fc9ee 100%)!important;box-shadow:0 4px 12px rgba(31,137,255,.18)!important}
+.sx-inbox > .sx-details > .sx-score .sx-score-ring strong{position:static!important;z-index:2!important;color:#102449!important;font-size:27px!important;line-height:32px!important;font-weight:860!important;letter-spacing:-.04em!important}
+.sx-inbox > .sx-details > .sx-score .sx-score-ring strong::before{content:""!important;position:absolute!important;z-index:4!important;left:clamp(0%,calc(var(--sx-score,0)*1%),100%)!important;top:45px!important;width:20px!important;height:20px!important;transform:translateX(-50%)!important;border:4px solid #fff!important;border-radius:50%!important;background:#2376ff!important;box-shadow:0 4px 12px rgba(35,118,255,.28)!important}
+.sx-inbox > .sx-details > .sx-score .sx-score-ring strong::after{content:counter(sxqualscore) "%"!important;position:absolute!important;z-index:3!important;right:0!important;top:0!important;min-width:64px!important;height:32px!important;padding:0 12px!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;border-radius:999px!important;background:#edf5ff!important;color:#1768ff!important;font-size:13px!important;line-height:1!important;font-weight:820!important}
+.sx-inbox > .sx-details > .sx-score .sx-score-ring span{position:static!important;z-index:2!important;margin:3px 0 0 7px!important;color:#8e9bb1!important;font-size:18px!important;line-height:27px!important;font-weight:560!important;letter-spacing:-.025em!important}
+.sx-inbox > .sx-details > .sx-score .sx-score-ring span::before,.sx-inbox > .sx-details > .sx-score .sx-score-ring span::after{position:absolute!important;top:68px!important;color:#8a98ae!important;font-size:10px!important;line-height:12px!important;font-weight:720!important}
+.sx-inbox > .sx-details > .sx-score .sx-score-ring span::before{content:"1"!important;left:0!important}.sx-inbox > .sx-details > .sx-score .sx-score-ring span::after{content:"100"!important;right:0!important}
+.sx-inbox > .sx-details > .sx-score > div:last-child{min-width:0!important;margin-top:7px!important}.sx-inbox > .sx-details > .sx-score > div:last-child > strong{margin:0 0 4px!important;color:#102449!important;font-size:14px!important;line-height:19px!important;font-weight:840!important;letter-spacing:-.015em!important}.sx-inbox > .sx-details > .sx-score p{max-width:100%!important;margin:0!important;color:#7f8fa8!important;font-size:10.5px!important;line-height:1.45!important}
+CSS
 
-          if [[ -z "$actual_dirty_paths" ]]; then
-            printf 'PASS: LIVE_TRACKED_WORKTREE_ALREADY_CLEAN\n'
-            test -z "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)"
-          elif [[ "$actual_dirty_paths" == "$expected_dirty_list" ]]; then
-            install -d -m 700 "$BACKUP_DIR"
-            recovery_patch="$BACKUP_DIR/production-dirty-before-ui-v2.patch"
-            git -C "$REPO_ROOT" diff HEAD --binary -- "${expected_dirty_paths[@]}" > "$recovery_patch"
-            test -s "$recovery_patch"
-            chmod 600 "$recovery_patch"
-            patch_sha256="$(sha256sum "$recovery_patch" | awk '{print $1}')"
-            printf 'HASH_LOCK_PATCH_SHA256=%s\n' "$patch_sha256"
-            if [[ "$patch_sha256" != "$EXPECTED_PATCH_SHA256" ]]; then
-              printf 'FAIL: HASH_LOCK_PATCH_DIGEST_MISMATCH\n' >&2
-              exit 62
-            fi
+          CHANGED="$(git -C "$STAGE_ROOT" diff --name-only)"; test "$CHANGED" = "$CSS_REL"; git -C "$STAGE_ROOT" diff --check
+          echo "PASS: ONE_FILE_SOURCE_SCOPE_LOCKED $CHANGED"
 
-            untracked_before_sha="$(git -C "$REPO_ROOT" ls-files --others --exclude-standard -z | sha256sum | awk '{print $1}')"
-            untracked_before_count="$(git -C "$REPO_ROOT" ls-files --others --exclude-standard | wc -l | tr -d ' ')"
-            {
-              printf 'RUN_ID=%s\n' "$RUN_ID"
-              printf 'LIVE_SHA=%s\n' "$EXPECTED_LIVE_SHA"
-              printf 'TARGET_SHA=%s\n' "$TARGET_SHA"
-              printf 'PATCH_SHA256=%s\n' "$patch_sha256"
-              printf 'UNTRACKED_COUNT_BEFORE=%s\n' "$untracked_before_count"
-              printf 'UNTRACKED_SHA_BEFORE=%s\n' "$untracked_before_sha"
-            } > "$BACKUP_DIR/ui-v2-reconciliation-manifest.txt"
-            chmod 600 "$BACKUP_DIR/ui-v2-reconciliation-manifest.txt"
+          cd "$STAGE"; npm run typecheck; NODE_ENV=production npm run build
+          BUILD="$(cat .next/BUILD_ID)"; test -n "$BUILD"; test "$BUILD" != "$GOOD_BUILD"
+          ./node_modules/next/dist/bin/next start -p 3111 > "$LOG" 2>&1 & PID=$!
+          CODE=000; for _ in $(seq 1 25); do CODE=$(curl --max-time 3 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3111/login || true); case "$CODE" in 200|301|302|303|307|308) break;; esac; sleep 1; done
+          IC=$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3111/inbox || true); kill "$PID" >/dev/null 2>&1 || true; wait "$PID" >/dev/null 2>&1 || true
+          case "$CODE" in 200|301|302|303|307|308);;*) cat "$LOG"; exit 31;;esac; case "$IC" in 200|301|302|303|307|308);;*) cat "$LOG"; exit 32;;esac
+          cp -a "$STAGE/.next" "$NEW"; test "$(cat "$NEW/BUILD_ID")" = "$BUILD"
 
-            git -C "$REPO_ROOT" restore --source=HEAD --staged --worktree -- "${expected_dirty_paths[@]}"
-            test -z "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)"
-            untracked_after_sha="$(git -C "$REPO_ROOT" ls-files --others --exclude-standard -z | sha256sum | awk '{print $1}')"
-            untracked_after_count="$(git -C "$REPO_ROOT" ls-files --others --exclude-standard | wc -l | tr -d ' ')"
-            test "$untracked_after_sha" = "$untracked_before_sha"
-            test "$untracked_after_count" = "$untracked_before_count"
-            printf 'PASS: HASH_LOCK_RECONCILIATION_COMPLETE untracked_count=%s\n' "$untracked_after_count"
-          else
-            printf 'HASH_LOCK_ACTUAL_DIRTY_PATHS_BEGIN\n'
-            printf '%s\n' "$actual_dirty_paths"
-            printf 'HASH_LOCK_ACTUAL_DIRTY_PATHS_END\n'
-            printf 'HASH_LOCK_TRACKED_STATUS_BEGIN\n'
-            git -C "$REPO_ROOT" status --porcelain --untracked-files=no
-            printf 'HASH_LOCK_TRACKED_STATUS_END\n'
-            printf 'FAIL: HASH_LOCK_DIRTY_PATH_SET_CHANGED\n' >&2
-            exit 61
-          fi
-
-          test -z "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)"
-          git -C "$LIVE_APP" worktree add --detach "$STAGE_ROOT" "$TARGET_SHA"
-          ln -s "$LIVE_APP/.env" "$STAGE_APP/.env"
-          cd "$STAGE_APP"
-          npm install --include=dev --no-audit --no-fund --package-lock=false
-
-          LIVE_APP="$LIVE_APP" \
-          STAGE_APP="$STAGE_APP" \
-          RELEASE_SHA="$TARGET_SHA" \
-          RUN_ID="$RUN_ID" \
-          PM2_PROCESS_NAME=sikhadenge-whatsapp-agent \
-          PUBLIC_URL=https://whatsapp.sikhadenge.in \
-          BACKUP_ROOT=/root/sikhadenge-backups \
-          BACKUP_DIR="$BACKUP_DIR" \
-          ENV_FILE="$LIVE_APP/.env" \
-          bash "$STAGE_APP/scripts/engageos-production-batch1.sh"
+          rollback(){ set +e;if test -d "$OLD";then rm -rf "$LIVE/.next";mv "$OLD" "$LIVE/.next";fi;rm -rf "$NEW";pm2 restart "$NAME" >/dev/null 2>&1;sleep 5;pm2 save >/dev/null 2>&1; }
+          trap rollback ERR
+          mv "$LIVE/.next" "$OLD"; mv "$NEW" "$LIVE/.next"; test "$(cat "$LIVE/.next/BUILD_ID")" = "$BUILD"; pm2 restart "$NAME"; sleep 5
+          L=$(curl --max-time 15 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/login); I=$(curl --max-time 15 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/inbox); P=$(curl --max-time 20 -sS -L -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/login?score-only=1'); Q=$(curl --max-time 20 -sS -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/inbox?score-only=1')
+          test "$L" = 200; test "$P" = 200; case "$I" in 200|301|302|303|307|308);;*) exit 41;;esac; case "$Q" in 200|301|302|303|307|308);;*) exit 42;;esac
+          test "$(git -C "$LIVE" rev-parse HEAD)" = "$BASE_SHA"; test "$(cat "$LIVE/.next/BUILD_ID")" = "$BUILD"; pm2 save >/dev/null; trap - ERR
+          echo "PASS: QUALIFICATION_SCORE_ONLY_LIVE"; echo "ACTIVE_BUILD=$BUILD"; echo "BASE_SOURCE=$BASE_SHA"; echo "CHANGED_FILE=$CSS_REL"; echo "PUBLIC_LOGIN=$P PUBLIC_INBOX=$Q"
           REMOTE
