@@ -475,6 +475,7 @@ model EngageWorkspace {
 
 
   emailMessages             EngageEmailMessage[]
+  emailAutomationEvents     EngageEmailAutomationEvent[]
 @@index([isActive, createdAt])
 }
 
@@ -969,4 +970,30 @@ model EngageEmailMessage {
   @@index([workspaceId, status, createdAt])
   @@index([workspaceId, templateId, createdAt])
   @@index([workspaceId, retryOfMessageId, createdAt])
+}
+
+model EngageEmailAutomationEvent {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  eventKey        String
+  sourceEventId   String
+  trigger         String
+  relatedTriggers Json
+  contactId       String?
+  leadId          String?
+  submissionId    String?
+  payload         Json
+  status          String   @default("PENDING")
+  attemptCount    Int      @default(0)
+  lastError       String?
+  processedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workspace EngageWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, eventKey])
+  @@index([workspaceId, status, createdAt])
+  @@index([workspaceId, trigger, createdAt])
+  @@index([contactId, createdAt])
 }
