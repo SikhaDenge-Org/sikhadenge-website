@@ -81,6 +81,11 @@ export default async function InboxPage({
           overflow: hidden !important;
         }
 
+        /* Remove only the duplicate channel-card strip above conversation filters. */
+        body .sx-workspace-v22 .sx-list > .sx-channels-chips {
+          display: none !important;
+        }
+
         /* Current dynamic linear Qualification Score presentation. */
         body .sx-workspace-v22 .sx-score {
           display: block !important;
