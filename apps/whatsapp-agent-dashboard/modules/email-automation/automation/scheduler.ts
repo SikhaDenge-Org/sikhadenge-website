@@ -1,5 +1,22 @@
+import { randomUUID } from "node:crypto";
+
 import { prisma } from "@/lib/db/prisma";
+import { getEmailRuntimePolicy } from "../application/runtime-policy";
 import { processEmailAutomationEvents } from "./dispatcher";
+
+export async function getEmailAutomationSchedulerHealth() {
+  const staleBefore = new Date(Date.now() - 15 * 60 * 1000);
+  const [pending, processing, failed, staleProcessing, oldestPending, workspaces] = await Promise.all([
+    prisma.engageEmailAutomationEvent.count({ where: { status: "PENDING" } }),
+    prisma.engageEmailAutomationEvent.count({ where: { status: "PROCESSING" } }),
+    prisma.engageEmailAutomationEvent.count({ where: { status: "FAILED" } }),
+    prisma.engageEmailAutomationEvent.count({ where: { status: "PROCESSING", updatedAt: { lt: staleBefore } } }),
+    prisma.engageEmailAutomationEvent.findFirst({ where: { status: "PENDING" }, orderBy: { createdAt: "asc" }, select: { createdAt: true } }),
+    prisma.engageEmailAutomationEvent.findMany({ where: { OR: [{ status: "PENDING" }, { status: "PROCESSING", updatedAt: { lt: staleBefore } }] }, select: { workspaceId: true }, distinct: ["workspaceId"] }),
+  ]);
+  const policy = getEmailRuntimePolicy();
+  return { runtimeEnabled: policy.runtimeEnabled, automationEnabled: policy.automationEnabled, runtimeMode: policy.mode, externalWritesEnabled: policy.externalWritesEnabled, pending, processing, failed, staleProcessing, workspacesWithRunnableEvents: workspaces.length, oldestPendingAt: oldestPending?.createdAt ?? null };
+}
 
 export async function processEmailAutomationScheduler(input: {
   workspaceLimit?: number;
@@ -28,7 +45,7 @@ export async function processEmailAutomationScheduler(input: {
     });
     results.push({ workspaceId: candidate.workspaceId, ...result });
   }
-  return {
+  const summary = {
     workspacesScanned: candidates.length,
     processed: results.reduce((sum, item) => sum + item.processed, 0),
     failed: results.reduce((sum, item) => sum + item.failed, 0),
@@ -36,4 +53,21 @@ export async function processEmailAutomationScheduler(input: {
     recovered: results.reduce((sum, item) => sum + item.recovered, 0),
     results,
   };
+  const runId = randomUUID();
+  let auditRecorded = false;
+  try {
+    await prisma.auditLog.create({
+      data: {
+        actorId: null,
+        action: "EMAIL_AUTOMATION_SCHEDULER_RUN",
+        entityType: "EmailAutomationScheduler",
+        entityId: runId,
+        after: JSON.parse(JSON.stringify(summary)),
+      },
+    });
+    auditRecorded = true;
+  } catch {
+    auditRecorded = false;
+  }
+  return { runId, auditRecorded, ...summary };
 }

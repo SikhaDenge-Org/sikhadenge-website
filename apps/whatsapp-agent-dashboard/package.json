@@ -61,7 +61,8 @@
     "prisma:migrate": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
-    "question-bank:seed": "tsx prisma/seed-question-bank.ts"
+    "question-bank:seed": "tsx prisma/seed-question-bank.ts",
+    "email:automation:scheduler": "tsx scripts/email-automation-scheduler-call.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.12.0",
