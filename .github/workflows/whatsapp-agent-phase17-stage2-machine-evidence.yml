@@ -16,6 +16,8 @@ on:
       - "apps/whatsapp-agent-dashboard/tests/engageos-phase17-stage2-machine-evidence-policy.test.ts"
       - "apps/whatsapp-agent-dashboard/modules/release/application/controlled-launch.ts"
       - "apps/whatsapp-agent-dashboard/modules/release/domain/rollout-policy.ts"
+      - "apps/whatsapp-agent-dashboard/scripts/engageos-production-phase17-postdeploy-gate.sh"
+      - "apps/whatsapp-agent-dashboard/scripts/engageos-production-batch1.sh"
   workflow_dispatch:
 
 permissions:
@@ -86,18 +88,26 @@ jobs:
         run: |
           set -Eeuo pipefail
           api="https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/whatsapp-agent-production-batch1.yml/runs?branch=release%2Fwhatsapp-instagram-agent-flow-20260731&per_page=30"
-          json="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$api")"
-          match="$(jq -r --arg sha "$EXPECTED_LIVE_SHA" '
-            [.workflow_runs[]
-              | select(.head_sha == $sha)
-              | select(.status == "completed")
-              | select(.conclusion == "success")
-              | select(.event == "push")]
-            | sort_by(.updated_at)
-            | reverse
-            | .[0]
-            | if . == null then empty else [.id, .run_number, .updated_at] | @tsv end
-          ' <<<"$json")"
+          match=""
+          for attempt in $(seq 1 60); do
+            json="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$api")"
+            match="$(jq -r --arg sha "$EXPECTED_LIVE_SHA" '
+              [.workflow_runs[]
+                | select(.head_sha == $sha)
+                | select(.status == "completed")
+                | select(.conclusion == "success")
+                | select(.event == "push")]
+              | sort_by(.updated_at)
+              | reverse
+              | .[0]
+              | if . == null then empty else [.id, .run_number, .updated_at] | @tsv end
+            ' <<<"$json")"
+            if [[ -n "$match" ]]; then break; fi
+            failed="$(jq -r --arg sha "$EXPECTED_LIVE_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .event == "push" and .status == "completed" and .conclusion != "success")] | length' <<<"$json")"
+            test "$failed" = "0"
+            echo "WAIT_EXACT_PRODUCTION_BATCH attempt=$attempt sha=$EXPECTED_LIVE_SHA"
+            sleep 10
+          done
           test -n "$match"
           IFS=$'\t' read -r production_run_id production_run_number production_updated_at <<< "$match"
           [[ "$production_run_id" =~ ^[0-9]+$ ]]
