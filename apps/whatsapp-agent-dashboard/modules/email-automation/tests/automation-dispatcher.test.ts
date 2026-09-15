@@ -17,7 +17,7 @@ const valid = validateAutomationFlow({
   name: "Lead welcome email",
   nodes: [
     { id: "trigger", kind: "TRIGGER", type: "NEW_LEAD", label: "New lead", config: {} },
-    { id: "email", kind: "ACTION", type: "SEND_EMAIL", label: "Welcome email", config: { templateId: "template-1" } },
+    { id: "email", kind: "ACTION", type: "SEND_EMAIL", label: "Welcome email", config: { templateId: "template-1", templateVersionId: "version-1" } },
     { id: "end", kind: "ACTION", type: "END", label: "End", config: {} },
   ],
 });
@@ -33,6 +33,7 @@ const invalid = validateAutomationFlow({
 });
 assert.equal(invalid.valid, false);
 assert.ok(invalid.errors.some((item) => item.includes("approved email template ID")));
+assert.ok(invalid.errors.some((item) => item.includes("pinned approved email template version ID")));
 
 const sender = resolveEmailSender({
   availableSenders: [

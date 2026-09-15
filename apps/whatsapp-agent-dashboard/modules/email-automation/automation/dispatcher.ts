@@ -118,7 +118,9 @@ export async function processEmailAutomationEvents(input: {
       for (const flow of matching) {
         for (const node of flow.nodes.filter((item) => item.kind === "ACTION" && item.type === "SEND_EMAIL")) {
           const templateId = typeof node.config.templateId === "string" ? node.config.templateId.trim() : "";
+          const templateVersionId = typeof node.config.templateVersionId === "string" ? node.config.templateVersionId.trim() : "";
           if (!templateId) throw new Error(`Flow ${flow.name} has a SEND_EMAIL action without templateId.`);
+          if (!templateVersionId) throw new Error(`Flow ${flow.name} has a SEND_EMAIL action without templateVersionId.`);
           if (!event.contactId) throw new Error("Email automation event has no contactId.");
           const contact = await assertContactMayReceiveAutomation({ workspaceId: input.workspaceId, contactId: event.contactId });
           const rawKey = buildEmailAutomationIdempotencyKey({
@@ -138,6 +140,7 @@ export async function processEmailAutomationEvents(input: {
           const result = await sender.send({
             workspaceId: input.workspaceId,
             templateId,
+            templateVersionId,
             automationSenderIdentityId:
               typeof node.config.senderIdentityId === "string" ? node.config.senderIdentityId : null,
             to: [{ email: contact.email, name: contact.displayName || contact.profileName || undefined }],
