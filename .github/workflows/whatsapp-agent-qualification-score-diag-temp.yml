@@ -36,31 +36,29 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
           ssh-keygen -y -f "$KEY" >/dev/null
 
-      - name: Read live runtime and available release builds only
+      - name: Compare Inbox sources across rollback candidates only
         shell: bash
         run: |
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
           set -Eeuo pipefail
-          J=$(mktemp); pm2 jlist > "$J"
-          RUNTIME=$(node - "$J" <<'NODE'
-          const fs=require('node:fs');
-          const p=JSON.parse(fs.readFileSync(process.argv[2],'utf8')).find(x=>x.name==='sikhadenge-whatsapp-agent');
-          if(!p?.pm2_env?.pm_cwd) process.exit(2);
-          console.log('PM2_STATUS='+String(p.pm2_env?.status||''));
-          process.stdout.write(p.pm2_env.pm_cwd);
-          NODE
-          )
-          rm -f "$J"
-          echo "LIVE_RUNTIME=$RUNTIME"
-          echo "LIVE_BUILD=$(cat "$RUNTIME/.next/BUILD_ID" 2>/dev/null || true)"
-          echo "LIVE_LOGIN=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/login || true)"
-          echo "LIVE_INBOX=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/inbox || true)"
-          echo 'RELEASE_BUILDS_BEGIN'
-          find /var/www/sikhadenge-whatsapp-agent/releases -type f -path '*/apps/whatsapp-agent-dashboard/.next/BUILD_ID' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 40 | while read -r ts p; do
-            dir=${p%/.next/BUILD_ID}
-            build=$(cat "$p" 2>/dev/null || true)
-            printf '%s | %s | %s\n' "$ts" "$build" "$dir"
+          ROOT=/var/www/sikhadenge-whatsapp-agent/releases
+          CUR="$ROOT/reconcile-clean-28b813ca-20260915T043800Z/apps/whatsapp-agent-dashboard"
+          PREV="$ROOT/reconcile-28b813ca-20260915T041236Z/apps/whatsapp-agent-dashboard"
+          OLD="$ROOT/sa1-mirror-20260912-140636-a07df047/apps/whatsapp-agent-dashboard"
+          for d in "$CUR" "$PREV" "$OLD"; do
+            echo "RELEASE=$d"
+            echo "BUILD=$(cat "$d/.next/BUILD_ID" 2>/dev/null || true)"
+            for f in components/inbox/InboxDashboardV2.tsx app/inbox/page.tsx app/layout.tsx app/page02-inbox-structural-v22.css app/page02-inbox-futuristic-v20.css app/page02-inbox-enforce-v21.css app/page02-right-intelligence-v19.css; do
+              if test -f "$d/$f"; then printf '%s  %s\n' "$(sha256sum "$d/$f" | awk '{print $1}')" "$f"; else printf 'MISSING  %s\n' "$f"; fi
+            done
           done
-          echo 'RELEASE_BUILDS_END'
+          echo 'CUR_VS_PREV_BEGIN'
+          diff -qr "$CUR/components/inbox" "$PREV/components/inbox" 2>/dev/null | head -n 80 || true
+          diff -qr "$CUR/app/inbox" "$PREV/app/inbox" 2>/dev/null | head -n 80 || true
+          echo 'CUR_VS_PREV_END'
+          echo 'CUR_VS_OLD_BEGIN'
+          diff -qr "$CUR/components/inbox" "$OLD/components/inbox" 2>/dev/null | head -n 80 || true
+          diff -qr "$CUR/app/inbox" "$OLD/app/inbox" 2>/dev/null | head -n 80 || true
+          echo 'CUR_VS_OLD_END'
           REMOTE
