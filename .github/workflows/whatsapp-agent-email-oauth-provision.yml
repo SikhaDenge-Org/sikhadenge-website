@@ -100,7 +100,7 @@ jobs:
           kept.push('');
           const tmp=path.join(path.dirname(file),`.${path.basename(file)}.${process.pid}.tmp`);
           fs.writeFileSync(tmp,kept.join('\n'),{mode:stat.mode});fs.chmodSync(tmp,stat.mode);try{fs.chownSync(tmp,stat.uid,stat.gid);}catch{}fs.renameSync(tmp,file);
-NODE
+          NODE
           chmod 600 "$ENV_FILE"
           pm2 restart sikhadenge-whatsapp-agent --update-env >/dev/null
           sleep 3
@@ -109,6 +109,6 @@ NODE
           const env={};for(const raw of text.split(/\r?\n/)){const l=raw.trim();if(!l||l.startsWith('#'))continue;const i=l.indexOf('=');if(i>0)env[l.slice(0,i).trim()]=l.slice(i+1).trim().replace(/^['"]|['"]$/g,'');}
           const ok=Boolean(env.GOOGLE_GMAIL_CLIENT_ID&&env.GOOGLE_GMAIL_CLIENT_SECRET&&env.GOOGLE_GMAIL_OAUTH_STATE_SECRET?.length>=32&&env.EMAIL_CREDENTIAL_ENCRYPTION_KEY_B64&&env.EMAIL_RUNTIME_MODE==='DRY_RUN'&&env.EMAIL_EXTERNAL_WRITES_ENABLED==='false'&&env.EMAIL_INBOUND_SYNC_ENABLED==='false');
           console.log(`GMAIL_OAUTH_CONFIGURED=${ok?'yes':'no'}`);console.log(`EMAIL_RUNTIME_MODE=${env.EMAIL_RUNTIME_MODE||''}`);console.log(`EMAIL_EXTERNAL_WRITES_ENABLED=${env.EMAIL_EXTERNAL_WRITES_ENABLED||''}`);console.log(`EMAIL_INBOUND_SYNC_ENABLED=${env.EMAIL_INBOUND_SYNC_ENABLED||''}`);if(!ok)process.exit(1);
-NODE
+          NODE
           pm2 jlist | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const r=JSON.parse(s).find(x=>x.name==='sikhadenge-whatsapp-agent');console.log('PM2_STATUS='+(r?.pm2_env?.status||'missing'));if(r?.pm2_env?.status!=='online')process.exit(1)})"
           REMOTE
