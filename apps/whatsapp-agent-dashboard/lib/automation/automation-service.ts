@@ -204,6 +204,12 @@ export function validateAutomationFlow(flow: Pick<AutomationFlow, "name" | "node
     if (node.type === "SCHEDULE" && !clean(config.schedule, 200)) {
       errors.push("Schedule trigger requires a schedule value.");
     }
+    if (node.type === "APPOINTMENT_REMINDER") {
+      const minutes = Number(config.reminderMinutesBefore);
+      if (!Number.isFinite(minutes) || minutes < 1 || minutes > 43_200) {
+        errors.push("Appointment Reminder must be between 1 and 43,200 minutes before the appointment.");
+      }
+    }
     if ((node.type === "SEND_TEXT" || node.type === "ASK_QUESTION") && !clean(config.text, 4_000)) {
       errors.push(`${node.label} requires message text.`);
     }

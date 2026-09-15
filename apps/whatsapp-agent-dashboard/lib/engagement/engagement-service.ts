@@ -2,7 +2,8 @@ import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 
 import { prisma } from "../db/prisma";
-import { enqueueEmailAutomationEvent, findActorEmailWorkspaceId } from "../../modules/email-automation/automation/event-outbox";
+import { listAutomationFlowsForWorkspace } from "../automation/automation-service";
+import { enqueueEmailAutomationEvent, findActorEmailWorkspaceId, supersedePendingEmailAutomationEvents } from "../../modules/email-automation/automation/event-outbox";
 
 const FORM_EVENT = "engagement_form";
 const SUBMISSION_EVENT = "engagement_submission";
@@ -433,6 +434,15 @@ export async function createAppointment(input: {
     updatedAt: now,
   };
   const emailWorkspaceId = appointment.contactId ? await findActorEmailWorkspaceId(input.actorId) : null;
+  const reminderFlows = emailWorkspaceId
+    ? (await listAutomationFlowsForWorkspace(emailWorkspaceId, false)).filter((flow) => {
+        if (flow.status !== "ACTIVE") return false;
+        const trigger = flow.nodes.find((node) => node.kind === "TRIGGER");
+        if (!trigger || trigger.type !== "APPOINTMENT_REMINDER") return false;
+        const minutes = Number(trigger.config.reminderMinutesBefore);
+        return Number.isFinite(minutes) && minutes >= 1 && minutes <= 43_200;
+      })
+    : [];
   await prisma.$transaction(async (tx) => {
     await tx.webhookEvent.create({
       data: {
@@ -461,6 +471,31 @@ export async function createAppointment(input: {
         payload: { appointmentId: appointment.id, title: appointment.title, scheduledAt: appointment.scheduledAt, ownerId: appointment.ownerId },
       });
     }
+    if (emailWorkspaceId && appointment.contactId) {
+      for (const flow of reminderFlows) {
+        const trigger = flow.nodes.find((node) => node.kind === "TRIGGER" && node.type === "APPOINTMENT_REMINDER");
+        const minutes = Number(trigger?.config.reminderMinutesBefore);
+        if (!trigger || !Number.isFinite(minutes) || minutes < 1 || minutes > 43_200) continue;
+        const requestedAt = new Date(scheduledAt.getTime() - minutes * 60_000);
+        const availableAt = requestedAt.getTime() > Date.now() ? requestedAt : new Date();
+        await enqueueEmailAutomationEvent(tx, {
+          workspaceId: emailWorkspaceId,
+          sourceEventId: `engagement-appointment-reminder:${appointment.id}:${flow.flowId}:${flow.version}`,
+          trigger: "APPOINTMENT_REMINDER",
+          contactId: appointment.contactId,
+          availableAt,
+          payload: {
+            appointmentId: appointment.id,
+            title: appointment.title,
+            scheduledAt: appointment.scheduledAt,
+            ownerId: appointment.ownerId,
+            reminderMinutesBefore: minutes,
+            targetFlowId: flow.flowId,
+            targetFlowVersion: flow.version,
+          },
+        });
+      }
+    }
   });
   return appointment;
 }
@@ -480,9 +515,10 @@ export async function updateAppointment(input: {
     throw new Error("Appointment status is invalid.");
   }
   const updated = { ...appointment, status, updatedAt: new Date().toISOString() };
-  await prisma.$transaction([
-    prisma.webhookEvent.update({ where: { id: event.id }, data: { payload: toJson(updated) } }),
-    prisma.auditLog.create({
+  const emailWorkspaceId = appointment.contactId ? await findActorEmailWorkspaceId(input.actorId) : null;
+  await prisma.$transaction(async (tx) => {
+    await tx.webhookEvent.update({ where: { id: event.id }, data: { payload: toJson(updated) } });
+    await tx.auditLog.create({
       data: {
         actorId: input.actorId,
         action: "APPOINTMENT_STATUS_UPDATED",
@@ -491,8 +527,15 @@ export async function updateAppointment(input: {
         before: toJson({ status: appointment.status }),
         after: toJson({ status }),
       },
-    }),
-  ]);
+    });
+    if (emailWorkspaceId && status !== "SCHEDULED") {
+      await supersedePendingEmailAutomationEvents(tx, {
+        workspaceId: emailWorkspaceId,
+        trigger: "APPOINTMENT_REMINDER",
+        sourceEventIdPrefix: `engagement-appointment-reminder:${appointment.id}:`,
+      });
+    }
+  });
   return updated;
 }
 

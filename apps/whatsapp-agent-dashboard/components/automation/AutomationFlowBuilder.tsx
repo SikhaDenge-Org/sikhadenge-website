@@ -109,6 +109,7 @@ function emptyNode(kind: NodeKind): FlowNode {
 function configField(type: string) {
   if (type === "INCOMING_KEYWORD") return { key: "keyword", label: "Keyword", placeholder: "demo class" };
   if (type === "SCHEDULE") return { key: "schedule", label: "Schedule", placeholder: "Every day 09:00 IST" };
+  if (type === "APPOINTMENT_REMINDER") return { key: "reminderMinutesBefore", label: "Minutes before appointment", placeholder: "60" };
   if (type === "WEBHOOK") return { key: "secretLabel", label: "Webhook label", placeholder: "Website lead form" };
   if (type === "TAG_ADDED" || type === "ADD_TAG" || type === "REMOVE_TAG") return { key: "tag", label: "Tag", placeholder: "Hot Lead" };
   if (type === "STAGE_CHANGED" || type === "UPDATE_STAGE") return { key: "stage", label: "Lead stage", placeholder: "QUALIFIED" };
