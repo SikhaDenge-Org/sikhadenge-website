@@ -1,12 +1,17 @@
 import { DashboardRole } from "@prisma/client";
+import { Manrope } from "next/font/google";
 
 import DashboardModuleShell from "../../components/navigation/DashboardModuleShell";
 import { requireDashboardUser } from "../../lib/auth/session";
-import EmailWorkspaceNav from "../../modules/email-automation/ui/EmailWorkspaceNav";
 import EmailWorkspaceOverview from "../../modules/email-automation/ui/EmailWorkspaceOverview";
 import "../dashboard-system.css";
 
 export const dynamic = "force-dynamic";
+
+const emailManrope = Manrope({
+  subsets: ["latin"],
+  display: "swap",
+});
 
 export default async function EmailControlCenterPage() {
   const user = await requireDashboardUser([
@@ -18,13 +23,14 @@ export default async function EmailControlCenterPage() {
     <DashboardModuleShell
       activeTitle="Integrations"
       eyebrow="Email channel"
-      title="Email Automation"
-      description="A focused operating system for accounts, templates, delivery and automation."
+      title="Email Command Center"
+      description="Send smarter. Automate faster. Deliver everywhere."
       userName={user.name}
       userRole={user.role}
     >
-      <EmailWorkspaceNav />
-      <EmailWorkspaceOverview />
+      <div className={emailManrope.className}>
+        <EmailWorkspaceOverview />
+      </div>
     </DashboardModuleShell>
   );
 }
