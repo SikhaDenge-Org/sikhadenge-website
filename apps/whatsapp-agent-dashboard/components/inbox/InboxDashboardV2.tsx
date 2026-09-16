@@ -96,6 +96,38 @@ function formatMessageTime(value: string): string {
   }).format(date);
 }
 
+function messageDayKey(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+function formatMessageDay(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return "Today";
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: date.getFullYear() === today.getFullYear() ? undefined : "numeric",
+  }).format(date);
+}
+
+function outboundStatusLabel(status: string): string {
+  switch (status.toUpperCase()) {
+    case "READ": return "✓✓ Read";
+    case "DELIVERED": return "✓✓ Delivered";
+    case "SENT": return "✓ Sent";
+    case "QUEUED": return "◷ Queued";
+    case "FAILED": return "⚠ Failed";
+    default: return readable(status);
+  }
+}
+
 function formatBytes(value: number): string {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
@@ -582,6 +614,7 @@ export default function InboxDashboardV2({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectedIdRef = useRef(selectedId);
   const pollingRef = useRef(false);
+  const detailRequestSeqRef = useRef(0);
   const messageAreaRef = useRef<HTMLDivElement>(null);
   const draftRevisionRef = useRef(0);
   const draftSavedAtRef = useRef<Date>(new Date(0));
@@ -767,7 +800,12 @@ export default function InboxDashboardV2({
         const detailBody = (await detailResponse.json()) as {
           conversation?: InboxConversationDetail;
         };
-        if (detailBody.conversation) setSelected(detailBody.conversation);
+        if (
+          detailBody.conversation &&
+          selectedIdRef.current === activeId
+        ) {
+          setSelected(detailBody.conversation);
+        }
       } catch {
         // The next one-second poll retries without clearing the visible inbox.
       } finally {
@@ -881,6 +919,7 @@ export default function InboxDashboardV2({
       return;
     }
 
+    const requestSeq = ++detailRequestSeqRef.current;
     setLoadingConversation(true);
     setError(null);
     try {
@@ -899,6 +938,12 @@ export default function InboxDashboardV2({
       if (!response.ok || !body.conversation) {
         throw new Error(body.error || "Conversation could not be loaded.");
       }
+      if (
+        requestSeq !== detailRequestSeqRef.current ||
+        selectedIdRef.current !== conversationId
+      ) {
+        return;
+      }
       setSelected(body.conversation);
       setConversations((current) =>
         current.map((item) => item.id === body.conversation?.id ? body.conversation : item),
@@ -907,7 +952,9 @@ export default function InboxDashboardV2({
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Conversation could not be loaded.");
     } finally {
-      setLoadingConversation(false);
+      if (requestSeq === detailRequestSeqRef.current) {
+        setLoadingConversation(false);
+      }
     }
   }
 
@@ -1068,8 +1115,8 @@ export default function InboxDashboardV2({
               ? "Message sent through Facebook Messenger Send API."
               : "Message sent through Meta WhatsApp Cloud API."
           : body.dispatchError
-            ? `Message queued, but delivery failed: ${body.dispatchError}`
-            : "Message queued. Open Cutover to activate live outbound delivery.",
+            ? `Not sent externally. Message is queued: ${body.dispatchError}`
+            : "Not sent externally. Message is queued; live outbound remains disabled by the current Cutover policy.",
       );
       await loadConversation(selectedId, true);
     } catch (sendError) {
@@ -1432,17 +1479,34 @@ export default function InboxDashboardV2({
             <div className="sx-center">No message has been stored in this conversation.</div>
           ) : (
             <>
-              <div className="sx-daydivider"><span>Today</span></div>
-              {selected.messages.map((message) => (
-                <div key={message.id} className={`sx-msgrow ${message.direction.toLowerCase()}`}>
-                  <div className="sx-bubble">
-                    {message.direction === "OUTBOUND" ? <small>{message.actor === "AI" ? "AI Agent" : message.actor === "HUMAN" ? "Counselor" : readable(message.actor)}</small> : null}
-                    <MessageMedia message={message} />
-                    {message.text ? <p>{message.text}</p> : !message.mediaUrl ? <p>[{readable(message.type)} message]</p> : null}
-                    <time>{formatMessageTime(message.messageTimestamp)} · {readable(message.status)}</time>
+              {selected.messages.map((message, index) => {
+                const previous = selected.messages[index - 1];
+                const showDay =
+                  !previous ||
+                  messageDayKey(previous.messageTimestamp) !==
+                    messageDayKey(message.messageTimestamp);
+                return (
+                  <div key={message.id}>
+                    {showDay ? (
+                      <div className="sx-daydivider">
+                        <span>{formatMessageDay(message.messageTimestamp)}</span>
+                      </div>
+                    ) : null}
+                    <div className={`sx-msgrow ${message.direction.toLowerCase()}`}>
+                      <div className="sx-bubble">
+                        {message.direction === "OUTBOUND" ? <small>{message.actor === "AI" ? "AI Agent" : message.actor === "HUMAN" ? "Counselor" : readable(message.actor)}</small> : null}
+                        <MessageMedia message={message} />
+                        {message.text ? <p>{message.text}</p> : !message.mediaUrl ? <p>[{readable(message.type)} message]</p> : null}
+                        <time>
+                          {formatMessageTime(message.messageTimestamp)} · {message.direction === "OUTBOUND"
+                            ? outboundStatusLabel(message.status)
+                            : readable(message.status)}
+                        </time>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </>
           )}
 
