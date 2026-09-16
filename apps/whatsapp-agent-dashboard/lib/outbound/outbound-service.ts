@@ -8,6 +8,14 @@ import {
   TemplateStatus,
 } from "@prisma/client";
 
+import {
+  readLegacyWhatsAppMappingMetadata,
+} from "@/modules/channels/whatsapp/application/legacy-identity-mapping";
+import {
+  assertControlledLaunchOutboundAllowed,
+  ControlledLaunchOutboundDeniedError,
+  type ControlledLaunchOutboundContext,
+} from "@/modules/release/application/controlled-launch-outbound-guard";
 import { resolveMasterclassImageForOutbound } from "../automation/masterclass-image-flow";
 import { prisma } from "../db/prisma";
 import {
@@ -87,6 +95,36 @@ function metadataMediaType(value: unknown): OutboundMediaType | null {
     value === "audio"
     ? value
     : null;
+}
+
+function controlledLaunchContext(input: {
+  contactId: string;
+  waId: string;
+  metadata: Prisma.JsonValue | null;
+}): ControlledLaunchOutboundContext {
+  const mapping = readLegacyWhatsAppMappingMetadata(input.metadata);
+  if (!mapping) {
+    throw new ControlledLaunchOutboundDeniedError(
+      "CONTROLLED_LAUNCH_GOVERNANCE_INVALID",
+      "Persisted WhatsApp workspace/connection mapping is missing for this outbound contact.",
+    );
+  }
+  if (
+    mapping.legacyContactId !== input.contactId ||
+    mapping.externalUserId !== input.waId ||
+    mapping.channel !== "WHATSAPP"
+  ) {
+    throw new ControlledLaunchOutboundDeniedError(
+      "CONTROLLED_LAUNCH_GOVERNANCE_INVALID",
+      "Persisted WhatsApp identity mapping does not match the queued outbound recipient.",
+    );
+  }
+  return {
+    workspaceId: mapping.workspaceId,
+    connectionId: mapping.connectionId,
+    channel: "WHATSAPP",
+    action: "OUTBOUND_QUEUED",
+  };
 }
 
 function withContext(
@@ -453,7 +491,13 @@ export async function dispatchOutboundMessage(
       conversation: {
         select: {
           id: true,
-          contact: { select: { waId: true } },
+          contact: {
+            select: {
+              id: true,
+              waId: true,
+              metadata: true,
+            },
+          },
         },
       },
     },
@@ -476,6 +520,18 @@ export async function dispatchOutboundMessage(
       })
     : null;
   const mode = getOutboundMode();
+  const governanceContext =
+    mode === "live"
+      ? controlledLaunchContext({
+          contactId: message.conversation.contact.id,
+          waId: message.conversation.contact.waId,
+          metadata: message.conversation.contact.metadata,
+        })
+      : null;
+
+  if (governanceContext) {
+    await assertControlledLaunchOutboundAllowed(governanceContext);
+  }
 
   let metaMediaId =
     message.mediaId ||
@@ -489,12 +545,21 @@ export async function dispatchOutboundMessage(
   if (needsMetaMedia && !metaMediaId) {
     if (!assetId) throw new Error("Queued media asset ID is missing.");
     if (mode === "live") {
+      if (!governanceContext) {
+        throw new ControlledLaunchOutboundDeniedError(
+          "CONTROLLED_LAUNCH_GOVERNANCE_INVALID",
+          "Live WhatsApp media upload is missing persisted governance context.",
+        );
+      }
       const { asset, data } = await readMediaAsset(assetId);
-      const uploaded = await uploadMetaWhatsAppMedia({
-        data,
-        mimeType: asset.mimeType,
-        filename: message.filename || asset.originalName,
-      });
+      const uploaded = await uploadMetaWhatsAppMedia(
+        {
+          data,
+          mimeType: asset.mimeType,
+          filename: message.filename || asset.originalName,
+        },
+        governanceContext,
+      );
       metaMediaId = uploaded.mediaId;
     } else {
       metaMediaId = `preview_${assetId.slice(0, 16)}`;
@@ -535,13 +600,20 @@ export async function dispatchOutboundMessage(
     };
   }
 
+  if (!governanceContext) {
+    throw new ControlledLaunchOutboundDeniedError(
+      "CONTROLLED_LAUNCH_GOVERNANCE_INVALID",
+      "Live WhatsApp send is missing persisted governance context.",
+    );
+  }
+
   const previousAttempts =
     typeof metadata.attemptCount === "number" && Number.isFinite(metadata.attemptCount)
       ? Math.max(0, Math.floor(metadata.attemptCount))
       : 0;
 
   try {
-    const sent = await sendMetaWhatsAppMessage(payload);
+    const sent = await sendMetaWhatsAppMessage(payload, governanceContext);
     const sentAt = new Date();
     await prisma.$transaction([
       prisma.whatsAppMessage.update({
@@ -591,6 +663,10 @@ export async function dispatchOutboundMessage(
       reason: null,
     };
   } catch (error) {
+    if (error instanceof ControlledLaunchOutboundDeniedError) {
+      throw error;
+    }
+
     const reason = (
       error instanceof Error ? error.message : "Meta send failed."
     ).slice(0, 1_000);
