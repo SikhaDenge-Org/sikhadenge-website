@@ -13,7 +13,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function emailPage(request: Request, params: Record<string, string>): URL {
-  const target = new URL("/email", request.url);
+  const appUrl = process.env.APP_URL?.trim();
+  const target = new URL("/email", appUrl || request.url);
   for (const [key, value] of Object.entries(params)) target.searchParams.set(key, value);
   return target;
 }
