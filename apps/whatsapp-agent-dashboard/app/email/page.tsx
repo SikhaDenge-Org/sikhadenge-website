@@ -3,6 +3,7 @@ import { Manrope } from "next/font/google";
 
 import DashboardModuleShell from "../../components/navigation/DashboardModuleShell";
 import { requireDashboardUser } from "../../lib/auth/session";
+import EmailWorkspaceNav from "../../modules/email-automation/ui/EmailWorkspaceNav";
 import EmailWorkspaceOverview from "../../modules/email-automation/ui/EmailWorkspaceOverview";
 import "../dashboard-system.css";
 
@@ -29,6 +30,7 @@ export default async function EmailControlCenterPage() {
       userRole={user.role}
     >
       <div className={emailManrope.className}>
+        <EmailWorkspaceNav />
         <EmailWorkspaceOverview />
       </div>
     </DashboardModuleShell>

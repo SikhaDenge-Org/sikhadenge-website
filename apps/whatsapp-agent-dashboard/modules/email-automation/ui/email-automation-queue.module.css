@@ -13,3 +13,14 @@
 @media(max-width:1200px){.topGrid{grid-template-columns:1fr 1fr}.controlsCard{grid-column:1/-1}.middleGrid{grid-template-columns:1fr 1fr}.processorCard{grid-column:1/-1}.kpiGrid{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:800px){.topGrid,.middleGrid,.bottomGrid{grid-template-columns:1fr}.kpiGrid{grid-template-columns:1fr 1fr}.sources{grid-template-columns:1fr 1fr}.workflowTable{overflow-x:auto}.tableHeader,.workflowRow{min-width:520px}}
 @media(max-width:520px){.kpiGrid,.sources{grid-template-columns:1fr}.runtimeBar{justify-content:flex-start}.recoveryBody{grid-template-columns:1fr;justify-items:center}}
+
+/* Email workspace visual system v2 — automation */
+.root{gap:14px;padding-bottom:18px;grid-auto-rows:max-content;background:radial-gradient(circle at 2% 0,rgba(31,112,241,.045),transparent 22%),radial-gradient(circle at 98% 10%,rgba(119,72,247,.05),transparent 24%)}
+.kpiGrid article,.workflowsCard,.chartCard,.controlsCard,.eventsCard,.recoveryCard,.processorCard,.sourcesCard,.logCard{border-color:#d9e5f5;background:linear-gradient(180deg,rgba(255,255,255,.99),rgba(249,251,255,.97));box-shadow:0 14px 34px rgba(31,66,115,.06),inset 0 1px 0 rgba(255,255,255,.9)}
+.kpiGrid article{min-height:98px;border-radius:17px;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}.kpiGrid article:hover{transform:translateY(-2px);border-color:#c9dafa;box-shadow:0 18px 40px rgba(31,66,115,.09)}
+.topGrid,.middleGrid,.bottomGrid{align-items:start;grid-auto-rows:max-content}.workflowsCard,.chartCard,.controlsCard,.eventsCard,.recoveryCard,.processorCard,.sourcesCard,.logCard{align-self:start;height:auto;min-height:0;border-radius:18px}.cardHead{padding:14px 15px 10px}.cardHead h3{font-size:13px}
+.runtimeBar span,.runtimeBar button{border-color:#d8e4f2;background:rgba(255,255,255,.92);box-shadow:0 6px 16px rgba(31,66,115,.045)}.running{background:#eafaf3!important}.modeChip{background:#eef6ff!important}.runtimeBar button:hover{border-color:#bfd3f0;background:#f8fbff}
+.barChart{background:repeating-linear-gradient(to top,transparent 0,transparent 31px,#edf2f8 32px);border-bottom-color:#dfe7f3}.barGroup i{background:#d6e5ff}.barGroup b{background:linear-gradient(180deg,#4d84f8,#246ff3)}
+.controlRow:hover,.workflowRow:hover,.eventList article:hover{background:#f8fbff}.sources>span{border-color:#dce6f3;background:linear-gradient(180deg,#fff,#f9fbff)}
+.logCard pre{border:1px solid #1f2f53;background:radial-gradient(circle at 100% 0,rgba(54,117,246,.18),transparent 35%),linear-gradient(180deg,#111d36,#0c162c);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+@media(max-width:800px){.workflowsCard,.chartCard,.controlsCard,.eventsCard,.recoveryCard,.processorCard,.sourcesCard,.logCard,.kpiGrid article{border-radius:15px}}
