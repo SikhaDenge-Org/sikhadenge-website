@@ -2,6 +2,7 @@
 
 import {
   evaluateBoundedAutopilotCapacity,
+  isBoundedAutopilotReservationConnectionMatch,
   normalizeBoundedAutopilotRecipientKey,
 } from "../modules/release/application/controlled-launch-bounded-autopilot";
 
@@ -33,12 +34,18 @@ function testRecipientNormalizationIsDeterministic() {
   assert.equal(normalizeBoundedAutopilotRecipientKey("+91 99999-99999"), "919999999999");
 }
 
+function testExistingReservationMustStayBoundToConnection() {
+  assert.equal(isBoundedAutopilotReservationConnectionMatch("conn-a", "conn-a"), true);
+  assert.equal(isBoundedAutopilotReservationConnectionMatch("conn-a", "conn-b"), false);
+}
+
 function main() {
   testInvalidCapFailsClosed();
   testCapExhaustionFailsClosed();
   testExistingRecipientDoesNotConsumeAnotherSlot();
   testNewRecipientWithinCapIsAllowed();
   testRecipientNormalizationIsDeterministic();
+  testExistingReservationMustStayBoundToConnection();
   console.log("EngageOS Phase17-G3 bounded autopilot caps: PASS");
 }
 
