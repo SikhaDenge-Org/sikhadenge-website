@@ -1,0 +1,81 @@
+name: WhatsApp Agent Email Lifecycle Readiness
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+
+permissions:
+  contents: read
+
+jobs:
+  audit-email-lifecycle-readiness:
+    concurrency:
+      group: whatsapp-agent-production
+      cancel-in-progress: false
+    if: contains(github.event.head_commit.message, '[email-lifecycle-readiness]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      DEPLOYED_SHA: ${{ github.event.before }}
+      AUDIT_RUN_ID: email-lifecycle-readiness-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Validate deployed SHA and production secrets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          missing=0
+          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            [[ -n "${!variable_name:-}" ]] || { echo "Missing production secret: $variable_name" >&2; missing=1; }
+          done
+          test "$missing" = "0"
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+      - name: Run read-only lifecycle readiness audit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" \
+            "DEPLOYED_SHA='$DEPLOYED_SHA' RUN_ID='$AUDIT_RUN_ID' bash -s" <<'REMOTE' | tee email-lifecycle-readiness.log
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          BACKUP_DIR="/root/sikhadenge-backups/${RUN_ID}"
+          cd "$APP"
+          test "$(git rev-parse HEAD)" = "$DEPLOYED_SHA"
+          install -d -m 700 "$BACKUP_DIR"
+          set -a
+          source "$APP/.env"
+          set +a
+          npx tsx scripts/email-lifecycle-readiness.ts | tee "$BACKUP_DIR/result.log"
+          grep -q '^EMAIL_LIFECYCLE_READINESS_AUDIT=PASS$' "$BACKUP_DIR/result.log"
+          printf 'PASS: EMAIL_LIFECYCLE_READINESS_READ_ONLY_AUDIT\n'
+          REMOTE
+
+      - name: Upload protected readiness evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatsapp-agent-email-lifecycle-readiness-${{ env.AUDIT_RUN_ID }}
+          path: email-lifecycle-readiness.log
+          if-no-files-found: error
+          retention-days: 14
