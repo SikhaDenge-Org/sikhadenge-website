@@ -370,3 +370,5 @@ jobs:
 
 # Email dry-run rollback hardening deployment marker: 2026-09-15
 # Email sidebar active-state deployment marker: 2026-09-16
+
+# Internal email one-shot test harness deployment marker: 2026-09-16
