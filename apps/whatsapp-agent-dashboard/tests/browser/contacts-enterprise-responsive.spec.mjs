@@ -154,9 +154,10 @@ for (const viewport of VIEWPORTS) {
         }),
       );
       expect(metricBoxes).toHaveLength(4);
-      expect(Math.abs(metricBoxes[0].top - metricBoxes[1].top)).toBeLessThanOrEqual(2);
-      expect(metricBoxes[2].top).toBeGreaterThan(metricBoxes[0].top);
-      expect(metricBoxes[0].width).toBeGreaterThan(140);
+      // Contacts V20 stacks KPI cards into a single column at <=520px.
+      expect(metricBoxes[1].top).toBeGreaterThan(metricBoxes[0].top);
+      expect(metricBoxes[2].top).toBeGreaterThan(metricBoxes[1].top);
+      expect(metricBoxes[0].width).toBeGreaterThan(300);
     }
 
     // Exercise the actual operator state transition on desktop where both the

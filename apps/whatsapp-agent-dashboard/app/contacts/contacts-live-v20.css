@@ -273,6 +273,10 @@ body .sx-module .contact-loading {
     grid-template-columns: minmax(0, 1fr) !important;
   }
 
+  body .sx-module .contact-manager-v2.is-editor-open {
+    isolation: auto !important;
+  }
+
   body .sx-module .contact-editor-v2 {
     display: none !important;
   }
