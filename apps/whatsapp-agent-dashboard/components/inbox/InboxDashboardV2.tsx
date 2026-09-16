@@ -548,6 +548,7 @@ export default function InboxDashboardV2({
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<ConversationFilter>("ALL");
   const [channelFilter, setChannelFilter] = useState<ChannelId>("whatsapp");
+  const [emailConnected, setEmailConnected] = useState(false);
   const [scope, setScope] = useState<ConversationScope>("RECENT");
   const [loadingConversation, setLoadingConversation] = useState(false);
   const [modeUpdating, setModeUpdating] = useState(false);
@@ -626,6 +627,27 @@ export default function InboxDashboardV2({
   useEffect(() => {
     selectedIdRef.current = selectedId;
   }, [selectedId]);
+
+  useEffect(() => {
+    let alive = true;
+    async function loadEmailStatus() {
+      try {
+        const response = await fetch("/api/email/connections", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = (await response.json()) as { connections?: Array<{ status?: string }> };
+        const connected = payload.connections?.some((item) => item.status === "CONNECTED" || item.status === "VERIFIED") ?? false;
+        if (alive) setEmailConnected(connected);
+      } catch {
+        if (alive) setEmailConnected(false);
+      }
+    }
+    void loadEmailStatus();
+    const timer = window.setInterval(() => void loadEmailStatus(), 30000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     if (!selectedId) {
@@ -1102,11 +1124,12 @@ export default function InboxDashboardV2({
           {CHANNELS.map((channel) => {
             const unread = channelUnread[channel.id];
             const isActive = channelFilter === channel.id;
+            const connected = channel.id === "email" ? emailConnected : channel.connected;
             const content = (
               <>
                 <span className="sx-chan-ic"><ChannelGlyph channel={channel.id} /></span>
                 <span className="sx-chan-name">{channel.label}</span>
-                {channel.connected ? (
+                {connected ? (
                   unread > 0 ? (
                     <span className="sx-chan-count">{unread}</span>
                   ) : (
@@ -1122,7 +1145,7 @@ export default function InboxDashboardV2({
               return (
                 <Link
                   key={channel.id}
-                  className="sx-chan is-pending"
+                  className={`sx-chan ${emailConnected ? "is-active" : "is-pending"}`}
                   href="/email"
                   aria-label="Open Email Automation Control Center"
                 >
