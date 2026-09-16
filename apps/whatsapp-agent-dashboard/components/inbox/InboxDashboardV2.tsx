@@ -792,6 +792,7 @@ export default function InboxDashboardV2({
           return;
         }
 
+        const requestSeq = ++detailRequestSeqRef.current;
         const detailResponse = await fetch(
           `/api/conversations/${encodeURIComponent(activeId)}`,
           { cache: "no-store" },
@@ -802,6 +803,7 @@ export default function InboxDashboardV2({
         };
         if (
           detailBody.conversation &&
+          requestSeq === detailRequestSeqRef.current &&
           selectedIdRef.current === activeId
         ) {
           setSelected(detailBody.conversation);

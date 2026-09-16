@@ -280,7 +280,10 @@ export async function listInboxConversations(
       lead: true,
       assignedTo: { select: { id: true, name: true } },
       messages: {
-        orderBy: { messageTimestamp: "desc" },
+        orderBy: [
+          { messageTimestamp: "desc" },
+          { createdAt: "desc" },
+        ],
         take: 1,
         select: {
           text: true,
