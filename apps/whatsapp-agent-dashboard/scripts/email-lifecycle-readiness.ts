@@ -1,6 +1,8 @@
 import { prisma } from "../lib/db/prisma";
 import { listAutomationFlowsForWorkspace } from "../lib/automation/automation-service";
 import { PrismaEmailSenderRepository } from "../modules/email-automation/infrastructure/prisma-email-sender-repository";
+import { buildEmailTemplateRuntime } from "../modules/email-automation/infrastructure/template-runtime";
+import { LIFECYCLE_EMAIL_DEFINITIONS } from "../modules/email-automation/automation/lifecycle-provisioning";
 
 const WORKSPACE_SLUG = "sikhadenge-default";
 const PREFIX = "Lifecycle — ";
@@ -26,6 +28,10 @@ async function main() {
   });
   const flows = (await listAutomationFlowsForWorkspace(workspace.id, false))
     .filter((flow) => flow.name.startsWith(PREFIX));
+  const templateRuntime = buildEmailTemplateRuntime();
+  const templateDetails = await Promise.all(templates.map((template) =>
+    templateRuntime.service.get({ workspaceId: workspace.id, templateId: template.id }),
+  ));
   const supportSender = senders.find((sender) => sender.fromEmail.toLowerCase() === "support@sikhadenge.in");
   const supportConnection = supportSender
     ? connections.find((connection) => connection.id === supportSender.connectionId)
@@ -42,6 +48,29 @@ async function main() {
   const resourcesComplete = templates.length === EXPECTED && flows.length === EXPECTED;
   const approvedTemplates = templates.filter((template) => template.status === "APPROVED" && template.approvedAt).length;
   const draftFlows = flows.filter((flow) => flow.status === "DRAFT").length;
+  const flowChecks = LIFECYCLE_EMAIL_DEFINITIONS.map((definition) => {
+    const template = templateDetails.find((item) => item.name === definition.name);
+    const version = template?.versions.find((item) => item.version === template.currentVersion);
+    const flow = flows.find((item) => item.name === definition.name);
+    const sendNodes = flow?.nodes.filter((node) => node.kind === "ACTION" && node.type === "SEND_EMAIL") ?? [];
+    const send = sendNodes[0];
+    const unsubscribeValid = definition.purpose !== "MARKETING" || Boolean(
+      version?.document.variables.some((variable) => variable.key === "unsubscribe_url" && variable.required)
+      && version?.document.blocks.some((block) => block.type === "BUTTON" && block.url.includes("{{unsubscribe_url}}")),
+    );
+    return {
+      name: definition.name,
+      flowDraft: flow?.status === "DRAFT",
+      approvedCurrentVersion: Boolean(version?.approvedAt && template?.status === "APPROVED"),
+      singleSendAction: sendNodes.length === 1,
+      templatePinValid: send?.config.templateId === template?.id && send?.config.templateVersionId === version?.id,
+      senderPinValid: Boolean(supportSender && send?.config.senderIdentityId === supportSender.id),
+      purposeValid: send?.config.emailPurpose === definition.purpose,
+      unsubscribeValid,
+    };
+  });
+  const flowPinsValid = flowChecks.every((check) => check.flowDraft && check.approvedCurrentVersion && check.singleSendAction && check.templatePinValid && check.senderPinValid && check.purposeValid);
+  const marketingUnsubscribeValid = flowChecks.every((check) => check.unsubscribeValid);
 
   const blockers: string[] = [];
   if (!safeRuntime) blockers.push("runtime_not_safe_dry_run");
@@ -50,8 +79,11 @@ async function main() {
   if (!supportDefault) blockers.push("support_sender_not_workspace_default");
   if (!resourcesComplete) blockers.push("lifecycle_resources_incomplete");
   if (approvedTemplates !== EXPECTED) blockers.push("lifecycle_templates_not_approved");
+  if (draftFlows !== EXPECTED) blockers.push("lifecycle_flows_not_all_draft");
+  if (!flowPinsValid) blockers.push("lifecycle_flow_pins_invalid");
+  if (!marketingUnsubscribeValid) blockers.push("lifecycle_marketing_unsubscribe_invalid");
   const internalTestReady = safeRuntime && supportConnected && supportVerified && supportDefault && resourcesComplete;
-  const lifecycleActivationReady = internalTestReady && approvedTemplates === EXPECTED;
+  const lifecycleActivationReady = internalTestReady && approvedTemplates === EXPECTED && draftFlows === EXPECTED && flowPinsValid && marketingUnsubscribeValid;
   const result = {
     workspaceId: workspace.id,
     connectedEmailConnections: connections.filter((connection) => connection.status === "CONNECTED").length,
@@ -71,6 +103,9 @@ async function main() {
       totalFlows: flows.length,
       approvedTemplates,
       draftFlows,
+      flowPinsValid,
+      marketingUnsubscribeValid,
+      flowChecks,
     },
     internalTestReady,
     lifecycleActivationReady,
