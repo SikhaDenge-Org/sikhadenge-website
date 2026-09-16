@@ -69,6 +69,12 @@
     transition: transform 180ms ease, opacity 150ms ease, visibility 0s !important;
   }
 
+  /* While Lead Intelligence is open, the composer is behind the drawer/backdrop. */
+  .sx-inbox.sx-details-open .sx-workspace-v22 .sx-composer {
+    z-index: 0 !important;
+    pointer-events: none !important;
+  }
+
   .sx-inbox .sx-workspace-v22 > .sx-details-backdrop {
     display: none !important;
   }
@@ -102,36 +108,9 @@
     padding-bottom: max(14px, env(safe-area-inset-bottom)) !important;
   }
 
-  /* Inbox owns its mobile navigation; the generic V19 module rule must not
-   * hide this route's bottom bar. Keep the release-contract destinations. */
+  /* Inbox mobile navigation keeps the established enterprise-final five-tab lane model. */
   body .sx-inbox > .sx-side {
     display: flex !important;
-  }
-
-  body .sx-inbox .sx-side-scroll > .sx-nav > .rail-button:nth-child(n + 4) {
-    display: none !important;
-  }
-
-  body .sx-inbox .sx-side-scroll > .sx-side-group {
-    display: block !important;
-    flex: 1 1 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    border: 0 !important;
-  }
-
-  body .sx-inbox .sx-side-scroll > .sx-side-group > .sx-nav > .rail-button:not(:first-child) {
-    display: none !important;
-  }
-
-  body .sx-inbox .sx-side-scroll > .sx-nav {
-    flex: 3 1 0 !important;
-  }
-
-  body .sx-inbox .sx-side-scroll > .sx-side-group > .sx-nav,
-  body .sx-inbox .sx-side-foot {
-    flex: 1 1 0 !important;
-    min-width: 0 !important;
   }
 }
 
