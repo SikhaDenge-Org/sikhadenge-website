@@ -102,7 +102,7 @@ export async function processWebhookAgentBridge(
       if (shouldShowTyping) {
         let acknowledgedAt = Date.now();
         try {
-          const indicator = await showWhatsAppTypingIndicator(event.message.id);
+          const indicator = await showWhatsAppTypingIndicator(event.message.id, stored.id);
           acknowledgedAt = indicator.acknowledgedAt;
         } catch (error) {
           const message =

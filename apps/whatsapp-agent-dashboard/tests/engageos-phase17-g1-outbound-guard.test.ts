@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 
 import { sendMetaWhatsAppMessage } from "../lib/meta/outbound-client";
 import type { PreparedMetaMessage } from "../lib/outbound/types";
@@ -293,6 +295,15 @@ async function testProviderBoundaryRejectsBeforeNetworkIo() {
   }
 }
 
+function testTypingIndicatorCannotBypassPersistedGovernance() {
+  const typingSource = fs.readFileSync(path.join(process.cwd(), "lib/meta/typing-indicator.ts"), "utf8");
+  const bridgeSource = fs.readFileSync(path.join(process.cwd(), "lib/agent/webhook-agent-bridge.ts"), "utf8");
+  assert.match(typingSource, /assertControlledLaunchExternalWriteAllowed/);
+  assert.match(typingSource, /readLegacyWhatsAppMappingMetadata/);
+  assert.match(typingSource, /config\.phoneNumberId/);
+  assert.match(bridgeSource, /showWhatsAppTypingIndicator\(event\.message\.id, stored\.id\)/);
+}
+
 async function main() {
   testMissingStateFailsClosed();
   testShadowFailsClosed();
@@ -309,6 +320,7 @@ async function main() {
   testProviderConnectionBinding();
   testProviderRecipientBinding();
   await testProviderBoundaryRejectsBeforeNetworkIo();
+  testTypingIndicatorCannotBypassPersistedGovernance();
 
   console.log("EngageOS Phase17-G1 controlled-launch outbound guard: PASS");
 }

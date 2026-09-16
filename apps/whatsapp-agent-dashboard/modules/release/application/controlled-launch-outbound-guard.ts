@@ -49,6 +49,13 @@ export type ControlledLaunchOutboundAuthorization = {
   maxRealLeads: number;
 };
 
+export type ControlledLaunchExternalWriteContext = {
+  workspaceId: string;
+  connectionId: string;
+  channel: "WHATSAPP";
+  action: "OUTBOUND_QUEUED";
+};
+
 export type ControlledLaunchOutboundDecision =
   | { allowed: true }
   | {
@@ -231,6 +238,33 @@ export function assertWhatsAppProviderRecipientBinding(
     );
   }
 }
+export async function assertControlledLaunchExternalWriteAllowed(
+  context: ControlledLaunchExternalWriteContext,
+  phoneNumberId: string,
+): Promise<ControlledLaunchOutboundAuthorization> {
+  try {
+    if (!context.workspaceId.trim() || !context.connectionId.trim() || context.channel !== "WHATSAPP" || context.action !== "OUTBOUND_QUEUED") {
+      throw new ControlledLaunchOutboundDeniedError("CONTROLLED_LAUNCH_GOVERNANCE_INVALID", "External-write controlled-launch context is invalid.");
+    }
+    const outboundContext: ControlledLaunchOutboundContext = { ...context, messageId: "external-signal", recipientKey: "external-signal" };
+    assertWhatsAppProviderConnectionBinding(outboundContext, phoneNumberId);
+    const [state, connection, killSwitchRecords] = await Promise.all([
+      prismaControlledLaunchStateRepository.getState(context.workspaceId),
+      prisma.engageChannelConnection.findFirst({ where: { id: context.connectionId, workspaceId: context.workspaceId, channel: "WHATSAPP", status: { in: ["CONNECTED", "DEGRADED"] } }, select: { id: true } }),
+      prisma.engageKillSwitch.findMany({ where: { workspaceId: context.workspaceId, active: true, deactivatedAt: null, OR: [{ scopeType: "WORKSPACE" }, { scopeType: "CHANNEL", channel: "WHATSAPP" }, { scopeType: "CONNECTION", connectionId: context.connectionId }] }, select: { id: true, workspaceId: true, scopeType: true, channel: true, connectionId: true, blockedActions: true, reason: true } }),
+    ]);
+    if (!connection) throw new ControlledLaunchOutboundDeniedError("CONTROLLED_LAUNCH_CONNECTION_NOT_ACTIVE", "The persisted WhatsApp connection is not active for this workspace.");
+    const killSwitches: ControlledLaunchKillSwitchSnapshot[] = killSwitchRecords.map((record) => ({ id: record.id, workspaceId: record.workspaceId, scopeType: record.scopeType, channel: record.channel, connectionId: record.connectionId, blockedActions: parseBlockedActions(record.blockedActions, record.id), reason: record.reason }));
+    const decision = evaluateControlledLaunchOutbound({ context: outboundContext, state, killSwitches, approvalVerified: true, boundedScopeVerified: true, approvedFlowVerified: true });
+    if (!decision.allowed) throw new ControlledLaunchOutboundDeniedError(decision.code, decision.reason);
+    if (!state) throw new ControlledLaunchOutboundDeniedError("CONTROLLED_LAUNCH_STATE_MISSING", "Persisted controlled launch state is missing.");
+    return { writePolicy: state.writePolicy, stateVersion: state.version, maxRealLeads: state.scope.maxRealLeads };
+  } catch (error) {
+    if (error instanceof ControlledLaunchOutboundDeniedError) throw error;
+    throw new ControlledLaunchOutboundDeniedError("CONTROLLED_LAUNCH_GOVERNANCE_UNAVAILABLE", `Persisted external-write governance could not be verified: ${error instanceof Error ? error.message : "unknown error"}`);
+  }
+}
+
 export async function assertControlledLaunchOutboundAllowed(
   context: ControlledLaunchOutboundContext,
 ): Promise<ControlledLaunchOutboundAuthorization> {
