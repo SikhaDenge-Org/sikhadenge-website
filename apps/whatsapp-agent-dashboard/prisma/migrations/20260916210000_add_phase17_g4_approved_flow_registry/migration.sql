@@ -1,4 +1,4 @@
-﻿CREATE TABLE "EngageControlledLaunchApprovedFlow" (
+CREATE TABLE "EngageControlledLaunchApprovedFlow" (
   "id" TEXT NOT NULL,
   "workspaceId" TEXT NOT NULL,
   "connectionId" TEXT NOT NULL,

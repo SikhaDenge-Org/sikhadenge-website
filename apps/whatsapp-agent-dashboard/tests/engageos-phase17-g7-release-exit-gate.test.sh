@@ -23,6 +23,8 @@ migrations=(
 previous_line=0
 for migration in "${migrations[@]}"; do
   test -d "prisma/migrations/$migration"
+  first_hex="$(od -An -tx1 -N3 "prisma/migrations/$migration/migration.sql" | tr -d " \n")"
+  test "$first_hex" != "efbbbf"
   grep -Fq "$migration" "$gate"
   line="$(grep -nF "$migration" "$gate" | head -n1 | cut -d: -f1)"
   test "$line" -gt "$previous_line"
