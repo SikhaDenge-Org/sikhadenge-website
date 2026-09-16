@@ -18,6 +18,7 @@ import {
   syncTemplatesFromMeta,
 } from "../templates/template-service";
 import { sha256Hex } from "../meta/signature";
+import { enqueueEmailAutomationEvent } from "../../modules/email-automation/automation/event-outbox";
 
 const CONFIG_EVENT_KEY = "masterclass-two-step:config";
 const CONFIG_EVENT_TYPE = "masterclass_two_step_config";
@@ -1149,7 +1150,7 @@ export async function registerMasterclassLead(input: {
       });
     }
 
-    await transaction.lead.upsert({
+    const lead = await transaction.lead.upsert({
       where: { contactId: contact.id },
       create: {
         contactId: contact.id,
@@ -1161,7 +1162,22 @@ export async function registerMasterclassLead(input: {
       },
     });
 
-    return { contactId: contact.id, conversationId: conversation.id };
+    const emailWorkspace = await transaction.engageWorkspace.findUnique({
+      where: { slug: "sikhadenge-default" },
+      select: { id: true, isActive: true },
+    });
+    if (emailWorkspace?.isActive) {
+      await enqueueEmailAutomationEvent(transaction, {
+        workspaceId: emailWorkspace.id,
+        sourceEventId: `masterclass-registration:${registrationId}`,
+        trigger: "FORM_SUBMITTED",
+        relatedTriggers: existing ? [] : ["NEW_LEAD"],
+        contactId: contact.id,
+        leadId: lead.id,
+        payload: { registrationId, source, formKind: "MASTERCLASS_REGISTRATION", name, email, city },
+      });
+    }
+    return { contactId: contact.id, conversationId: conversation.id, leadId: lead.id };
   });
 
   const enrolled = await enrollMasterclassContact({

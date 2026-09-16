@@ -9,6 +9,10 @@ const FORM_EVENT = "engagement_form";
 const SUBMISSION_EVENT = "engagement_submission";
 const APPOINTMENT_EVENT = "engagement_appointment";
 const PAYMENT_EVENT = "engagement_payment";
+const FORM_ABANDON_AFTER_MINUTES = 20;
+const PAYMENT_ABANDON_AFTER_MINUTES = 30;
+
+function minutesFromNow(minutes: number) { return new Date(Date.now() + minutes * 60_000); }
 
 export type EngagementField = {
   id: string;
@@ -334,6 +338,27 @@ export async function createEngagementForm(input: {
   return form;
 }
 
+export async function recordFormStarted(input: {
+  formId: unknown; contactId: unknown; sessionId: unknown; source?: unknown; actorId: string;
+}) {
+  const formId = clean(input.formId, 80); const contactId = clean(input.contactId, 100); const sessionId = clean(input.sessionId, 120);
+  if (!formId || !contactId || !sessionId) throw new Error("Form lifecycle identifiers are required.");
+  const [formEvent, contact, emailWorkspaceId] = await Promise.all([
+    prisma.webhookEvent.findUnique({ where: { eventKey: `engagement-form:${formId}` } }),
+    prisma.whatsAppContact.findUnique({ where: { id: contactId }, select: { id: true, email: true } }),
+    findActorEmailWorkspaceId(input.actorId),
+  ]);
+  const form = formEvent ? parseForm(formEvent.payload) : null; if (!form || !contact) throw new Error("Form session context is invalid.");
+  if (!emailWorkspaceId) return { tracked: false, reason: "EMAIL_WORKSPACE_NOT_FOUND" };
+  const source = clean(input.source, 100) || "Website";
+  return prisma.$transaction(async (tx) => {
+    await enqueueEmailAutomationEvent(tx,{workspaceId:emailWorkspaceId,sourceEventId:`engagement-form-start:${formId}:${sessionId}`,trigger:"FORM_STARTED",contactId,payload:{formId,sessionId,source,email:contact.email}});
+    const recovery=await enqueueEmailAutomationEvent(tx,{workspaceId:emailWorkspaceId,sourceEventId:`engagement-form-abandon:${formId}:${sessionId}`,trigger:"FORM_ABANDONED",contactId,availableAt:minutesFromNow(FORM_ABANDON_AFTER_MINUTES),payload:{formId,sessionId,source,email:contact.email,abandonAfterMinutes:FORM_ABANDON_AFTER_MINUTES}});
+    await tx.auditLog.create({data:{actorId:input.actorId,action:"ENGAGEMENT_FORM_STARTED",entityType:"EngagementFormSession",entityId:sessionId,after:toJson({formId,contactId,source,recoveryEventId:recovery.id})}});
+    return { tracked:true, recoveryEventId:recovery.id, availableAt:recovery.availableAt };
+  });
+}
+
 export async function createFormSubmission(input: {
   formId: unknown;
   contactId?: unknown;
@@ -378,6 +403,7 @@ export async function createFormSubmission(input: {
       },
     });
     if (emailWorkspaceId) {
+      if (submission.contactId) await supersedePendingEmailAutomationEvents(tx,{workspaceId:emailWorkspaceId,trigger:"FORM_ABANDONED",contactId:submission.contactId,sourceEventIdPrefix:`engagement-form-abandon:${formId}:`});
       await enqueueEmailAutomationEvent(tx, {
         workspaceId: emailWorkspaceId,
         sourceEventId: `engagement-submission:${submission.id}`,
@@ -597,13 +623,10 @@ export async function createPaymentRecord(input: {
       },
     });
     if (emailWorkspaceId && payment.contactId && (status === "PENDING" || status === "PAID")) {
-      await enqueueEmailAutomationEvent(tx, {
-        workspaceId: emailWorkspaceId,
-        sourceEventId: `engagement-payment:${payment.id}:created`,
-        trigger: status === "PAID" ? "PAYMENT_PAID" : "PAYMENT_PENDING",
-        contactId: payment.contactId,
-        payload: { paymentId: payment.id, reference: payment.reference, amountMinor: payment.amountMinor, currency: payment.currency, status: payment.status, provider: payment.provider },
-      });
+      if(status === "PAID") await supersedePendingEmailAutomationEvents(tx,{workspaceId:emailWorkspaceId,trigger:"PAYMENT_ABANDONED",contactId:payment.contactId});
+      if(status === "PENDING") await enqueueEmailAutomationEvent(tx,{workspaceId:emailWorkspaceId,sourceEventId:`engagement-checkout:${payment.id}:created`,trigger:"CHECKOUT_STARTED",contactId:payment.contactId,payload:{paymentId:payment.id,reference:payment.reference,course:payment.course,amountMinor:payment.amountMinor,currency:payment.currency,provider:payment.provider}});
+      await enqueueEmailAutomationEvent(tx,{workspaceId:emailWorkspaceId,sourceEventId:`engagement-payment:${payment.id}:created`,trigger:status === "PAID" ? "PAYMENT_PAID" : "PAYMENT_PENDING",contactId:payment.contactId,payload:{paymentId:payment.id,reference:payment.reference,course:payment.course,amountMinor:payment.amountMinor,currency:payment.currency,status:payment.status,provider:payment.provider}});
+      if(status === "PENDING") await enqueueEmailAutomationEvent(tx,{workspaceId:emailWorkspaceId,sourceEventId:`engagement-payment-abandon:${payment.id}`,trigger:"PAYMENT_ABANDONED",contactId:payment.contactId,availableAt:minutesFromNow(PAYMENT_ABANDON_AFTER_MINUTES),payload:{paymentId:payment.id,reference:payment.reference,course:payment.course,amountMinor:payment.amountMinor,currency:payment.currency,provider:payment.provider,abandonAfterMinutes:PAYMENT_ABANDON_AFTER_MINUTES}});
     }
   });
   return payment;
@@ -644,13 +667,9 @@ export async function updatePaymentRecord(input: {
       },
     });
     if (emailWorkspaceId && payment.contactId && (status === "PENDING" || status === "PAID")) {
-      await enqueueEmailAutomationEvent(tx, {
-        workspaceId: emailWorkspaceId,
-        sourceEventId: `engagement-payment:${payment.id}:status:${payment.updatedAt}:${status}`,
-        trigger: status === "PAID" ? "PAYMENT_PAID" : "PAYMENT_PENDING",
-        contactId: payment.contactId,
-        payload: { paymentId: payment.id, reference: payment.reference, amountMinor: payment.amountMinor, currency: payment.currency, previousStatus: payment.status, status, provider: payment.provider, providerPaymentId: updated.providerPaymentId },
-      });
+      if(status === "PAID") await supersedePendingEmailAutomationEvents(tx,{workspaceId:emailWorkspaceId,trigger:"PAYMENT_ABANDONED",contactId:payment.contactId});
+      await enqueueEmailAutomationEvent(tx,{workspaceId:emailWorkspaceId,sourceEventId:`engagement-payment:${payment.id}:status:${payment.updatedAt}:${status}`,trigger:status === "PAID" ? "PAYMENT_PAID" : "PAYMENT_PENDING",contactId:payment.contactId,payload:{paymentId:payment.id,reference:payment.reference,course:payment.course,amountMinor:payment.amountMinor,currency:payment.currency,previousStatus:payment.status,status,provider:payment.provider,providerPaymentId:updated.providerPaymentId}});
+      if(status === "PENDING") await enqueueEmailAutomationEvent(tx,{workspaceId:emailWorkspaceId,sourceEventId:`engagement-payment-abandon:${payment.id}:${updated.updatedAt}`,trigger:"PAYMENT_ABANDONED",contactId:payment.contactId,availableAt:minutesFromNow(PAYMENT_ABANDON_AFTER_MINUTES),payload:{paymentId:payment.id,reference:payment.reference,course:payment.course,amountMinor:payment.amountMinor,currency:payment.currency,provider:payment.provider,abandonAfterMinutes:PAYMENT_ABANDON_AFTER_MINUTES}});
     }
   });
   return updated;
