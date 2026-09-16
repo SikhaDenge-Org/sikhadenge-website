@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import ApprovedFlowGovernancePanel from "./ApprovedFlowGovernancePanel";
+
 type ApprovalCandidate = {
   messageId: string;
   type: string;
@@ -281,6 +283,8 @@ export default function CutoverReadinessManager() {
           </button>
         </div>
       </section>
+
+      <ApprovedFlowGovernancePanel />
 
       <div className={`suite-alert ${data.cutoverExecuted ? "success" : "warning"}`}>
         {data.cutoverExecuted
