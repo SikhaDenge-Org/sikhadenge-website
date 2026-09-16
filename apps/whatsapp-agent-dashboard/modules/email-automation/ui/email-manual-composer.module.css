@@ -8,3 +8,5 @@
 .deliverySafety{display:flex;align-items:center;gap:8px;padding:10px 13px;border:1px solid #cfeedd;border-radius:11px;background:#effbf5;color:#19704f;font-size:9px}.deliverySafety span{color:#6d8a7f}
 @media(max-width:1100px){.workspace{grid-template-columns:1fr}.sideColumn{grid-template-columns:1fr}.summaryGrid{grid-template-columns:1fr 1fr}}
 @media(max-width:700px){.summaryGrid,.twoCol,.sideGrid{grid-template-columns:1fr}.actions{align-items:stretch;flex-direction:column}.actions code{max-width:100%}.actions button{width:100%}.mailPreview{padding:18px}}
+
+.summaryIcon{background:#edf5ff!important;color:#1d6ef4!important}
