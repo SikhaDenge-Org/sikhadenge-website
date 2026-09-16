@@ -34,12 +34,12 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: whatsapp-agent-production
-  cancel-in-progress: false
 
 jobs:
   production-batch-1:
+    concurrency:
+      group: whatsapp-agent-production
+      cancel-in-progress: false
     if: >-
       (github.event_name == 'workflow_dispatch' && inputs.execute == true) ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[production-batch1]'))

@@ -8,12 +8,12 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: whatsapp-agent-production
-  cancel-in-progress: false
 
 jobs:
   email-dryrun-activation:
+    concurrency:
+      group: whatsapp-agent-production
+      cancel-in-progress: false
     if: contains(github.event.head_commit.message, '[email-dryrun-activate]')
     runs-on: ubuntu-latest
     timeout-minutes: 20

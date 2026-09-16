@@ -8,12 +8,12 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: whatsapp-agent-email-internal-test
-  cancel-in-progress: false
 
 jobs:
   email-internal-test:
+    concurrency:
+      group: whatsapp-agent-production
+      cancel-in-progress: false
     if: contains(github.event.head_commit.message, '[email-internal-test]')
     runs-on: ubuntu-latest
     timeout-minutes: 20
