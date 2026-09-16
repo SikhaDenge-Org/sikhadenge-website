@@ -222,10 +222,11 @@ function ChannelGlyph({ channel, size = 16 }: { channel: ChannelId; size?: numbe
   }
 }
 
-function ChannelLink({ channel }: { channel: ChannelItem }) {
+function ChannelLink({ channel, selected }: { channel: ChannelItem; selected?: boolean }) {
+  const stateClass = selected ? "is-active" : channel.connected ? (selected === false ? "is-connected" : "is-active") : "is-pending";
   return (
     <Link
-      className={`sx-chan ${channel.connected ? "is-active" : "is-pending"}`}
+      className={`sx-chan ${stateClass}`}
       href={channel.href}
       aria-label={channel.connected ? `${channel.label} connected` : `Connect ${channel.label}`}
     >
@@ -249,6 +250,7 @@ export default function DashboardModuleShell({
   userRole,
   children,
 }: DashboardModuleShellProps) {
+  const isEmailWorkspace = eyebrow.toLowerCase().startsWith("email");
   const initials = userName
     .split(/\s+/)
     .slice(0, 2)
@@ -290,8 +292,8 @@ export default function DashboardModuleShell({
             <div className="sx-channels-list">
               {channels.map((channel) => (
                 channel.id === "email"
-                  ? <EmailChannelLink key={channel.id} />
-                  : <ChannelLink key={channel.id} channel={channel} />
+                  ? <EmailChannelLink key={channel.id} selected={isEmailWorkspace} />
+                  : <ChannelLink key={channel.id} channel={channel} selected={isEmailWorkspace ? false : undefined} />
               ))}
             </div>
           </div>
