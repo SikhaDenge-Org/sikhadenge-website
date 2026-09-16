@@ -21,6 +21,8 @@ assert.match(repository, /chronologicalMessages[\s\S]*\.reverse\(\)/);
 assert.doesNotMatch(repository, /orderBy: \{ messageTimestamp: "asc" \}[\s\S]*take: 200/);
 
 assert.match(inbox, /detailRequestSeqRef/);
+assert.match(inbox, /loadingConversationSeqRef/);
+assert.match(inbox, /loadingSeq === loadingConversationSeqRef\.current/);
 assert.match(inbox, /selectedIdRef\.current !== conversationId/);
 assert.match(inbox, /requestSeq === detailRequestSeqRef\.current/);
 assert.match(inbox, /selectedIdRef\.current === activeId/);
