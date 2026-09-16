@@ -7,7 +7,7 @@ type EmailState = {
   connections?: Array<{ status?: string }>;
 };
 
-export default function EmailChannelLink() {
+export default function EmailChannelLink({ selected = false }: { selected?: boolean }) {
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
@@ -33,7 +33,7 @@ export default function EmailChannelLink() {
 
   return (
     <Link
-      className={`sx-chan ${connected ? "is-active" : "is-pending"}`}
+      className={`sx-chan ${selected ? "is-active" : connected ? "is-connected" : "is-pending"}`}
       href="/email"
       aria-label={connected ? "Email connected" : "Connect Email"}
     >
