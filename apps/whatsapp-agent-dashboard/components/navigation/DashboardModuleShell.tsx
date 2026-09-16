@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import LogoutButton from "../auth/LogoutButton";
 import CoreWorkflowShortcuts from "./CoreWorkflowShortcuts";
+import EmailChannelLink from "./EmailChannelLink";
 import MetaConnectionStatus from "./MetaConnectionStatus";
 import SidebarMenuIcon, { type SidebarMenuTitle } from "./SidebarMenuIcon";
 
@@ -288,7 +289,9 @@ export default function DashboardModuleShell({
             <p className="sx-side-label">Channels</p>
             <div className="sx-channels-list">
               {channels.map((channel) => (
-                <ChannelLink key={channel.id} channel={channel} />
+                channel.id === "email"
+                  ? <EmailChannelLink key={channel.id} />
+                  : <ChannelLink key={channel.id} channel={channel} />
               ))}
             </div>
           </div>
