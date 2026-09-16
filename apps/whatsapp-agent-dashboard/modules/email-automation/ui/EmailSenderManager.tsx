@@ -1,369 +1,117 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-
 import styles from "./email-sender-manager.module.css";
 
 type Connection = {
-  id: string;
-  workspaceId: string;
-  provider: string;
-  displayName: string;
-  externalAccountId: string | null;
-  status: string;
-  connectedAt: string | null;
-  lastVerifiedAt: string | null;
-  revokedAt: string | null;
+  id:string; workspaceId:string; provider:string; displayName:string; externalAccountId:string|null;
+  status:string; connectedAt:string|null; lastVerifiedAt:string|null; revokedAt:string|null;
 };
-
 type Sender = {
-  id: string;
-  workspaceId: string;
-  connectionId: string;
-  provider: string;
-  fromName: string;
-  fromEmail: string;
-  replyToEmail: string | null;
-  verificationStatus: string;
-  isProviderDefault: boolean;
-  isWorkspaceDefault: boolean;
-  isActive: boolean;
-  dailyLimit: number | null;
+  id:string; workspaceId:string; connectionId:string; provider:string; fromName:string; fromEmail:string;
+  replyToEmail:string|null; verificationStatus:string; isProviderDefault:boolean; isWorkspaceDefault:boolean;
+  isActive:boolean; dailyLimit:number|null;
 };
+type EmailState = { workspace:{id:string;slug:string}; connections:Connection[]; senders:Sender[] };
+type ActionState = { key:string; message:string; kind:"working"|"success"|"error" } | null;
 
-type EmailState = {
-  workspace: { id: string; slug: string };
-  connections: Connection[];
-  senders: Sender[];
-};
-
-type ActionState = {
-  key: string;
-  message: string;
-  kind: "working" | "success" | "error";
-} | null;
-
-async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      ...(init?.body ? { "content-type": "application/json" } : {}),
-      ...init?.headers,
-    },
-    cache: "no-store",
-  });
-  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!response.ok) {
-    throw new Error(
-      typeof payload.error === "string" ? payload.error : `Request failed (${response.status}).`,
-    );
-  }
+async function apiJson<T>(url:string,init?:RequestInit):Promise<T>{
+  const response=await fetch(url,{...init,headers:{...(init?.body?{"content-type":"application/json"}:{}),...init?.headers},cache:"no-store"});
+  const payload=(await response.json().catch(()=>({}))) as Record<string,unknown>;
+  if(!response.ok)throw new Error(typeof payload.error==="string"?payload.error:`Request failed (${response.status}).`);
   return payload as T;
 }
+function providerLabel(provider:string){return provider==="GOOGLE_GMAIL"?"Google Workspace":provider==="MICROSOFT_365"?"Microsoft 365":provider.replaceAll("_"," ");}
+function compactDate(value:string|null){if(!value)return "Not available";const d=new Date(value);return Number.isNaN(d.getTime())?"Not available":new Intl.DateTimeFormat(undefined,{dateStyle:"medium",timeStyle:"short"}).format(d);}
+function relativeDate(value:string|null){if(!value)return "Not yet";const t=new Date(value).getTime();if(Number.isNaN(t))return "Not yet";const ms=Date.now()-t;if(ms<60000)return "Just now";if(ms<3600000)return `${Math.floor(ms/60000)}m ago`;if(ms<86400000)return `${Math.floor(ms/3600000)}h ago`;return `${Math.floor(ms/86400000)}d ago`;}
 
-function providerLabel(provider: string): string {
-  switch (provider) {
-    case "GOOGLE_GMAIL":
-      return "Google Workspace / Gmail";
-    case "MICROSOFT_365":
-      return "Microsoft 365";
-    default:
-      return provider.replaceAll("_", " ");
-  }
-}
+export default function EmailSenderManager(){
+  const [state,setState]=useState<EmailState|null>(null);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState<string|null>(null);
+  const [action,setAction]=useState<ActionState>(null);
 
-function statusClass(status: string): string {
-  if (status === "CONNECTED" || status === "VERIFIED") return styles.good;
-  if (status === "PENDING") return styles.warn;
-  return styles.bad;
-}
+  const load=useCallback(async()=>{try{setError(null);setState(await apiJson<EmailState>("/api/email/connections"));}catch(e){setError(e instanceof Error?e.message:"Email state could not be loaded.");}finally{setLoading(false);}},[]);
+  useEffect(()=>{void load();},[load]);
 
-function compactDate(value: string | null): string {
-  if (!value) return "Not verified yet";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Not verified yet";
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
-}
+  const activeConnections=useMemo(()=>state?.connections.filter(c=>c.status!=="REVOKED")??[],[state]);
+  const verifiedSenders=useMemo(()=>state?.senders.filter(s=>s.verificationStatus==="VERIFIED"&&s.isActive)??[],[state]);
+  const workspaceDefault=useMemo(()=>verifiedSenders.find(s=>s.isWorkspaceDefault)??null,[verifiedSenders]);
+  const primaryConnection=activeConnections[0]??null;
+  const primarySenders=primaryConnection?state?.senders.filter(s=>s.connectionId===primaryConnection.id)??[]:[];
 
-export default function EmailSenderManager() {
-  const [state, setState] = useState<EmailState | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [action, setAction] = useState<ActionState>(null);
+  async function connectGoogle(){try{setAction({key:"connect",message:"Preparing secure Google connection…",kind:"working"});const result=await apiJson<{authorizationUrl:string}>("/api/email/google/connect",{method:"POST"});window.location.assign(result.authorizationUrl);}catch(e){setAction({key:"connect",message:e instanceof Error?e.message:"Google connection could not start.",kind:"error"});}}
+  async function refreshConnection(id:string){try{setAction({key:`refresh:${id}`,message:"Refreshing sender identities…",kind:"working"});await apiJson(`/api/email/connections/${encodeURIComponent(id)}/refresh`,{method:"POST"});await load();setAction({key:`refresh:${id}`,message:"Sender identities refreshed.",kind:"success"});}catch(e){setAction({key:`refresh:${id}`,message:e instanceof Error?e.message:"Sender refresh failed.",kind:"error"});}}
+  async function chooseDefault(id:string){try{setAction({key:`default:${id}`,message:"Updating workspace default…",kind:"working"});await apiJson("/api/email/senders/default",{method:"POST",body:JSON.stringify({senderIdentityId:id})});await load();setAction({key:`default:${id}`,message:"Workspace default sender updated.",kind:"success"});}catch(e){setAction({key:`default:${id}`,message:e instanceof Error?e.message:"Default sender update failed.",kind:"error"});}}
+  async function disconnect(connection:Connection){if(!window.confirm(`Disconnect ${connection.displayName}? Stored OAuth credentials will be revoked.`))return;try{setAction({key:`revoke:${connection.id}`,message:"Revoking Google access…",kind:"working"});await apiJson(`/api/email/connections/${encodeURIComponent(connection.id)}`,{method:"DELETE"});await load();setAction({key:`revoke:${connection.id}`,message:"Email account disconnected.",kind:"success"});}catch(e){setAction({key:`revoke:${connection.id}`,message:e instanceof Error?e.message:"Email account could not be disconnected.",kind:"error"});}}
 
-  const load = useCallback(async () => {
-    try {
-      setError(null);
-      const next = await apiJson<EmailState>("/api/email/connections");
-      setState(next);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Email state could not be loaded.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  if(loading)return <div className={styles.loading}>Loading Email Accounts…</div>;
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  return <section className={styles.root} aria-label="Email Accounts workspace">
+    <div className={styles.statusRail}>
+      <span className={activeConnections.length?styles.connectedPill:styles.neutralPill}>● {activeConnections.length?"Connected":"Not connected"}</span>
+      <span className={styles.protectedPill}>🛡 Protected OAuth</span>
+      <button className={styles.primaryButton} type="button" onClick={()=>void connectGoogle()}><span className={styles.googleMark}>G</span>{activeConnections.length?"Add another account":"Connect Google account"}</button>
+    </div>
 
-  const activeConnections = useMemo(
-    () => state?.connections.filter((connection) => connection.status !== "REVOKED") ?? [],
-    [state],
-  );
-  const verifiedSenders = useMemo(
-    () => state?.senders.filter((sender) => sender.verificationStatus === "VERIFIED" && sender.isActive) ?? [],
-    [state],
-  );
-  const workspaceDefault = useMemo(
-    () => verifiedSenders.find((sender) => sender.isWorkspaceDefault) ?? null,
-    [verifiedSenders],
-  );
+    {error?<div className={styles.errorBanner}>{error}</div>:null}
+    {action?<div className={`${styles.actionBanner} ${styles[action.kind]}`}>{action.message}</div>:null}
 
-  async function connectGoogle() {
-    try {
-      setAction({ key: "connect", message: "Preparing secure Google connection…", kind: "working" });
-      const result = await apiJson<{ authorizationUrl: string }>(
-        "/api/email/google/connect",
-        { method: "POST" },
-      );
-      window.location.assign(result.authorizationUrl);
-    } catch (caught) {
-      setAction({
-        key: "connect",
-        message: caught instanceof Error ? caught.message : "Google connection could not start.",
-        kind: "error",
-      });
-    }
-  }
-
-  async function refreshConnection(connectionId: string) {
-    try {
-      setAction({ key: `refresh:${connectionId}`, message: "Refreshing sender identities…", kind: "working" });
-      await apiJson(`/api/email/connections/${encodeURIComponent(connectionId)}/refresh`, {
-        method: "POST",
-      });
-      await load();
-      setAction({ key: `refresh:${connectionId}`, message: "Sender identities refreshed.", kind: "success" });
-    } catch (caught) {
-      setAction({
-        key: `refresh:${connectionId}`,
-        message: caught instanceof Error ? caught.message : "Sender refresh failed.",
-        kind: "error",
-      });
-    }
-  }
-
-  async function chooseDefault(senderIdentityId: string) {
-    try {
-      setAction({ key: `default:${senderIdentityId}`, message: "Updating workspace default…", kind: "working" });
-      await apiJson("/api/email/senders/default", {
-        method: "POST",
-        body: JSON.stringify({ senderIdentityId }),
-      });
-      await load();
-      setAction({ key: `default:${senderIdentityId}`, message: "Workspace default sender updated.", kind: "success" });
-    } catch (caught) {
-      setAction({
-        key: `default:${senderIdentityId}`,
-        message: caught instanceof Error ? caught.message : "Default sender update failed.",
-        kind: "error",
-      });
-    }
-  }
-
-  async function disconnect(connection: Connection) {
-    if (!window.confirm(`Disconnect ${connection.displayName}? Automated email remains disabled, and stored OAuth credentials will be revoked.`)) {
-      return;
-    }
-    try {
-      setAction({ key: `revoke:${connection.id}`, message: "Revoking Google access…", kind: "working" });
-      await apiJson(`/api/email/connections/${encodeURIComponent(connection.id)}`, {
-        method: "DELETE",
-      });
-      await load();
-      setAction({ key: `revoke:${connection.id}`, message: "Email account disconnected.", kind: "success" });
-    } catch (caught) {
-      setAction({
-        key: `revoke:${connection.id}`,
-        message: caught instanceof Error ? caught.message : "Email account could not be disconnected.",
-        kind: "error",
-      });
-    }
-  }
-
-  if (loading) {
-    return <div className={styles.loading}>Loading Email Automation control plane…</div>;
-  }
-
-  return (
-    <section className={styles.root} aria-label="Email Automation Control Center">
-      <div className={styles.hero}>
-        <div>
-          <span className={styles.kicker}>EMAIL AUTOMATION · E1</span>
-          <h2>Sender Control Center</h2>
-          <p>
-            Connect multiple Google Workspace accounts, discover verified send-as aliases,
-            and choose exactly one workspace default. Production email delivery remains locked.
-          </p>
-        </div>
-        <button className={styles.primaryButton} type="button" onClick={() => void connectGoogle()}>
-          <span className={styles.googleMark}>G</span>
-          Connect Google account
-        </button>
+    {primaryConnection ? <article className={styles.accountHero}>
+      <div className={styles.googleLogo}>G</div>
+      <div className={styles.accountIdentity}>
+        <div><strong>{workspaceDefault?.fromEmail??primaryConnection.displayName}</strong>{workspaceDefault?<span>Primary</span>:null}</div>
+        <p>{providerLabel(primaryConnection.provider)} · {state?.workspace.slug}</p>
+        <small>Connected {compactDate(primaryConnection.connectedAt)} · Last verified {relativeDate(primaryConnection.lastVerifiedAt)}</small>
       </div>
+      <div className={styles.accountHealth}><span>OAuth status</span><strong>{primaryConnection.status}</strong><small>Server-side protected connection</small></div>
+      <div className={styles.accountHealth}><span>Sender identities</span><strong>{primarySenders.length}</strong><small>Discovered from provider</small></div>
+      <button className={styles.iconButton} onClick={()=>void refreshConnection(primaryConnection.id)} disabled={action?.kind==="working"}>↻</button>
+    </article> : <div className={styles.emptyState}><div className={styles.emptyIcon}>@</div><h3>No email account connected</h3><p>Connect your Google Workspace account. OAuth tokens stay server-side and encrypted before persistence.</p><button className={styles.primaryButton} onClick={()=>void connectGoogle()}>Connect first account</button></div>}
 
-      {error ? <div className={styles.errorBanner}>{error}</div> : null}
-      {action ? (
-        <div className={`${styles.actionBanner} ${styles[action.kind]}`}>{action.message}</div>
-      ) : null}
+    <div className={styles.metrics}>
+      <article><span className={styles.metricIconBlue}>◎</span><div><small>Verified senders</small><strong>{verifiedSenders.length}</strong><p>Primary + aliases</p></div></article>
+      <article><span className={styles.metricIconBlue}>✉</span><div><small>Workspace default</small><strong className={styles.metricEmail}>{workspaceDefault?.fromEmail??"Not selected"}</strong><p>Templates & automations</p></div></article>
+      <article><span className={styles.metricIconGreen}>➤</span><div><small>Sender status</small><strong>{workspaceDefault?.verificationStatus??"Pending"}</strong><p>{workspaceDefault?.isActive?"Ready to use":"Requires verified sender"}</p></div></article>
+      <article><span className={styles.metricIconPurple}>◫</span><div><small>Provider connections</small><strong>{activeConnections.length}</strong><p>Real active connections</p></div></article>
+    </div>
 
-      <div className={styles.metrics}>
-        <article>
-          <span>Connected accounts</span>
-          <strong>{activeConnections.length}</strong>
-          <small>Multiple accounts supported</small>
-        </article>
-        <article>
-          <span>Verified senders</span>
-          <strong>{verifiedSenders.length}</strong>
-          <small>Primary addresses + aliases</small>
-        </article>
-        <article>
-          <span>Workspace default</span>
-          <strong className={styles.metricEmail}>{workspaceDefault?.fromEmail ?? "Not selected"}</strong>
-          <small>Fallback sender for templates and flows</small>
-        </article>
-        <article>
-          <span>External delivery</span>
-          <strong className={styles.locked}>LOCKED</strong>
-          <small>E3 controlled enablement required</small>
-        </article>
-      </div>
-
-      <div className={styles.sectionHeader}>
-        <div>
-          <span>CONNECTED ACCOUNTS</span>
-          <h3>Google Workspace connections</h3>
+    <div className={styles.mainGrid}>
+      <section className={styles.sendersCard}>
+        <div className={styles.cardHead}><div><h3>Senders & aliases</h3><p>Manage verified email identities discovered from connected providers.</p></div><button onClick={()=>void connectGoogle()}>+ Add account</button></div>
+        <div className={styles.senderTable}>
+          <div className={styles.tableHead}><span>EMAIL ADDRESS</span><span>TYPE</span><span>STATUS</span><span>ACTIONS</span></div>
+          {state?.senders.length?state.senders.map(sender=><div className={styles.senderTableRow} key={sender.id}>
+            <span><i>{sender.isWorkspaceDefault?"★":"✉"}</i><div><strong>{sender.fromEmail}</strong><small>{sender.fromName}</small></div>{sender.isWorkspaceDefault?<em>Default</em>:null}</span>
+            <span>{sender.isProviderDefault?"Primary":"Alias"}</span>
+            <span className={sender.verificationStatus==="VERIFIED"?styles.good:styles.warn}>● {sender.verificationStatus}</span>
+            <span>{!sender.isWorkspaceDefault&&sender.verificationStatus==="VERIFIED"&&sender.isActive?<button onClick={()=>void chooseDefault(sender.id)} disabled={action?.kind==="working"}>Set default</button>:<b>—</b>}</span>
+          </div>):<div className={styles.tableEmpty}>No sender identities discovered yet.</div>}
         </div>
-        <button className={styles.secondaryButton} type="button" onClick={() => void load()}>
-          Reload state
-        </button>
-      </div>
+      </section>
 
-      {activeConnections.length === 0 ? (
-        <div className={styles.emptyState}>
-          <div className={styles.emptyIcon}>@</div>
-          <h3>No email account connected</h3>
-          <p>
-            Connect the first Google Workspace account. OAuth tokens stay server-side and are
-            encrypted before persistence.
-          </p>
-          <button className={styles.primaryButton} type="button" onClick={() => void connectGoogle()}>
-            Connect first account
-          </button>
-        </div>
-      ) : (
-        <div className={styles.connectionGrid}>
-          {activeConnections.map((connection) => {
-            const accountSenders = state?.senders.filter(
-              (sender) => sender.connectionId === connection.id,
-            ) ?? [];
-            return (
-              <article className={styles.connectionCard} key={connection.id}>
-                <div className={styles.connectionTop}>
-                  <div className={styles.providerIcon}>G</div>
-                  <div className={styles.connectionIdentity}>
-                    <span>{providerLabel(connection.provider)}</span>
-                    <strong>{connection.displayName}</strong>
-                    <small>{accountSenders.length} sender identities discovered</small>
-                  </div>
-                  <span className={`${styles.status} ${statusClass(connection.status)}`}>
-                    {connection.status}
-                  </span>
-                </div>
+      <section className={styles.detailsCard}>
+        <div className={styles.cardHead}><div><h3>Account details</h3><p>{primaryConnection?providerLabel(primaryConnection.provider):"No provider connected"}</p></div></div>
+        {primaryConnection?<dl>
+          <div><dt>Account name</dt><dd>{primaryConnection.displayName}</dd></div>
+          <div><dt>Provider</dt><dd>{providerLabel(primaryConnection.provider)}</dd></div>
+          <div><dt>Status</dt><dd>{primaryConnection.status}</dd></div>
+          <div><dt>Connected</dt><dd>{compactDate(primaryConnection.connectedAt)}</dd></div>
+          <div><dt>Last verified</dt><dd>{compactDate(primaryConnection.lastVerifiedAt)}</dd></div>
+          <div><dt>External account ID</dt><dd>{primaryConnection.externalAccountId??"Provider-managed"}</dd></div>
+        </dl>:<p className={styles.panelEmpty}>Connect an account to view provider details.</p>}
+        {primaryConnection?<div className={styles.detailActions}><button onClick={()=>void refreshConnection(primaryConnection.id)} disabled={action?.kind==="working"}>↻ Refresh aliases</button><button className={styles.dangerButton} onClick={()=>void disconnect(primaryConnection)} disabled={action?.kind==="working"}>Disconnect</button></div>:null}
+      </section>
+    </div>
 
-                <div className={styles.connectionMeta}>
-                  <span>Last verified</span>
-                  <strong>{compactDate(connection.lastVerifiedAt)}</strong>
-                </div>
+    <div className={styles.securityGrid}>
+      <section className={styles.securityCard}><div className={styles.cardHead}><div><h3>Authentication & connection health</h3><p>Only states exposed by the current provider integration are shown.</p></div></div><div className={styles.securityItems}><span><i>🛡</i><b>OAuth connection</b><strong>{primaryConnection?.status??"Not connected"}</strong><small>Credentials stored server-side</small></span><span><i>✓</i><b>Verified identities</b><strong>{verifiedSenders.length}</strong><small>Active provider send-as identities</small></span><span><i>↻</i><b>Last verification</b><strong>{relativeDate(primaryConnection?.lastVerifiedAt??null)}</strong><small>{compactDate(primaryConnection?.lastVerifiedAt??null)}</small></span></div></section>
+      <section className={styles.permissionsCard}><div className={styles.cardHead}><div><h3>OAuth protection</h3><p>Security properties supported by the current implementation.</p></div></div><ul><li>✓ OAuth tokens remain server-side</li><li>✓ Stored credentials are encrypted before persistence</li><li>✓ Connection can be revoked from this workspace</li><li>✓ Sender identities are refreshed from the provider</li></ul></section>
+    </div>
 
-                <div className={styles.senderList}>
-                  {accountSenders.length === 0 ? (
-                    <div className={styles.noSenders}>No send-as identity discovered yet.</div>
-                  ) : (
-                    accountSenders.map((sender) => (
-                      <div
-                        className={`${styles.senderRow} ${sender.isWorkspaceDefault ? styles.senderDefault : ""}`}
-                        key={sender.id}
-                      >
-                        <div className={styles.senderAvatar}>
-                          {(sender.fromName || sender.fromEmail).slice(0, 1).toUpperCase()}
-                        </div>
-                        <div className={styles.senderIdentity}>
-                          <strong>{sender.fromName}</strong>
-                          <span>{sender.fromEmail}</span>
-                          <div className={styles.senderTags}>
-                            <em className={statusClass(sender.verificationStatus)}>
-                              {sender.verificationStatus}
-                            </em>
-                            {sender.isProviderDefault ? <em>Google default</em> : null}
-                            {sender.isWorkspaceDefault ? <em className={styles.defaultTag}>Workspace default</em> : null}
-                          </div>
-                        </div>
-                        {!sender.isWorkspaceDefault && sender.verificationStatus === "VERIFIED" && sender.isActive ? (
-                          <button
-                            className={styles.inlineButton}
-                            type="button"
-                            onClick={() => void chooseDefault(sender.id)}
-                            disabled={action?.kind === "working"}
-                          >
-                            Make default
-                          </button>
-                        ) : null}
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                <div className={styles.cardActions}>
-                  <button
-                    className={styles.secondaryButton}
-                    type="button"
-                    onClick={() => void refreshConnection(connection.id)}
-                    disabled={action?.kind === "working"}
-                  >
-                    Refresh aliases
-                  </button>
-                  <button
-                    className={styles.dangerButton}
-                    type="button"
-                    onClick={() => void disconnect(connection)}
-                    disabled={action?.kind === "working"}
-                  >
-                    Disconnect
-                  </button>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      )}
-
-      <div className={styles.guardrail}>
-        <div className={styles.guardIcon}>✓</div>
-        <div>
-          <strong>Production-safe E1 boundary</strong>
-          <p>
-            Connect, verify, refresh and switch senders now. Actual Gmail message delivery is
-            hard-disabled in the provider adapter until the E3 manual-send gate is implemented
-            and explicitly enabled.
-          </p>
-        </div>
-      </div>
-    </section>
-  );
+    <div className={styles.bottomGrid}>
+      <section className={styles.activityCard}><div className={styles.cardHead}><div><h3>Recent account activity</h3><p>Connection lifecycle timestamps from real account state.</p></div></div>{activeConnections.map(c=><div className={styles.activityRow} key={c.id}><span>✓</span><div><strong>{c.displayName}</strong><small>Connected {compactDate(c.connectedAt)} · Verified {compactDate(c.lastVerifiedAt)}</small></div><time>{relativeDate(c.lastVerifiedAt??c.connectedAt)}</time></div>)}{!activeConnections.length?<p className={styles.panelEmpty}>No account activity yet.</p>:null}</section>
+      <section className={styles.healthCard}><div className={styles.cardHead}><div><h3>Connection health</h3><p>Based on current provider status and verified senders.</p></div><span className={primaryConnection?.status==="CONNECTED"?styles.healthy:styles.warning}>{primaryConnection?.status==="CONNECTED"?"Healthy":"Needs setup"}</span></div><div className={styles.healthBody}><div className={styles.healthRing}><span><b>{verifiedSenders.length}</b><small>verified senders</small></span></div><dl><div><dt>Provider status</dt><dd>{primaryConnection?.status??"Not connected"}</dd></div><div><dt>Workspace default</dt><dd>{workspaceDefault?.fromEmail??"Not selected"}</dd></div><div><dt>Active identities</dt><dd>{verifiedSenders.length}</dd></div></dl></div></section>
+    </div>
+  </section>;
 }
