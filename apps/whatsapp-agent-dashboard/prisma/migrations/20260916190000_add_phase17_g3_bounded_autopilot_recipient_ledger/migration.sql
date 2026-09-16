@@ -1,4 +1,4 @@
-﻿-- Phase17-G3 bounded-autopilot distinct-recipient exposure ledger.
+-- Phase17-G3 bounded-autopilot distinct-recipient exposure ledger.
 CREATE TABLE "EngageControlledLaunchAutopilotRecipient" (
     "id" TEXT NOT NULL,
     "workspaceId" TEXT NOT NULL,
