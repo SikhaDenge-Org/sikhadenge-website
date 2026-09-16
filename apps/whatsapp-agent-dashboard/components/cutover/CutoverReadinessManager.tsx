@@ -2,6 +2,30 @@
 
 import { useEffect, useState } from "react";
 
+type ApprovalCandidate = {
+  messageId: string;
+  type: string;
+  actor: string;
+  preview: string;
+  recipient: string;
+  waId: string;
+  workspaceId: string;
+  connectionId: string;
+  queuedAt: string;
+};
+
+type ApprovalResponse = {
+  success: boolean;
+  message?: string;
+  approval?: {
+    id: string;
+    messageId: string;
+    approvedAt: string;
+    expiresAt: string;
+    controlledLaunchStateVersion: number;
+  };
+};
+
 type Readiness = {
   readyForSupervisedCutover: boolean;
   readyForAutomaticCutover: boolean;
@@ -22,8 +46,8 @@ type Readiness = {
 };
 
 async function readJson<T>(response: Response): Promise<T> {
-  const payload = (await response.json()) as T & { error?: string };
-  if (!response.ok) throw new Error(payload.error || "Cutover readiness request failed.");
+  const payload = (await response.json()) as T & { error?: string; message?: string };
+  if (!response.ok) throw new Error(payload.error || payload.message || "Cutover readiness request failed.");
   return payload;
 }
 
@@ -39,17 +63,54 @@ export default function CutoverReadinessManager() {
   const [data, setData] = useState<Readiness | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [candidates, setCandidates] = useState<ApprovalCandidate[]>([]);
+  const [selectedMessageId, setSelectedMessageId] = useState("");
+  const [approvalReason, setApprovalReason] = useState("");
+  const [ttlMs, setTtlMs] = useState(10 * 60 * 1_000);
+  const [approving, setApproving] = useState(false);
+  const [approvalResult, setApprovalResult] = useState("");
 
   async function load() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/cutover/readiness", { cache: "no-store" });
+      const [response, approvalResponse] = await Promise.all([
+        fetch("/api/cutover/readiness", { cache: "no-store" }),
+        fetch("/api/cutover/outbound-approvals", { cache: "no-store" }),
+      ]);
       setData(await readJson<Readiness>(response));
+      const approvalData = await readJson<{ success: boolean; candidates: ApprovalCandidate[] }>(approvalResponse);
+      setCandidates(approvalData.candidates);
+      setSelectedMessageId((current) => current || approvalData.candidates[0]?.messageId || "");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Cutover readiness could not load.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function approveSelected() {
+    if (!selectedMessageId || !approvalReason.trim()) {
+      setError("Select a queued message and enter an approval reason.");
+      return;
+    }
+    setApproving(true);
+    setError("");
+    setApprovalResult("");
+    try {
+      const response = await fetch("/api/cutover/outbound-approvals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId: selectedMessageId, reason: approvalReason.trim(), ttlMs }),
+      });
+      const result = await readJson<ApprovalResponse>(response);
+      if (!result.approval) throw new Error("Approval response is missing persisted approval details.");
+      setApprovalResult("Approved " + result.approval.messageId + " until " + new Date(result.approval.expiresAt).toLocaleString() + ".");
+      setApprovalReason("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Outbound approval failed.");
+    } finally {
+      setApproving(false);
     }
   }
 
@@ -122,6 +183,35 @@ export default function CutoverReadinessManager() {
           <div className="suite-list compact">
             {Object.entries(data.constraints).map(([name, value]) => <article key={name}><span>{humanise(name)}</span><strong>{value ? "Yes" : "No"}</strong></article>)}
           </div>
+        </div>
+      </section>
+
+      <section className="suite-card">
+        <header><div><span>Controlled outbound</span><h3>One-time human approval</h3></div></header>
+        <p>Approvals are persisted, message-specific, content-fingerprinted, state-version-bound and consumed exactly once at the Meta provider boundary.</p>
+        <div className="suite-stack">
+          <label>Queued outbound message</label>
+          <select value={selectedMessageId} onChange={(event) => setSelectedMessageId(event.target.value)}>
+            {candidates.length === 0 ? <option value="">No eligible queued messages</option> : null}
+            {candidates.map((candidate) => (
+              <option key={candidate.messageId} value={candidate.messageId}>
+                {candidate.recipient} · {candidate.type} · {candidate.preview}
+              </option>
+            ))}
+          </select>
+          <label>Approval reason</label>
+          <textarea value={approvalReason} onChange={(event) => setApprovalReason(event.target.value)} rows={3} placeholder="Why is this exact outbound message approved for controlled launch?" />
+          <label>Approval validity</label>
+          <select value={ttlMs} onChange={(event) => setTtlMs(Number(event.target.value))}>
+            <option value={5 * 60 * 1_000}>5 minutes</option>
+            <option value={10 * 60 * 1_000}>10 minutes</option>
+            <option value={15 * 60 * 1_000}>15 minutes</option>
+            <option value={30 * 60 * 1_000}>30 minutes</option>
+          </select>
+          <button type="button" className="primary" onClick={() => void approveSelected()} disabled={approving || !selectedMessageId || !approvalReason.trim()}>
+            {approving ? "Persisting approval…" : "Approve exactly once"}
+          </button>
+          {approvalResult ? <div className="suite-alert success">{approvalResult}</div> : null}
         </div>
       </section>
 

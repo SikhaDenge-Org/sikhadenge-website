@@ -1,3 +1,4 @@
+import { MessageDirection, MessageStatus } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 
 import { getCurrentDashboardUser } from "@/lib/auth/session";
@@ -58,6 +59,47 @@ async function resolveServerAuthoritativeScope(messageId: string) {
     workspaceId: mapping.workspaceId,
     connectionId: mapping.connectionId,
   };
+}
+
+export async function GET() {
+  const user = await requirePlatformAdmin();
+  if (!user) return errorResponse(403, "AUTH_REQUIRED", "Platform admin authentication required.");
+
+  const queued = await prisma.whatsAppMessage.findMany({
+    where: { direction: MessageDirection.OUTBOUND, status: MessageStatus.QUEUED },
+    orderBy: { createdAt: "asc" },
+    take: 50,
+    select: {
+      id: true, type: true, actor: true, text: true, filename: true, messageTimestamp: true,
+      conversation: { select: { contact: { select: { waId: true, displayName: true, profileName: true, metadata: true } } } },
+    },
+  });
+
+  const mapped = queued.flatMap((message) => {
+    const mapping = readLegacyWhatsAppMappingMetadata(message.conversation.contact.metadata);
+    return mapping ? [{ message, mapping }] : [];
+  });
+  const workspaceIds = [...new Set(mapped.map(({ mapping }) => mapping.workspaceId))];
+  const memberships = workspaceIds.length === 0 ? [] : await prisma.engageWorkspaceMembership.findMany({
+    where: { userId: user.id, isActive: true, workspaceId: { in: workspaceIds }, user: { isActive: true } },
+    select: { workspaceId: true },
+  });
+  const allowed = new Set(memberships.map((membership) => membership.workspaceId));
+
+  return NextResponse.json({
+    success: true,
+    candidates: mapped.filter(({ mapping }) => allowed.has(mapping.workspaceId)).map(({ message, mapping }) => ({
+      messageId: message.id,
+      type: message.type,
+      actor: message.actor,
+      preview: message.text?.slice(0, 180) || message.filename || message.type,
+      recipient: message.conversation.contact.displayName || message.conversation.contact.profileName || message.conversation.contact.waId,
+      waId: message.conversation.contact.waId,
+      workspaceId: mapping.workspaceId,
+      connectionId: mapping.connectionId,
+      queuedAt: message.messageTimestamp,
+    })),
+  });
 }
 
 export async function POST(req: NextRequest) {
