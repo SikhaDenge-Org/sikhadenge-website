@@ -134,6 +134,13 @@ function testGmailAliasNormalization() {
   assert.equal(mapped.verificationStatus, "VERIFIED");
   assert.equal(mapped.isProviderDefault, true);
   assert.equal(mapped.isWorkspaceDefault, false);
+
+  const primary = gmailSendAsToSenderIdentity({
+    workspaceId: "workspace-1",
+    connectionId: "connection-1",
+    resource: { sendAsEmail: "support@sikhadenge.in", isPrimary: true },
+  });
+  assert.equal(primary.verificationStatus, "VERIFIED");
 }
 
 function testEmailIsFirstClassChannel() {
