@@ -6,3 +6,4 @@ exit 0
 # retry after workflow concurrency cancellation 2026-09-16
 # Gmail OAuth production return URL deploy 2026-09-16
 # Gmail primary sender verification deploy 2026-09-16 
+# Email scheduler reconciliation deploy 2026-09-16 
