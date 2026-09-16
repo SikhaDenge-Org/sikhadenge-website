@@ -615,6 +615,7 @@ export default function InboxDashboardV2({
   const selectedIdRef = useRef(selectedId);
   const pollingRef = useRef(false);
   const detailRequestSeqRef = useRef(0);
+  const loadingConversationSeqRef = useRef(0);
   const messageAreaRef = useRef<HTMLDivElement>(null);
   const draftRevisionRef = useRef(0);
   const draftSavedAtRef = useRef<Date>(new Date(0));
@@ -922,6 +923,7 @@ export default function InboxDashboardV2({
     }
 
     const requestSeq = ++detailRequestSeqRef.current;
+    const loadingSeq = ++loadingConversationSeqRef.current;
     setLoadingConversation(true);
     setError(null);
     try {
@@ -952,9 +954,14 @@ export default function InboxDashboardV2({
       );
       await markRead(conversationId);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Conversation could not be loaded.");
+      if (
+        requestSeq === detailRequestSeqRef.current &&
+        selectedIdRef.current === conversationId
+      ) {
+        setError(loadError instanceof Error ? loadError.message : "Conversation could not be loaded.");
+      }
     } finally {
-      if (requestSeq === detailRequestSeqRef.current) {
+      if (loadingSeq === loadingConversationSeqRef.current) {
         setLoadingConversation(false);
       }
     }
