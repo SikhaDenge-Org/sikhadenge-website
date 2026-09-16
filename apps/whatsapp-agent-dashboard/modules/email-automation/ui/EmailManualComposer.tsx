@@ -68,7 +68,10 @@ export default function EmailManualComposer(){
   const canSend=Boolean(runtime?.manualSendEnabled&&version&&to.trim()&&!busy);
   const internalOnly=runtime?.mode==="INTERNAL_RECIPIENTS";
   const previewSubject=subjectOverride.trim()||version?.document.subject||"Select an approved template";
-  const recent24=audits.filter(a=>Date.now()-new Date(a.createdAt).getTime()<86400000).length;
+  const recentAudits=audits.filter(a=>Date.now()-new Date(a.createdAt).getTime()<86400000);
+  const recent24=recentAudits.length;
+  const recentDelivered=recentAudits.filter(a=>a.status==="SENT"||a.status==="DELIVERED").length;
+  const recentFailed=recentAudits.filter(a=>a.status==="FAILED").length;
 
   async function retryMessage(messageId:string){
     setBusy(true);setNotice(null);
@@ -109,7 +112,7 @@ export default function EmailManualComposer(){
       <article><span className={styles.summaryIcon}>⚙</span><div><small>Mode</small><strong>{runtime?.mode??"Loading"}</strong><p>{runtime?.externalWritesEnabled?"External writes enabled":"External writes protected"}</p></div></article>
       <article><span className={styles.summaryIconGreen}>◎</span><div><small>Default sender</small><strong className={styles.emailValue}>{senders.find(s=>s.isWorkspaceDefault)?.fromEmail??"Not selected"}</strong><p>Workspace default</p></div></article>
       <article><span className={styles.summaryIconGreen}>▤</span><div><small>Approved templates</small><strong>{templates.length}</strong><p>Ready to use</p></div></article>
-      <article><span className={styles.summaryIconPurple}>➤</span><div><small>Recent sends (24h)</small><strong>{recent24}</strong><p>From real audit records</p></div></article>
+      <article><span className={styles.summaryIconPurple}>➤</span><div><small>Recent sends (24h)</small><strong>{recent24}</strong><p>{recentDelivered} delivered · {recentFailed} failed</p></div></article>
     </div>
 
     {notice?<div className={notice.kind==="ok"?styles.ok:styles.error}>{notice.text}</div>:null}
@@ -120,7 +123,7 @@ export default function EmailManualComposer(){
           <div className={styles.stepHead}><b>1</b><div><h3>Sender & Template</h3><p>Choose a verified sender and an approved template.</p></div></div>
           <div className={styles.twoCol}>
             <label>From (Sender)<select value={senderId} onChange={e=>setSenderId(e.target.value)}><option value="">Template / workspace default</option>{senders.map(s=><option key={s.id} value={s.id}>{s.fromName} · {s.fromEmail}{s.isWorkspaceDefault?" · Default":""}</option>)}</select></label>
-            <label>Template<select value={templateId} onChange={e=>setTemplateId(e.target.value)}><option value="">Select template</option>{templates.map(t=><option key={t.id} value={t.id}>{t.name} · v{t.currentVersion}</option>)}</select></label>
+            <label>Template<select value={templateId} onChange={e=>setTemplateId(e.target.value)}><option value="">Select template</option>{templates.map(t=><option key={t.id} value={t.id}>{t.name} · v{t.currentVersion}</option>)}</select>{version?<button type="button" className={styles.previewLink} onClick={()=>document.getElementById("email-send-preview")?.scrollIntoView({behavior:"smooth",block:"center"})}>◎ Preview template</button>:null}</label>
           </div>
         </section>
 
@@ -138,14 +141,16 @@ export default function EmailManualComposer(){
         </section>
 
         <section className={styles.stepCard}>
-          <div className={styles.stepHead}><b>4</b><div><h3>Schedule & Send</h3><p>Send now through the guarded runtime.</p></div></div>
+          <div className={styles.stepHead}><b>4</b><div><h3>Schedule & Send</h3><p>Choose the supported delivery path and review safety controls.</p></div></div>
+          <div className={styles.deliveryModes}><div className={styles.deliveryModeActive}><span className={styles.radioOn}>●</span><div><strong>Send now</strong><small>Process immediately through the protected runtime</small></div></div><div className={styles.deliveryModeDisabled} title="Scheduling is not exposed by the current Email API"><span>○</span><div><strong>Schedule for later</strong><small>Unavailable in the current runtime</small></div></div></div>
+          <div className={styles.runtimeControls}><div><span className={runtime?.mode==="DRY_RUN"?styles.toggleOn:styles.toggleOff}/><p><strong>DRY_RUN safety</strong><small>{runtime?.mode==="DRY_RUN"?"No provider delivery will be attempted":"Runtime is not in DRY_RUN"}</small></p></div><div><span className={internalOnly?styles.toggleOn:styles.toggleOff}/><p><strong>Internal recipient restriction</strong><small>{internalOnly?(runtime?.internalRecipientAllowlistCount??0)+" allowlisted recipients":"Controlled by runtime configuration"}</small></p></div></div>
           <div className={styles.safetyRow}><span>● Runtime: {runtime?.mode??"Loading"}</span><span>● Idempotency protected</span><span>● Audit logging enabled</span></div>
           <div className={styles.actions}><code>{idempotencyKey}</code><button disabled={!canSend} onClick={()=>void submit()}>{busy?"Processing…":runtime?.mode==="DRY_RUN"?"Send Email (DRY_RUN)":runtime?.mode==="INTERNAL_RECIPIENTS"?"Send Internal Email":"Runtime locked"}</button></div>
         </section>
       </main>
 
       <aside className={styles.sideColumn}>
-        <section className={styles.previewCard}>
+        <section className={styles.previewCard} id="email-send-preview">
           <div className={styles.cardHead}><div><span>MESSAGE PREVIEW</span><h3>Desktop</h3></div><span className={styles.desktopPill}>Desktop</span></div>
           <div className={styles.mailPreview}>
             <div className={styles.brand}>Sikha<span>Denge</span></div>
