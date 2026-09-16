@@ -23,6 +23,10 @@ export function normalizeBoundedAutopilotRecipientKey(value: string): string {
   return normalized;
 }
 
+export function isBoundedAutopilotReservationConnectionMatch(existingConnectionId: string, requestedConnectionId: string): boolean {
+  return existingConnectionId.trim() === requestedConnectionId.trim();
+}
+
 export function evaluateBoundedAutopilotCapacity(input: {
   maxRealLeads: number;
   reservedRecipients: number;
@@ -153,6 +157,12 @@ export async function reserveBoundedAutopilotRecipient(input: {
       WHERE "workspaceId" = ${workspaceId} AND "controlledLaunchStateVersion" = ${state.version}
     `;
     const reservedRecipients = counts[0] ? Number(counts[0].count) : 0;
+    if (existing[0] && !isBoundedAutopilotReservationConnectionMatch(existing[0].connectionId, connectionId)) {
+      throw new ControlledLaunchBoundedAutopilotError(
+        "BOUNDED_AUTOPILOT_RESERVATION_SCOPE_MISMATCH",
+        "Recipient is already reserved under a different WhatsApp connection for this controlled-launch state version.",
+      );
+    }
     const decision = evaluateBoundedAutopilotCapacity({ maxRealLeads: scope.maxRealLeads, reservedRecipients, alreadyReserved: Boolean(existing[0]) });
     if (!decision.allowed) throw new ControlledLaunchBoundedAutopilotError(decision.code, decision.reason);
     if (existing[0]) return { reservation: existing[0], alreadyReserved: true, reservedRecipients, maxRealLeads: scope.maxRealLeads };
