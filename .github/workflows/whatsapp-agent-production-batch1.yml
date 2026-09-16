@@ -1,4 +1,6 @@
-# Email lifecycle E1 deployment marker: 2026-09-16`r`n# Production deploy trigger: Page 01 login UI — 2026-09-12
+# Email lifecycle E2 deployment marker: 2026-09-16
+# Email lifecycle E1 deployment marker: 2026-09-16
+# Production deploy trigger: Page 01 login UI — 2026-09-12
 # Retry marker: Base64 production SSH key configured on 2026-08-03
 # Retry marker: corrected public ED25519 host key configured on 2026-08-03
 # Retry marker: canonical pinned host entry for alternate SSH port on 2026-08-03
