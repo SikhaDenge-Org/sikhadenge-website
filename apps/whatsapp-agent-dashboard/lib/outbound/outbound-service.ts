@@ -126,6 +126,7 @@ function controlledLaunchContext(input: {
     channel: "WHATSAPP",
     action: "OUTBOUND_QUEUED",
     messageId: input.messageId,
+  recipientKey: normalizeRecipient(input.waId),
   };
 }
 

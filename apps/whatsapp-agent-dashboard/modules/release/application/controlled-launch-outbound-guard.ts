@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import { assertActiveControlledLaunchOutboundApproval, ControlledLaunchOutboundApprovalError } from "@/modules/release/application/controlled-launch-outbound-approval";
+import type { ControlledWritePolicy } from "@/modules/release/application/controlled-launch";
 import type { ControlledLaunchStateRecord } from "@/modules/release/application/controlled-launch-state";
 import { prismaControlledLaunchStateRepository } from "@/modules/release/infrastructure/prisma-controlled-launch-state-repository";
 
@@ -9,6 +10,7 @@ export type ControlledLaunchOutboundContext = {
   channel: "WHATSAPP";
   action: "OUTBOUND_QUEUED";
   messageId: string;
+  recipientKey: string;
 };
 
 export type ControlledLaunchOutboundDenyCode =
@@ -24,6 +26,7 @@ export type ControlledLaunchOutboundDenyCode =
   | "CONTROLLED_LAUNCH_APPROVAL_ENGINE_REQUIRED"
   | "CONTROLLED_LAUNCH_APPROVAL_REQUIRED"
   | "CONTROLLED_LAUNCH_BOUNDED_SCOPE_ENFORCEMENT_REQUIRED"
+  | "CONTROLLED_LAUNCH_BOUNDED_CAP_DENIED"
   | "CONTROLLED_LAUNCH_APPROVED_FLOW_PROOF_REQUIRED"
   | "CONTROLLED_LAUNCH_PROVIDER_CONNECTION_MISMATCH"
   | "CONTROLLED_LAUNCH_GOVERNANCE_INVALID"
@@ -37,6 +40,12 @@ export type ControlledLaunchKillSwitchSnapshot = {
   connectionId: string | null;
   blockedActions: readonly string[];
   reason: string;
+};
+
+export type ControlledLaunchOutboundAuthorization = {
+  writePolicy: ControlledWritePolicy;
+  stateVersion: number;
+  maxRealLeads: number;
 };
 
 export type ControlledLaunchOutboundDecision =
@@ -98,6 +107,7 @@ export function evaluateControlledLaunchOutbound(input: {
   state: ControlledLaunchStateRecord | null;
   killSwitches?: readonly ControlledLaunchKillSwitchSnapshot[];
   approvalVerified?: boolean;
+  boundedScopeVerified?: boolean;
 }): ControlledLaunchOutboundDecision {
   const { context, state } = input;
   if (!state) {
@@ -168,9 +178,9 @@ export function evaluateControlledLaunchOutbound(input: {
         "This queued outbound message does not have a current persisted human approval.",
       );
     case "BOUNDED_AUTOPILOT":
-      return deny(
+      return input.boundedScopeVerified ? { allowed: true } : deny(
         "CONTROLLED_LAUNCH_BOUNDED_SCOPE_ENFORCEMENT_REQUIRED",
-        "Bounded autopilot remains blocked until persisted recipient/real-lead caps are enforced at runtime.",
+        "Bounded autopilot requires a positive persisted real-lead cap and runtime recipient enforcement.",
       );
     case "APPROVED_FLOWS_ONLY":
       return deny(
@@ -204,14 +214,30 @@ export function assertWhatsAppProviderConnectionBinding(
   }
 }
 
+
+export function assertWhatsAppProviderRecipientBinding(
+  context: ControlledLaunchOutboundContext,
+  providerRecipient: string,
+): void {
+  const normalize = (value: string) => value.replace(/^\+/, "").replace(/\D/g, "");
+  const expected = normalize(context.recipientKey);
+  const actual = normalize(providerRecipient);
+  if (!expected || !actual || expected !== actual) {
+    throw new ControlledLaunchOutboundDeniedError(
+      "CONTROLLED_LAUNCH_PROVIDER_CONNECTION_MISMATCH",
+      "Outbound provider recipient does not match the persisted WhatsApp governance recipient.",
+    );
+  }
+}
 export async function assertControlledLaunchOutboundAllowed(
   context: ControlledLaunchOutboundContext,
-): Promise<void> {
+): Promise<ControlledLaunchOutboundAuthorization> {
   try {
     if (
       !context.workspaceId.trim() ||
       !context.connectionId.trim() ||
       !context.messageId.trim() ||
+      !context.recipientKey.trim() ||
       context.channel !== "WHATSAPP" ||
       context.action !== "OUTBOUND_QUEUED"
     ) {
@@ -279,13 +305,16 @@ export async function assertControlledLaunchOutboundAllowed(
       await assertActiveControlledLaunchOutboundApproval({ workspaceId: context.workspaceId, connectionId: context.connectionId, messageId: context.messageId, controlledLaunchStateVersion: state.version });
       approvalVerified = true;
     }
-    const decision = evaluateControlledLaunchOutbound({ context, state, killSwitches, approvalVerified });
+    const boundedScopeVerified = Boolean(state?.writePolicy === "BOUNDED_AUTOPILOT" && state.mode === "LIMITED_AUTOPILOT" && state.scope.maxRealLeads > 0);
+    const decision = evaluateControlledLaunchOutbound({ context, state, killSwitches, approvalVerified, boundedScopeVerified });
     if (!decision.allowed) {
       throw new ControlledLaunchOutboundDeniedError(
         decision.code,
         decision.reason,
       );
     }
+    if (!state) throw new ControlledLaunchOutboundDeniedError("CONTROLLED_LAUNCH_STATE_MISSING", "Persisted controlled launch state is missing.");
+    return { writePolicy: state.writePolicy, stateVersion: state.version, maxRealLeads: state.scope.maxRealLeads };
   } catch (error) {
     if (error instanceof ControlledLaunchOutboundDeniedError) throw error;
     if (error instanceof ControlledLaunchOutboundApprovalError) throw new ControlledLaunchOutboundDeniedError("CONTROLLED_LAUNCH_APPROVAL_REQUIRED", error.message);

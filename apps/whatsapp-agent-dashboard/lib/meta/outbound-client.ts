@@ -1,7 +1,11 @@
 import { consumeCurrentControlledLaunchOutboundApproval } from "@/modules/release/application/controlled-launch-outbound-approval";
+import { ControlledLaunchBoundedAutopilotError, reserveBoundedAutopilotRecipient } from "@/modules/release/application/controlled-launch-bounded-autopilot";
 import {
   assertControlledLaunchOutboundAllowed,
   assertWhatsAppProviderConnectionBinding,
+  assertWhatsAppProviderRecipientBinding,
+  ControlledLaunchOutboundDeniedError,
+  type ControlledLaunchOutboundAuthorization,
   type ControlledLaunchOutboundContext,
 } from "@/modules/release/application/controlled-launch-outbound-guard";
 import type {
@@ -73,9 +77,9 @@ function metaError(body: MetaSendResponse, status: number, fallback: string): Er
 async function assertProviderWriteAllowed(
   governance: ControlledLaunchOutboundContext,
   phoneNumberId: string,
-): Promise<void> {
+): Promise<ControlledLaunchOutboundAuthorization> {
   assertWhatsAppProviderConnectionBinding(governance, phoneNumberId);
-  await assertControlledLaunchOutboundAllowed(governance);
+  return assertControlledLaunchOutboundAllowed(governance);
 }
 
 export async function uploadMetaWhatsAppMedia(
@@ -137,8 +141,20 @@ export async function sendMetaWhatsAppMessage(
   }
 
   const config = requiredLiveConfig();
-  await assertProviderWriteAllowed(governance, config.phoneNumberId);
-  await consumeCurrentControlledLaunchOutboundApproval({ workspaceId: governance.workspaceId, connectionId: governance.connectionId, messageId: governance.messageId });
+  const authorization = await assertProviderWriteAllowed(governance, config.phoneNumberId);
+  assertWhatsAppProviderRecipientBinding(governance, payload.to);
+  if (authorization.writePolicy === "HUMAN_APPROVAL_REQUIRED") {
+    await consumeCurrentControlledLaunchOutboundApproval({ workspaceId: governance.workspaceId, connectionId: governance.connectionId, messageId: governance.messageId });
+  } else if (authorization.writePolicy === "BOUNDED_AUTOPILOT") {
+    try {
+      await reserveBoundedAutopilotRecipient({ workspaceId: governance.workspaceId, connectionId: governance.connectionId, messageId: governance.messageId, recipientKey: governance.recipientKey });
+    } catch (error) {
+      if (error instanceof ControlledLaunchBoundedAutopilotError) {
+        throw new ControlledLaunchOutboundDeniedError("CONTROLLED_LAUNCH_BOUNDED_CAP_DENIED", error.message);
+      }
+      throw error;
+    }
+  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs());

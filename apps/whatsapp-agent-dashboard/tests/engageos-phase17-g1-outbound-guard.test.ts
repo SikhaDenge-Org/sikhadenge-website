@@ -4,6 +4,7 @@ import { sendMetaWhatsAppMessage } from "../lib/meta/outbound-client";
 import type { PreparedMetaMessage } from "../lib/outbound/types";
 import {
   assertWhatsAppProviderConnectionBinding,
+  assertWhatsAppProviderRecipientBinding,
   ControlledLaunchOutboundDeniedError,
   evaluateControlledLaunchOutbound,
   type ControlledLaunchOutboundContext,
@@ -16,6 +17,7 @@ const context: ControlledLaunchOutboundContext = {
   channel: "WHATSAPP",
   action: "OUTBOUND_QUEUED",
   messageId: "message-1",
+  recipientKey: "919999999999",
 };
 
 function state(
@@ -178,6 +180,20 @@ function testBoundedAutopilotRequiresEnforcedRuntimeCap() {
   );
 }
 
+
+function testBoundedAutopilotAllowsWhenRuntimeCapIsVerified() {
+  const decision = evaluateControlledLaunchOutbound({
+    context,
+    state: state({
+      stage: "LIMITED_REAL_LEADS",
+      mode: "LIMITED_AUTOPILOT",
+      writePolicy: "BOUNDED_AUTOPILOT",
+      scope: { ...state().scope, maxRealLeads: 10 },
+    }),
+    boundedScopeVerified: true,
+  });
+  assert.equal(decision.allowed, true);
+}
 function testApprovedFlowsRequireAuthoritativeFlowProof() {
   expectDenied(
     evaluateControlledLaunchOutbound({
@@ -204,6 +220,14 @@ function testProviderConnectionBinding() {
   );
 }
 
+
+function testProviderRecipientBinding() {
+  assert.doesNotThrow(() => assertWhatsAppProviderRecipientBinding(context, "+91 99999 99999"));
+  assert.throws(
+    () => assertWhatsAppProviderRecipientBinding(context, "918888888888"),
+    (error: unknown) => error instanceof ControlledLaunchOutboundDeniedError,
+  );
+}
 async function testProviderBoundaryRejectsBeforeNetworkIo() {
   const keys = [
     "WHATSAPP_OUTBOUND_MODE",
@@ -266,8 +290,10 @@ async function main() {
   testPersistedKillSwitchWins();
   testApprovalOnlyRequiresPersistedApproval();
   testBoundedAutopilotRequiresEnforcedRuntimeCap();
+  testBoundedAutopilotAllowsWhenRuntimeCapIsVerified();
   testApprovedFlowsRequireAuthoritativeFlowProof();
   testProviderConnectionBinding();
+  testProviderRecipientBinding();
   await testProviderBoundaryRejectsBeforeNetworkIo();
 
   console.log("EngageOS Phase17-G1 controlled-launch outbound guard: PASS");
