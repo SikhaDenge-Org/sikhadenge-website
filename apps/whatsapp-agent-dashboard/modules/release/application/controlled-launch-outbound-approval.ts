@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { MessageDirection, MessageStatus, type Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db/prisma";
@@ -11,6 +11,7 @@ export type ControlledLaunchOutboundApprovalRecord = {
   workspaceId: string;
   connectionId: string;
   messageId: string;
+  contentFingerprint: string;
   controlledLaunchStateVersion: number;
   approvedByUserId: string;
   reason: string;
@@ -25,6 +26,7 @@ export type OutboundApprovalContext = {
   workspaceId: string;
   connectionId: string;
   messageId: string;
+  contentFingerprint: string;
   controlledLaunchStateVersion: number;
 };
 
@@ -36,6 +38,7 @@ export type OutboundApprovalDecision =
         | "APPROVAL_MISSING"
         | "APPROVAL_SCOPE_MISMATCH"
         | "APPROVAL_STATE_VERSION_MISMATCH"
+        | "APPROVAL_CONTENT_MISMATCH"
         | "APPROVAL_EXPIRED"
         | "APPROVAL_CONSUMED"
         | "APPROVAL_REVOKED";
@@ -58,6 +61,25 @@ function nonEmpty(value: string, label: string, maximum = 500): string {
   return normalized;
 }
 
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+}
+
+type ApprovalMessageSnapshot = { id: string; direction: string; status: string; type: string; text: string | null; mediaId: string | null; mediaUrl: string | null; mimeType: string | null; filename: string | null; replyToMetaMessageId: string | null; rawPayload: unknown; messageTimestamp: Date; recipientWaId: string; };
+
+export function fingerprintQueuedOutboundMessage(input: ApprovalMessageSnapshot): string {
+  return createHash("sha256").update(stableJson({ id: input.id, direction: input.direction, status: input.status, type: input.type, text: input.text, mediaId: input.mediaId, mediaUrl: input.mediaUrl, mimeType: input.mimeType, filename: input.filename, replyToMetaMessageId: input.replyToMetaMessageId, rawPayload: input.rawPayload, messageTimestamp: input.messageTimestamp.toISOString(), recipientWaId: input.recipientWaId })).digest("hex");
+}
+
+async function currentQueuedMessageFingerprint(client: Prisma.TransactionClient | typeof prisma, messageId: string): Promise<string> {
+  const message = await client.whatsAppMessage.findUnique({ where: { id: messageId }, select: { id: true, direction: true, status: true, type: true, text: true, mediaId: true, mediaUrl: true, mimeType: true, filename: true, replyToMetaMessageId: true, rawPayload: true, messageTimestamp: true, conversation: { select: { contact: { select: { waId: true } } } } } });
+  if (!message || message.direction !== MessageDirection.OUTBOUND || message.status !== MessageStatus.QUEUED) throw new ControlledLaunchOutboundApprovalError("APPROVAL_MESSAGE_INVALID", "Approval target must remain an existing QUEUED outbound WhatsApp message.");
+  return fingerprintQueuedOutboundMessage({ ...message, recipientWaId: message.conversation.contact.waId });
+}
+
 export function evaluateOutboundApproval(input: {
   context: OutboundApprovalContext;
   approval: ControlledLaunchOutboundApprovalRecord | null;
@@ -74,6 +96,9 @@ export function evaluateOutboundApproval(input: {
     approval.messageId !== context.messageId
   ) {
     return { allowed: false, code: "APPROVAL_SCOPE_MISMATCH", reason: "Persisted approval does not match the outbound workspace, connection, and message." };
+  }
+  if (approval.contentFingerprint !== context.contentFingerprint) {
+    return { allowed: false, code: "APPROVAL_CONTENT_MISMATCH", reason: "Queued outbound content changed after human approval." };
   }
   if (approval.controlledLaunchStateVersion !== context.controlledLaunchStateVersion) {
     return { allowed: false, code: "APPROVAL_STATE_VERSION_MISMATCH", reason: "Persisted approval was issued for a different controlled-launch state version." };
@@ -188,6 +213,8 @@ export async function approveControlledLaunchOutbound(input: {
       throw new ControlledLaunchOutboundApprovalError("APPROVAL_SCOPE_MISMATCH", "Queued message identity mapping does not match the requested approval scope.");
     }
 
+    const contentFingerprint = await currentQueuedMessageFingerprint(tx, messageId);
+
     const approver = await tx.engageWorkspaceMembership.findFirst({
       where: { workspaceId, userId: approvedByUserId, isActive: true, user: { isActive: true } },
       select: { id: true },
@@ -210,13 +237,13 @@ export async function approveControlledLaunchOutbound(input: {
     const expiresAt = new Date(Date.now() + ttlMs);
     const rows = await tx.$queryRaw<RawApproval[]>`
       INSERT INTO "EngageControlledLaunchOutboundApproval" (
-        "id", "workspaceId", "connectionId", "messageId", "controlledLaunchStateVersion",
+        "id", "workspaceId", "connectionId", "messageId", "contentFingerprint", "controlledLaunchStateVersion",
         "approvedByUserId", "reason", "expiresAt"
       ) VALUES (
-        ${id}, ${workspaceId}, ${connectionId}, ${messageId}, ${state.version},
+        ${id}, ${workspaceId}, ${connectionId}, ${messageId}, ${contentFingerprint}, ${state.version},
         ${approvedByUserId}, ${reason}, ${expiresAt}
       )
-      RETURNING "id", "workspaceId", "connectionId", "messageId", "controlledLaunchStateVersion",
+      RETURNING "id", "workspaceId", "connectionId", "messageId", "contentFingerprint", "controlledLaunchStateVersion",
                 "approvedByUserId", "reason", "approvedAt", "expiresAt", "consumedAt", "revokedAt", "createdAt"
     `;
     const created = rows[0];
@@ -230,13 +257,14 @@ export async function getActiveControlledLaunchOutboundApproval(
   client: Prisma.TransactionClient | typeof prisma = prisma,
 ): Promise<ControlledLaunchOutboundApprovalRecord | null> {
   const rows = await client.$queryRaw<RawApproval[]>`
-    SELECT "id", "workspaceId", "connectionId", "messageId", "controlledLaunchStateVersion",
+    SELECT "id", "workspaceId", "connectionId", "messageId", "contentFingerprint", "controlledLaunchStateVersion",
            "approvedByUserId", "reason", "approvedAt", "expiresAt", "consumedAt", "revokedAt", "createdAt"
     FROM "EngageControlledLaunchOutboundApproval"
     WHERE "workspaceId" = ${context.workspaceId}
       AND "connectionId" = ${context.connectionId}
       AND "messageId" = ${context.messageId}
       AND "controlledLaunchStateVersion" = ${context.controlledLaunchStateVersion}
+      AND "contentFingerprint" = ${context.contentFingerprint}
       AND "consumedAt" IS NULL
       AND "revokedAt" IS NULL
     ORDER BY "createdAt" DESC
@@ -246,10 +274,12 @@ export async function getActiveControlledLaunchOutboundApproval(
 }
 
 export async function assertActiveControlledLaunchOutboundApproval(
-  context: OutboundApprovalContext,
+  context: Omit<OutboundApprovalContext, "contentFingerprint">,
 ): Promise<ControlledLaunchOutboundApprovalRecord> {
-  const approval = await getActiveControlledLaunchOutboundApproval(context);
-  const decision = evaluateOutboundApproval({ context, approval });
+  const contentFingerprint = await currentQueuedMessageFingerprint(prisma, context.messageId);
+  const resolvedContext: OutboundApprovalContext = { ...context, contentFingerprint };
+  const approval = await getActiveControlledLaunchOutboundApproval(resolvedContext);
+  const decision = evaluateOutboundApproval({ context: resolvedContext, approval });
   if (!decision.allowed) {
     throw new ControlledLaunchOutboundApprovalError(decision.code, decision.reason);
   }
@@ -268,6 +298,7 @@ export async function consumeControlledLaunchOutboundApproval(
         AND approval."connectionId" = ${context.connectionId}
         AND approval."messageId" = ${context.messageId}
         AND approval."controlledLaunchStateVersion" = ${context.controlledLaunchStateVersion}
+        AND approval."contentFingerprint" = ${context.contentFingerprint}
         AND approval."consumedAt" IS NULL
         AND approval."revokedAt" IS NULL
         AND approval."expiresAt" > CURRENT_TIMESTAMP
@@ -276,7 +307,7 @@ export async function consumeControlledLaunchOutboundApproval(
         AND launch."mode" = 'APPROVAL_ONLY'
         AND launch."writePolicy" = 'HUMAN_APPROVAL_REQUIRED'
         AND launch."externalWritesAllowed" = true
-      RETURNING approval."id", approval."workspaceId", approval."connectionId", approval."messageId",
+      RETURNING approval."id", approval."workspaceId", approval."connectionId", approval."messageId", approval."contentFingerprint",
                 approval."controlledLaunchStateVersion", approval."approvedByUserId", approval."reason",
                 approval."approvedAt", approval."expiresAt", approval."consumedAt", approval."revokedAt", approval."createdAt"
     `;
@@ -287,6 +318,24 @@ export async function consumeControlledLaunchOutboundApproval(
         "A current, unexpired, unconsumed persisted approval could not be atomically consumed.",
       );
     }
+    return mapApproval(consumed);
+  });
+}
+
+export async function consumeCurrentControlledLaunchOutboundApproval(input: { workspaceId: string; connectionId: string; messageId: string; }): Promise<ControlledLaunchOutboundApprovalRecord> {
+  return prisma.$transaction(async (tx) => {
+    const contentFingerprint = await currentQueuedMessageFingerprint(tx, input.messageId);
+    const rows = await tx.$queryRaw<RawApproval[]>`
+      UPDATE "EngageControlledLaunchOutboundApproval" AS approval SET "consumedAt" = CURRENT_TIMESTAMP
+      FROM "EngageControlledLaunchState" AS launch
+      WHERE approval."workspaceId" = ${input.workspaceId} AND approval."connectionId" = ${input.connectionId} AND approval."messageId" = ${input.messageId}
+        AND approval."contentFingerprint" = ${contentFingerprint} AND approval."controlledLaunchStateVersion" = launch."version"
+        AND approval."consumedAt" IS NULL AND approval."revokedAt" IS NULL AND approval."expiresAt" > CURRENT_TIMESTAMP
+        AND launch."workspaceId" = approval."workspaceId" AND launch."mode" = 'APPROVAL_ONLY' AND launch."writePolicy" = 'HUMAN_APPROVAL_REQUIRED' AND launch."externalWritesAllowed" = true
+      RETURNING approval."id", approval."workspaceId", approval."connectionId", approval."messageId", approval."contentFingerprint", approval."controlledLaunchStateVersion", approval."approvedByUserId", approval."reason", approval."approvedAt", approval."expiresAt", approval."consumedAt", approval."revokedAt", approval."createdAt"
+    `;
+    const consumed = rows[0];
+    if (!consumed) throw new ControlledLaunchOutboundApprovalError("APPROVAL_CONSUME_DENIED", "Current persisted approval could not be atomically consumed before the provider write.");
     return mapApproval(consumed);
   });
 }

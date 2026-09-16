@@ -1,3 +1,4 @@
+import { consumeCurrentControlledLaunchOutboundApproval } from "@/modules/release/application/controlled-launch-outbound-approval";
 import {
   assertControlledLaunchOutboundAllowed,
   assertWhatsAppProviderConnectionBinding,
@@ -137,6 +138,7 @@ export async function sendMetaWhatsAppMessage(
 
   const config = requiredLiveConfig();
   await assertProviderWriteAllowed(governance, config.phoneNumberId);
+  await consumeCurrentControlledLaunchOutboundApproval({ workspaceId: governance.workspaceId, connectionId: governance.connectionId, messageId: governance.messageId });
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs());

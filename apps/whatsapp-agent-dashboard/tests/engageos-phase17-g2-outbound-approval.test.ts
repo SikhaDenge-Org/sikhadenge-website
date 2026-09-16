@@ -11,6 +11,7 @@ const context: OutboundApprovalContext = {
   workspaceId: "workspace-a",
   connectionId: "whatsapp:12345",
   messageId: "message-1",
+  contentFingerprint: "fingerprint-a",
   controlledLaunchStateVersion: 7,
 };
 
@@ -22,6 +23,7 @@ function approval(
     workspaceId: context.workspaceId,
     connectionId: context.connectionId,
     messageId: context.messageId,
+    contentFingerprint: context.contentFingerprint,
     controlledLaunchStateVersion: context.controlledLaunchStateVersion,
     approvedByUserId: "admin-1",
     reason: "Approve one canary message",
@@ -77,6 +79,10 @@ function testScopeIsMessageSpecific() {
   );
 }
 
+function testContentMutationInvalidatesApproval() {
+  expectDenied(evaluateOutboundApproval({ context, approval: approval({ contentFingerprint: "fingerprint-mutated" }), now: new Date("2026-09-16T10:05:00.000Z") }), "APPROVAL_CONTENT_MISMATCH");
+}
+
 function testLaunchStateTransitionInvalidatesApproval() {
   expectDenied(
     evaluateOutboundApproval({
@@ -129,6 +135,7 @@ function testTtlPolicyIsBounded() {
 function main() {
   testMissingApprovalFailsClosed();
   testScopeIsMessageSpecific();
+  testContentMutationInvalidatesApproval();
   testLaunchStateTransitionInvalidatesApproval();
   testExpiryRevocationAndConsumptionFailClosed();
   testExactActiveProofAllows();

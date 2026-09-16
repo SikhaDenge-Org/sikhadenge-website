@@ -6,6 +6,7 @@ CREATE TABLE "EngageControlledLaunchOutboundApproval" (
     "workspaceId" TEXT NOT NULL,
     "connectionId" TEXT NOT NULL,
     "messageId" TEXT NOT NULL,
+    "contentFingerprint" TEXT NOT NULL,
     "controlledLaunchStateVersion" INTEGER NOT NULL,
     "approvedByUserId" TEXT NOT NULL,
     "reason" TEXT NOT NULL,

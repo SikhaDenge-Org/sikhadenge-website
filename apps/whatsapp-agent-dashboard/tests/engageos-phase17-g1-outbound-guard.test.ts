@@ -15,6 +15,7 @@ const context: ControlledLaunchOutboundContext = {
   connectionId: "whatsapp:12345",
   channel: "WHATSAPP",
   action: "OUTBOUND_QUEUED",
+  messageId: "message-1",
 };
 
 function state(
@@ -152,10 +153,10 @@ function testPersistedKillSwitchWins() {
   );
 }
 
-function testApprovalOnlyRequiresPersistedApprovalEngine() {
+function testApprovalOnlyRequiresPersistedApproval() {
   expectDenied(
     evaluateControlledLaunchOutbound({ context, state: state() }),
-    "CONTROLLED_LAUNCH_APPROVAL_ENGINE_REQUIRED",
+    "CONTROLLED_LAUNCH_APPROVAL_REQUIRED",
   );
 }
 
@@ -263,7 +264,7 @@ async function main() {
   testChannelMustBeExplicitlyScoped();
   testConnectionMustBeExplicitlyScoped();
   testPersistedKillSwitchWins();
-  testApprovalOnlyRequiresPersistedApprovalEngine();
+  testApprovalOnlyRequiresPersistedApproval();
   testBoundedAutopilotRequiresEnforcedRuntimeCap();
   testApprovedFlowsRequireAuthoritativeFlowProof();
   testProviderConnectionBinding();

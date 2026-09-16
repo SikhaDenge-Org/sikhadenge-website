@@ -101,6 +101,7 @@ function controlledLaunchContext(input: {
   contactId: string;
   waId: string;
   metadata: Prisma.JsonValue | null;
+  messageId: string;
 }): ControlledLaunchOutboundContext {
   const mapping = readLegacyWhatsAppMappingMetadata(input.metadata);
   if (!mapping) {
@@ -124,6 +125,7 @@ function controlledLaunchContext(input: {
     connectionId: mapping.connectionId,
     channel: "WHATSAPP",
     action: "OUTBOUND_QUEUED",
+    messageId: input.messageId,
   };
 }
 
@@ -526,6 +528,7 @@ export async function dispatchOutboundMessage(
           contactId: message.conversation.contact.id,
           waId: message.conversation.contact.waId,
           metadata: message.conversation.contact.metadata,
+          messageId: message.id,
         })
       : null;
 

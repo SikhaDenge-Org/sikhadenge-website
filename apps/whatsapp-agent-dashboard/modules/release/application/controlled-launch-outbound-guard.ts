@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db/prisma";
+import { assertActiveControlledLaunchOutboundApproval, ControlledLaunchOutboundApprovalError } from "@/modules/release/application/controlled-launch-outbound-approval";
 import type { ControlledLaunchStateRecord } from "@/modules/release/application/controlled-launch-state";
 import { prismaControlledLaunchStateRepository } from "@/modules/release/infrastructure/prisma-controlled-launch-state-repository";
 
@@ -7,6 +8,7 @@ export type ControlledLaunchOutboundContext = {
   connectionId: string;
   channel: "WHATSAPP";
   action: "OUTBOUND_QUEUED";
+  messageId: string;
 };
 
 export type ControlledLaunchOutboundDenyCode =
@@ -20,6 +22,7 @@ export type ControlledLaunchOutboundDenyCode =
   | "CONTROLLED_LAUNCH_CONNECTION_NOT_ACTIVE"
   | "CONTROLLED_LAUNCH_KILL_SWITCH_ACTIVE"
   | "CONTROLLED_LAUNCH_APPROVAL_ENGINE_REQUIRED"
+  | "CONTROLLED_LAUNCH_APPROVAL_REQUIRED"
   | "CONTROLLED_LAUNCH_BOUNDED_SCOPE_ENFORCEMENT_REQUIRED"
   | "CONTROLLED_LAUNCH_APPROVED_FLOW_PROOF_REQUIRED"
   | "CONTROLLED_LAUNCH_PROVIDER_CONNECTION_MISMATCH"
@@ -94,6 +97,7 @@ export function evaluateControlledLaunchOutbound(input: {
   context: ControlledLaunchOutboundContext;
   state: ControlledLaunchStateRecord | null;
   killSwitches?: readonly ControlledLaunchKillSwitchSnapshot[];
+  approvalVerified?: boolean;
 }): ControlledLaunchOutboundDecision {
   const { context, state } = input;
   if (!state) {
@@ -159,9 +163,9 @@ export function evaluateControlledLaunchOutbound(input: {
 
   switch (state.writePolicy) {
     case "HUMAN_APPROVAL_REQUIRED":
-      return deny(
-        "CONTROLLED_LAUNCH_APPROVAL_ENGINE_REQUIRED",
-        "Human-approved outbound writes remain blocked until an authoritative persisted approval proof is enforced at runtime.",
+      return input.approvalVerified ? { allowed: true } : deny(
+        "CONTROLLED_LAUNCH_APPROVAL_REQUIRED",
+        "This queued outbound message does not have a current persisted human approval.",
       );
     case "BOUNDED_AUTOPILOT":
       return deny(
@@ -172,11 +176,6 @@ export function evaluateControlledLaunchOutbound(input: {
       return deny(
         "CONTROLLED_LAUNCH_APPROVED_FLOW_PROOF_REQUIRED",
         "Approved-flow outbound writes remain blocked until the provider boundary receives and verifies an authoritative persisted flow proof.",
-      );
-    case "NO_EXTERNAL_WRITES":
-      return deny(
-        "CONTROLLED_LAUNCH_EXTERNAL_WRITES_DISABLED",
-        "Persisted controlled launch write policy disables external writes.",
       );
   }
 }
@@ -212,6 +211,7 @@ export async function assertControlledLaunchOutboundAllowed(
     if (
       !context.workspaceId.trim() ||
       !context.connectionId.trim() ||
+      !context.messageId.trim() ||
       context.channel !== "WHATSAPP" ||
       context.action !== "OUTBOUND_QUEUED"
     ) {
@@ -274,11 +274,12 @@ export async function assertControlledLaunchOutboundAllowed(
       }),
     );
 
-    const decision = evaluateControlledLaunchOutbound({
-      context,
-      state,
-      killSwitches,
-    });
+    let approvalVerified = false;
+    if (state?.writePolicy === "HUMAN_APPROVAL_REQUIRED") {
+      await assertActiveControlledLaunchOutboundApproval({ workspaceId: context.workspaceId, connectionId: context.connectionId, messageId: context.messageId, controlledLaunchStateVersion: state.version });
+      approvalVerified = true;
+    }
+    const decision = evaluateControlledLaunchOutbound({ context, state, killSwitches, approvalVerified });
     if (!decision.allowed) {
       throw new ControlledLaunchOutboundDeniedError(
         decision.code,
@@ -287,6 +288,7 @@ export async function assertControlledLaunchOutboundAllowed(
     }
   } catch (error) {
     if (error instanceof ControlledLaunchOutboundDeniedError) throw error;
+    if (error instanceof ControlledLaunchOutboundApprovalError) throw new ControlledLaunchOutboundDeniedError("CONTROLLED_LAUNCH_APPROVAL_REQUIRED", error.message);
     throw new ControlledLaunchOutboundDeniedError(
       "CONTROLLED_LAUNCH_GOVERNANCE_UNAVAILABLE",
       `Persisted outbound governance could not be verified: ${
