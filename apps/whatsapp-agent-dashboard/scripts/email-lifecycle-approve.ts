@@ -14,8 +14,20 @@ import { PrismaEmailSenderRepository } from "../modules/email-automation/infrast
 const WORKSPACE_SLUG = "sikhadenge-default";
 const SUPPORT_EMAIL = "support@sikhadenge.in";
 
+function canonicalJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, canonicalJson(item)]),
+    );
+  }
+  return value;
+}
+
 function sameJson(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return JSON.stringify(canonicalJson(left)) === JSON.stringify(canonicalJson(right));
 }
 async function main() {
   const workspace = await prisma.engageWorkspace.findUnique({
