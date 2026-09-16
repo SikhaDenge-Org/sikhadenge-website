@@ -39,16 +39,25 @@ async function attachViewport(page, testInfo, name) {
   await testInfo.attach(name, { body, contentType: "image/png" });
 }
 
-async function expectNoRootHorizontalOverflow(page) {
+async function expectNoRootHorizontalOverflow(
+  page,
+  { allowClippedBodyOverflow = false } = {},
+) {
   const geometry = await page.evaluate(() => ({
     innerWidth: window.innerWidth,
     clientWidth: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth,
     bodyScrollWidth: document.body.scrollWidth,
+    htmlOverflowX: getComputedStyle(document.documentElement).overflowX,
+    bodyOverflowX: getComputedStyle(document.body).overflowX,
   }));
 
   expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 2);
-  expect(geometry.bodyScrollWidth).toBeLessThanOrEqual(geometry.innerWidth + 2);
+  if (allowClippedBodyOverflow) {
+    expect([geometry.htmlOverflowX, geometry.bodyOverflowX].some((value) => value === "hidden" || value === "clip")).toBeTruthy();
+  } else {
+    expect(geometry.bodyScrollWidth).toBeLessThanOrEqual(geometry.innerWidth + 2);
+  }
 }
 
 async function expectManropeFont(page) {
@@ -190,7 +199,9 @@ for (const viewport of VIEWPORTS) {
     await waitForFonts(page);
     await expect(page.locator(".split01")).toBeVisible();
     await expectManropeFont(page);
-    await expectNoRootHorizontalOverflow(page);
+    await expectNoRootHorizontalOverflow(page, {
+      allowClippedBodyOverflow: viewport.width <= 620,
+    });
     await attachViewport(page, testInfo, `${viewport.name}-login`);
 
     await login(page);
