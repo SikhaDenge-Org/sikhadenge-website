@@ -19,6 +19,8 @@ export type ControlledLaunchOutboundApprovalRecord = {
   expiresAt: Date;
   consumedAt: Date | null;
   revokedAt: Date | null;
+  revokedByUserId: string | null;
+  revokeReason: string | null;
   createdAt: Date;
 };
 
@@ -225,7 +227,9 @@ export async function approveControlledLaunchOutbound(input: {
 
     await tx.$executeRaw`
       UPDATE "EngageControlledLaunchOutboundApproval"
-      SET "revokedAt" = CURRENT_TIMESTAMP
+      SET "revokedAt" = CURRENT_TIMESTAMP,
+          "revokedByUserId" = ${approvedByUserId},
+          "revokeReason" = ${"Superseded by a newer approval for the same queued message."}
       WHERE "workspaceId" = ${workspaceId}
         AND "connectionId" = ${connectionId}
         AND "messageId" = ${messageId}
@@ -244,7 +248,7 @@ export async function approveControlledLaunchOutbound(input: {
         ${approvedByUserId}, ${reason}, ${expiresAt}
       )
       RETURNING "id", "workspaceId", "connectionId", "messageId", "contentFingerprint", "controlledLaunchStateVersion",
-                "approvedByUserId", "reason", "approvedAt", "expiresAt", "consumedAt", "revokedAt", "createdAt"
+                "approvedByUserId", "reason", "approvedAt", "expiresAt", "consumedAt", "revokedAt", "revokedByUserId", "revokeReason", "createdAt"
     `;
     const created = rows[0];
     if (!created) throw new ControlledLaunchOutboundApprovalError("APPROVAL_PERSIST_FAILED", "Failed to persist outbound approval.");
@@ -258,7 +262,7 @@ export async function getActiveControlledLaunchOutboundApproval(
 ): Promise<ControlledLaunchOutboundApprovalRecord | null> {
   const rows = await client.$queryRaw<RawApproval[]>`
     SELECT "id", "workspaceId", "connectionId", "messageId", "contentFingerprint", "controlledLaunchStateVersion",
-           "approvedByUserId", "reason", "approvedAt", "expiresAt", "consumedAt", "revokedAt", "createdAt"
+           "approvedByUserId", "reason", "approvedAt", "expiresAt", "consumedAt", "revokedAt", "revokedByUserId", "revokeReason", "createdAt"
     FROM "EngageControlledLaunchOutboundApproval"
     WHERE "workspaceId" = ${context.workspaceId}
       AND "connectionId" = ${context.connectionId}
@@ -309,7 +313,7 @@ export async function consumeControlledLaunchOutboundApproval(
         AND launch."externalWritesAllowed" = true
       RETURNING approval."id", approval."workspaceId", approval."connectionId", approval."messageId", approval."contentFingerprint",
                 approval."controlledLaunchStateVersion", approval."approvedByUserId", approval."reason",
-                approval."approvedAt", approval."expiresAt", approval."consumedAt", approval."revokedAt", approval."createdAt"
+                approval."approvedAt", approval."expiresAt", approval."consumedAt", approval."revokedAt", approval."revokedByUserId", approval."revokeReason", approval."createdAt"
     `;
     const consumed = rows[0];
     if (!consumed) {
@@ -332,10 +336,49 @@ export async function consumeCurrentControlledLaunchOutboundApproval(input: { wo
         AND approval."contentFingerprint" = ${contentFingerprint} AND approval."controlledLaunchStateVersion" = launch."version"
         AND approval."consumedAt" IS NULL AND approval."revokedAt" IS NULL AND approval."expiresAt" > CURRENT_TIMESTAMP
         AND launch."workspaceId" = approval."workspaceId" AND launch."mode" = 'APPROVAL_ONLY' AND launch."writePolicy" = 'HUMAN_APPROVAL_REQUIRED' AND launch."externalWritesAllowed" = true
-      RETURNING approval."id", approval."workspaceId", approval."connectionId", approval."messageId", approval."contentFingerprint", approval."controlledLaunchStateVersion", approval."approvedByUserId", approval."reason", approval."approvedAt", approval."expiresAt", approval."consumedAt", approval."revokedAt", approval."createdAt"
+      RETURNING approval."id", approval."workspaceId", approval."connectionId", approval."messageId", approval."contentFingerprint", approval."controlledLaunchStateVersion", approval."approvedByUserId", approval."reason", approval."approvedAt", approval."expiresAt", approval."consumedAt", approval."revokedAt", approval."revokedByUserId", approval."revokeReason", approval."createdAt"
     `;
     const consumed = rows[0];
     if (!consumed) throw new ControlledLaunchOutboundApprovalError("APPROVAL_CONSUME_DENIED", "Current persisted approval could not be atomically consumed before the provider write.");
     return mapApproval(consumed);
+  });
+}
+
+export async function revokeControlledLaunchOutboundApproval(input: {
+  approvalId: string;
+  revokedByUserId: string;
+  reason: string;
+}): Promise<ControlledLaunchOutboundApprovalRecord> {
+  const approvalId = nonEmpty(input.approvalId, "approvalId", 200);
+  const revokedByUserId = nonEmpty(input.revokedByUserId, "revokedByUserId", 200);
+  const reason = nonEmpty(input.reason, "Revocation reason", 1_000);
+  return prisma.$transaction(async (tx) => {
+    const current = await tx.$queryRaw<RawApproval[]>`
+      SELECT "id", "workspaceId", "connectionId", "messageId", "contentFingerprint", "controlledLaunchStateVersion",
+             "approvedByUserId", "reason", "approvedAt", "expiresAt", "consumedAt", "revokedAt", "revokedByUserId", "revokeReason", "createdAt"
+      FROM "EngageControlledLaunchOutboundApproval"
+      WHERE "id" = ${approvalId}
+      FOR UPDATE
+    `;
+    const approval = current[0];
+    if (!approval) throw new ControlledLaunchOutboundApprovalError("APPROVAL_NOT_FOUND", "Persisted outbound approval was not found.");
+    if (approval.consumedAt) throw new ControlledLaunchOutboundApprovalError("APPROVAL_ALREADY_CONSUMED", "Consumed outbound approval cannot be revoked.");
+    if (approval.revokedAt) throw new ControlledLaunchOutboundApprovalError("APPROVAL_ALREADY_REVOKED", "Outbound approval has already been revoked.");
+    if (approval.expiresAt.getTime() <= Date.now()) throw new ControlledLaunchOutboundApprovalError("APPROVAL_EXPIRED", "Expired outbound approval cannot be revoked.");
+    const actor = await tx.engageWorkspaceMembership.findFirst({
+      where: { workspaceId: approval.workspaceId, userId: revokedByUserId, isActive: true, user: { isActive: true } },
+      select: { id: true },
+    });
+    if (!actor) throw new ControlledLaunchOutboundApprovalError("APPROVAL_ACTOR_FORBIDDEN", "Revoking user is not an active member of the approval workspace.");
+    const rows = await tx.$queryRaw<RawApproval[]>`
+      UPDATE "EngageControlledLaunchOutboundApproval"
+      SET "revokedAt" = CURRENT_TIMESTAMP, "revokedByUserId" = ${revokedByUserId}, "revokeReason" = ${reason}
+      WHERE "id" = ${approvalId} AND "consumedAt" IS NULL AND "revokedAt" IS NULL AND "expiresAt" > CURRENT_TIMESTAMP
+      RETURNING "id", "workspaceId", "connectionId", "messageId", "contentFingerprint", "controlledLaunchStateVersion",
+                "approvedByUserId", "reason", "approvedAt", "expiresAt", "consumedAt", "revokedAt", "revokedByUserId", "revokeReason", "createdAt"
+    `;
+    const revoked = rows[0];
+    if (!revoked) throw new ControlledLaunchOutboundApprovalError("APPROVAL_REVOKE_DENIED", "Active outbound approval could not be atomically revoked.");
+    return mapApproval(revoked);
   });
 }

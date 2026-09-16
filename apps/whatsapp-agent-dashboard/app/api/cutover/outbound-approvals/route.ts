@@ -7,6 +7,7 @@ import { readLegacyWhatsAppMappingMetadata } from "@/modules/channels/whatsapp/a
 import {
   approveControlledLaunchOutbound,
   ControlledLaunchOutboundApprovalError,
+  revokeControlledLaunchOutboundApproval,
 } from "@/modules/release/application/controlled-launch-outbound-approval";
 
 export const runtime = "nodejs";
@@ -86,6 +87,22 @@ export async function GET() {
   });
   const allowed = new Set(memberships.map((membership) => membership.workspaceId));
 
+  const approvalGroups = await Promise.all([...allowed].map((workspaceId) => prisma.$queryRaw<Array<{
+    id: string; workspaceId: string; connectionId: string; messageId: string; approvedByUserId: string; reason: string;
+    approvedAt: Date; expiresAt: Date; consumedAt: Date | null; revokedAt: Date | null; revokedByUserId: string | null; revokeReason: string | null; createdAt: Date;
+  }>>`
+    SELECT "id", "workspaceId", "connectionId", "messageId", "approvedByUserId", "reason",
+           "approvedAt", "expiresAt", "consumedAt", "revokedAt", "revokedByUserId", "revokeReason", "createdAt"
+    FROM "EngageControlledLaunchOutboundApproval"
+    WHERE "workspaceId" = ${workspaceId}
+    ORDER BY "createdAt" DESC
+    LIMIT 25
+  `));
+  const now = Date.now();
+  const approvals = approvalGroups.flat().sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).slice(0, 50).map((approval) => ({
+    ...approval,
+    status: approval.consumedAt ? "CONSUMED" : approval.revokedAt ? "REVOKED" : approval.expiresAt.getTime() <= now ? "EXPIRED" : "ACTIVE",
+  }));
   return NextResponse.json({
     success: true,
     candidates: mapped.filter(({ mapping }) => allowed.has(mapping.workspaceId)).map(({ message, mapping }) => ({
@@ -99,6 +116,7 @@ export async function GET() {
       connectionId: mapping.connectionId,
       queuedAt: message.messageTimestamp,
     })),
+    approvals,
   });
 }
 
@@ -167,6 +185,29 @@ export async function POST(req: NextRequest) {
     const code = error instanceof ControlledLaunchOutboundApprovalError
       ? error.code
       : "OUTBOUND_APPROVAL_FAILED";
+    return errorResponse(400, code, message);
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  const user = await requirePlatformAdmin();
+  if (!user) return errorResponse(403, "AUTH_REQUIRED", "Platform admin authentication required.");
+  let body: unknown;
+  try { body = await req.json(); } catch { return errorResponse(400, "INVALID_JSON", "A JSON request body is required."); }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return errorResponse(400, "INVALID_BODY", "Request body must be an object.");
+  const input = body as Record<string, unknown>;
+  const unexpected = Object.keys(input).filter((key) => !["approvalId", "reason"].includes(key));
+  if (unexpected.length > 0) return errorResponse(400, "UNSUPPORTED_FIELDS", `Unsupported revocation fields: ${unexpected.join(", ")}`);
+  const approvalId = typeof input.approvalId === "string" ? input.approvalId.trim() : "";
+  const reason = typeof input.reason === "string" ? input.reason.trim() : "";
+  if (!approvalId) return errorResponse(400, "APPROVAL_REQUIRED", "approvalId is required.");
+  if (!reason) return errorResponse(400, "REASON_REQUIRED", "Revocation reason is required.");
+  try {
+    const approval = await revokeControlledLaunchOutboundApproval({ approvalId, revokedByUserId: user.id, reason });
+    return NextResponse.json({ success: true, approval: { id: approval.id, messageId: approval.messageId, revokedAt: approval.revokedAt, revokedByUserId: approval.revokedByUserId, revokeReason: approval.revokeReason } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Outbound approval revocation failed.";
+    const code = error instanceof ControlledLaunchOutboundApprovalError ? error.code : "OUTBOUND_APPROVAL_REVOKE_FAILED";
     return errorResponse(400, code, message);
   }
 }

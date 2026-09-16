@@ -14,6 +14,8 @@ CREATE TABLE "EngageControlledLaunchOutboundApproval" (
     "expiresAt" TIMESTAMP(3) NOT NULL,
     "consumedAt" TIMESTAMP(3),
     "revokedAt" TIMESTAMP(3),
+    "revokedByUserId" TEXT,
+    "revokeReason" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "EngageControlledLaunchOutboundApproval_pkey" PRIMARY KEY ("id"),
@@ -22,7 +24,10 @@ CREATE TABLE "EngageControlledLaunchOutboundApproval" (
     CONSTRAINT "EngageControlledLaunchOutboundApproval_expiry_check"
         CHECK ("expiresAt" > "approvedAt"),
     CONSTRAINT "EngageControlledLaunchOutboundApproval_terminal_state_check"
-        CHECK (NOT ("consumedAt" IS NOT NULL AND "revokedAt" IS NOT NULL))
+        CHECK (NOT ("consumedAt" IS NOT NULL AND "revokedAt" IS NOT NULL)),
+    CONSTRAINT "EngageControlledLaunchOutboundApproval_revoke_audit_check"
+        CHECK (("revokedAt" IS NULL AND "revokedByUserId" IS NULL AND "revokeReason" IS NULL) OR
+               ("revokedAt" IS NOT NULL AND "revokedByUserId" IS NOT NULL AND length(trim("revokeReason")) > 0))
 );
 
 CREATE INDEX "EngageControlledLaunchOutboundApproval_workspace_connection_expiry_idx"
@@ -48,4 +53,9 @@ ALTER TABLE "EngageControlledLaunchOutboundApproval"
 ALTER TABLE "EngageControlledLaunchOutboundApproval"
     ADD CONSTRAINT "EngageControlledLaunchOutboundApproval_approvedByUserId_fkey"
     FOREIGN KEY ("approvedByUserId") REFERENCES "DashboardUser"("id")
+    ON DELETE RESTRICT ON UPDATE CASCADE;
+
+ALTER TABLE "EngageControlledLaunchOutboundApproval"
+    ADD CONSTRAINT "EngageControlledLaunchOutboundApproval_revokedByUserId_fkey"
+    FOREIGN KEY ("revokedByUserId") REFERENCES "DashboardUser"("id")
     ON DELETE RESTRICT ON UPDATE CASCADE;

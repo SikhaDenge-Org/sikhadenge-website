@@ -31,6 +31,8 @@ function approval(
     expiresAt: new Date("2026-09-16T10:10:00.000Z"),
     consumedAt: null,
     revokedAt: null,
+    revokedByUserId: null,
+    revokeReason: null,
     createdAt: new Date("2026-09-16T10:00:00.000Z"),
     ...overrides,
   };

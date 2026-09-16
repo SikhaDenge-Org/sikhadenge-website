@@ -25,6 +25,18 @@ type ApprovalResponse = {
     controlledLaunchStateVersion: number;
   };
 };
+type ApprovalHistory = {
+  id: string;
+  messageId: string;
+  reason: string;
+  approvedAt: string;
+  expiresAt: string;
+  consumedAt: string | null;
+  revokedAt: string | null;
+  revokedByUserId: string | null;
+  revokeReason: string | null;
+  status: "ACTIVE" | "CONSUMED" | "REVOKED" | "EXPIRED";
+};
 
 type Readiness = {
   readyForSupervisedCutover: boolean;
@@ -69,6 +81,10 @@ export default function CutoverReadinessManager() {
   const [ttlMs, setTtlMs] = useState(10 * 60 * 1_000);
   const [approving, setApproving] = useState(false);
   const [approvalResult, setApprovalResult] = useState("");
+  const [approvals, setApprovals] = useState<ApprovalHistory[]>([]);
+  const [selectedApprovalId, setSelectedApprovalId] = useState("");
+  const [revokeReason, setRevokeReason] = useState("");
+  const [revoking, setRevoking] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -79,9 +95,14 @@ export default function CutoverReadinessManager() {
         fetch("/api/cutover/outbound-approvals", { cache: "no-store" }),
       ]);
       setData(await readJson<Readiness>(response));
-      const approvalData = await readJson<{ success: boolean; candidates: ApprovalCandidate[] }>(approvalResponse);
+      const approvalData = await readJson<{ success: boolean; candidates: ApprovalCandidate[]; approvals: ApprovalHistory[] }>(approvalResponse);
       setCandidates(approvalData.candidates);
+      setApprovals(approvalData.approvals);
       setSelectedMessageId((current) => current || approvalData.candidates[0]?.messageId || "");
+      setSelectedApprovalId((current) => {
+        const active = approvalData.approvals.filter((approval) => approval.status === "ACTIVE");
+        return active.some((approval) => approval.id === current) ? current : active[0]?.id || "";
+      });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Cutover readiness could not load.");
     } finally {
@@ -114,6 +135,30 @@ export default function CutoverReadinessManager() {
     }
   }
 
+  async function revokeSelected() {
+    if (!selectedApprovalId || !revokeReason.trim()) {
+      setError("Select an active approval and enter a revocation reason.");
+      return;
+    }
+    setRevoking(true);
+    setError("");
+    setApprovalResult("");
+    try {
+      const response = await fetch("/api/cutover/outbound-approvals", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approvalId: selectedApprovalId, reason: revokeReason.trim() }),
+      });
+      const result = await readJson<{ success: boolean; approval: { id: string; messageId: string } }>(response);
+      setApprovalResult("Revoked approval " + result.approval.id + " for message " + result.approval.messageId + ".");
+      setRevokeReason("");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Outbound approval revocation failed.");
+    } finally {
+      setRevoking(false);
+    }
+  }
   useEffect(() => {
     void load();
   }, []);
@@ -210,8 +255,30 @@ export default function CutoverReadinessManager() {
           </select>
           <button type="button" className="primary" onClick={() => void approveSelected()} disabled={approving || !selectedMessageId || !approvalReason.trim()}>
             {approving ? "Persisting approval…" : "Approve exactly once"}
+          </button>          {approvalResult ? <div className="suite-alert success">{approvalResult}</div> : null}
+
+          <div className="suite-list compact">
+            {approvals.slice(0, 10).map((approval) => (
+              <article key={approval.id}>
+                <span>{approval.status} · {approval.messageId}</span>
+                <strong>{new Date(approval.approvedAt).toLocaleString()}</strong>
+                <p>{approval.status === "REVOKED" ? approval.revokeReason : approval.reason}</p>
+              </article>
+            ))}
+          </div>
+
+          <label>Active approval to revoke</label>
+          <select value={selectedApprovalId} onChange={(event) => setSelectedApprovalId(event.target.value)}>
+            {approvals.filter((approval) => approval.status === "ACTIVE").length === 0 ? <option value="">No active approvals</option> : null}
+            {approvals.filter((approval) => approval.status === "ACTIVE").map((approval) => (
+              <option key={approval.id} value={approval.id}>{approval.messageId} · expires {new Date(approval.expiresAt).toLocaleTimeString()}</option>
+            ))}
+          </select>
+          <label>Revocation reason</label>
+          <textarea value={revokeReason} onChange={(event) => setRevokeReason(event.target.value)} rows={2} placeholder="Why should this persisted approval be cancelled?" />
+          <button type="button" className="secondary" onClick={() => void revokeSelected()} disabled={revoking || !selectedApprovalId || !revokeReason.trim()}>
+            {revoking ? "Revoking approval…" : "Revoke active approval"}
           </button>
-          {approvalResult ? <div className="suite-alert success">{approvalResult}</div> : null}
         </div>
       </section>
 
