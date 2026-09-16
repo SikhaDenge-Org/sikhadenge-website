@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db/prisma";
+import { assertCurrentControlledLaunchApprovedFlow, ControlledLaunchApprovedFlowError } from "@/modules/release/application/controlled-launch-approved-flow";
 import { assertActiveControlledLaunchOutboundApproval, ControlledLaunchOutboundApprovalError } from "@/modules/release/application/controlled-launch-outbound-approval";
 import type { ControlledWritePolicy } from "@/modules/release/application/controlled-launch";
 import type { ControlledLaunchStateRecord } from "@/modules/release/application/controlled-launch-state";
@@ -108,6 +109,7 @@ export function evaluateControlledLaunchOutbound(input: {
   killSwitches?: readonly ControlledLaunchKillSwitchSnapshot[];
   approvalVerified?: boolean;
   boundedScopeVerified?: boolean;
+  approvedFlowVerified?: boolean;
 }): ControlledLaunchOutboundDecision {
   const { context, state } = input;
   if (!state) {
@@ -183,7 +185,7 @@ export function evaluateControlledLaunchOutbound(input: {
         "Bounded autopilot requires a positive persisted real-lead cap and runtime recipient enforcement.",
       );
     case "APPROVED_FLOWS_ONLY":
-      return deny(
+      return input.approvedFlowVerified ? { allowed: true } : deny(
         "CONTROLLED_LAUNCH_APPROVED_FLOW_PROOF_REQUIRED",
         "Approved-flow outbound writes remain blocked until the provider boundary receives and verifies an authoritative persisted flow proof.",
       );
@@ -306,7 +308,12 @@ export async function assertControlledLaunchOutboundAllowed(
       approvalVerified = true;
     }
     const boundedScopeVerified = Boolean(state?.writePolicy === "BOUNDED_AUTOPILOT" && state.mode === "LIMITED_AUTOPILOT" && state.scope.maxRealLeads > 0);
-    const decision = evaluateControlledLaunchOutbound({ context, state, killSwitches, approvalVerified, boundedScopeVerified });
+    let approvedFlowVerified = false;
+    if (state?.writePolicy === "APPROVED_FLOWS_ONLY") {
+      await assertCurrentControlledLaunchApprovedFlow({ workspaceId: context.workspaceId, connectionId: context.connectionId, messageId: context.messageId });
+      approvedFlowVerified = true;
+    }
+    const decision = evaluateControlledLaunchOutbound({ context, state, killSwitches, approvalVerified, boundedScopeVerified, approvedFlowVerified });
     if (!decision.allowed) {
       throw new ControlledLaunchOutboundDeniedError(
         decision.code,
@@ -318,6 +325,7 @@ export async function assertControlledLaunchOutboundAllowed(
   } catch (error) {
     if (error instanceof ControlledLaunchOutboundDeniedError) throw error;
     if (error instanceof ControlledLaunchOutboundApprovalError) throw new ControlledLaunchOutboundDeniedError("CONTROLLED_LAUNCH_APPROVAL_REQUIRED", error.message);
+    if (error instanceof ControlledLaunchApprovedFlowError) throw new ControlledLaunchOutboundDeniedError("CONTROLLED_LAUNCH_APPROVED_FLOW_PROOF_REQUIRED", error.message);
     throw new ControlledLaunchOutboundDeniedError(
       "CONTROLLED_LAUNCH_GOVERNANCE_UNAVAILABLE",
       `Persisted outbound governance could not be verified: ${

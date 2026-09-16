@@ -523,6 +523,7 @@ export async function dispatchCampaignPlan(campaignId: string, actorId: string) 
             components: templateComponents(payload.variables),
           },
           idempotencyKey: `campaign:${payload.campaignId}:${recipient.id}`,
+          flowProvenance: { flowType: "CAMPAIGN", flowId: payload.campaignId, flowVersion: 1 },
         });
         if (result.queued || result.duplicate) queued += 1;
         if (result.message?.id) messageIds.push(result.message.id);

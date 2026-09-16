@@ -389,6 +389,7 @@ export async function queueOutboundMessage(input: QueueOutboundInput) {
           payload: toJson({
             conversationId: conversation.id,
             idempotencyKey,
+            approvedFlow: input.flowProvenance ?? null,
             kind: content.kind,
             assetId: mediaAssetId,
           }),
@@ -428,6 +429,7 @@ export async function queueOutboundMessage(input: QueueOutboundInput) {
           rawPayload: toJson({
             outbound: {
               idempotencyKey,
+              approvedFlow: input.flowProvenance ?? null,
               kind: content.kind,
               templateId: template?.id ?? null,
               templateName: template?.name ?? null,

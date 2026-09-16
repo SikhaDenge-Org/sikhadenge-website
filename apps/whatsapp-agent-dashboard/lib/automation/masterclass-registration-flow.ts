@@ -557,6 +557,7 @@ async function queueAndDispatch(input: {
     sentById: input.actorId || undefined,
     content,
     idempotencyKey: input.idempotencyKey,
+    flowProvenance: { flowType: "AUTOMATION", flowId: "masterclass-registration", flowVersion: 1 },
     now,
   });
 

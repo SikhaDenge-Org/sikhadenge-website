@@ -208,6 +208,19 @@ function testApprovedFlowsRequireAuthoritativeFlowProof() {
   );
 }
 
+function testApprovedFlowsAllowWhenAuthoritativeProofIsVerified() {
+  const decision = evaluateControlledLaunchOutbound({
+    context,
+    state: state({
+      stage: "STABLE_FULL_ROLLOUT",
+      mode: "FULL_AUTOPILOT_FOR_APPROVED_FLOWS",
+      writePolicy: "APPROVED_FLOWS_ONLY",
+    }),
+    approvedFlowVerified: true,
+  });
+  assert.equal(decision.allowed, true);
+}
+
 function testProviderConnectionBinding() {
   assert.doesNotThrow(() =>
     assertWhatsAppProviderConnectionBinding(context, "12345"),
@@ -292,6 +305,7 @@ async function main() {
   testBoundedAutopilotRequiresEnforcedRuntimeCap();
   testBoundedAutopilotAllowsWhenRuntimeCapIsVerified();
   testApprovedFlowsRequireAuthoritativeFlowProof();
+  testApprovedFlowsAllowWhenAuthoritativeProofIsVerified();
   testProviderConnectionBinding();
   testProviderRecipientBinding();
   await testProviderBoundaryRejectsBeforeNetworkIo();
