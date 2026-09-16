@@ -7,6 +7,7 @@ import { getEmailRuntimePolicy } from "../application/runtime-policy";
 import { buildEmailAutomationIdempotencyKey } from "./contracts";
 import { enqueueEmailAutomationEvent } from "./event-outbox";
 import { emailAutomationConditionPasses, emailAutomationContactContext, executeEmailAutomationCrmAction } from "./action-executor";
+import { createEmailUnsubscribeUrl } from "../campaigns/unsubscribe";
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -45,7 +46,7 @@ function automationPolicyReady(): { ready: boolean; reason: string | null } {
   return { ready: true, reason: null };
 }
 
-async function assertContactMayReceiveAutomation(input: { workspaceId: string; contactId: string }) {
+async function assertContactMayReceiveAutomation(input: { workspaceId: string; contactId: string; purpose: "TRANSACTIONAL" | "MARKETING" }) {
   const contact = await prisma.whatsAppContact.findUnique({
     where: { id: input.contactId },
     select: { id: true, email: true, displayName: true, profileName: true, consentStatus: true },
@@ -69,6 +70,14 @@ async function assertContactMayReceiveAutomation(input: { workspaceId: string; c
     select: { id: true, reason: true },
   });
   if (suppression) throw new Error(`Automation email is suppressed: ${suppression.reason}.`);
+  if (input.purpose === "MARKETING") {
+    const latestConsent = await prisma.engageCustomerConsentEvent.findFirst({
+      where: { workspaceId: input.workspaceId, customerRef: input.contactId, channel: "EMAIL", purpose: "MARKETING" },
+      orderBy: { occurredAt: "desc" },
+      select: { state: true },
+    });
+    if (latestConsent?.state !== "GRANTED") throw new Error("Affirmative EMAIL marketing consent is required for lifecycle automation.");
+  }
   return { ...contact, email: contact.email };
 }
 
@@ -147,9 +156,16 @@ export async function processEmailAutomationEvents(input: {
             const templateVersionId = typeof node.config.templateVersionId === "string" ? node.config.templateVersionId.trim() : "";
             if (!templateId || !templateVersionId) throw new Error(`Flow ${flow.name} has an unpinned SEND_EMAIL action.`);
             if (!event.contactId) throw new Error("Email automation event has no contactId.");
-            const deliverable = await assertContactMayReceiveAutomation({ workspaceId: input.workspaceId, contactId: event.contactId });
+            const emailPurpose = node.config.emailPurpose === "MARKETING" ? "MARKETING" : "TRANSACTIONAL";
+            const deliverable = await assertContactMayReceiveAutomation({ workspaceId: input.workspaceId, contactId: event.contactId, purpose: emailPurpose });
+            const sendValues = {
+              ...values,
+              ...(emailPurpose === "MARKETING"
+                ? { unsubscribe_url: createEmailUnsubscribeUrl({ workspaceId: input.workspaceId, contactId: event.contactId, email: deliverable.email }) }
+                : {}),
+            };
             const rawKey = buildEmailAutomationIdempotencyKey({ workspaceId: input.workspaceId, automationId: flow.flowId, automationVersion: flow.version, triggerEventId: event.id, contactId: event.contactId, actionNodeId: node.id });
-            const result = await sender.send({ workspaceId: input.workspaceId, templateId, templateVersionId, automationSenderIdentityId: typeof node.config.senderIdentityId === "string" ? node.config.senderIdentityId : null, to: [{ email: deliverable.email, name: deliverable.displayName || deliverable.profileName || undefined }], variables: values, idempotencyKey: compactIdempotencyKey(rawKey), actorUserId: flow.createdBy || input.actorUserId, deliveryContext: "AUTOMATION" });
+            const result = await sender.send({ workspaceId: input.workspaceId, templateId, templateVersionId, automationSenderIdentityId: typeof node.config.senderIdentityId === "string" ? node.config.senderIdentityId : null, to: [{ email: deliverable.email, name: deliverable.displayName || deliverable.profileName || undefined }], variables: sendValues, idempotencyKey: compactIdempotencyKey(rawKey), actorUserId: flow.createdBy || input.actorUserId, deliveryContext: "AUTOMATION" });
             actionCount += 1;
             results.push({ eventId: event.id, flowId: flow.flowId, nodeId: node.id, messageId: result.message.id, replayed: result.replayed });
             if (result.message.externalRequestSent) {
