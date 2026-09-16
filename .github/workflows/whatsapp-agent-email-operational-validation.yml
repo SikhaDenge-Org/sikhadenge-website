@@ -1,0 +1,68 @@
+name: WhatsApp Agent Email Operational Validation
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+
+permissions:
+  contents: read
+
+jobs:
+  validate-email-operation:
+    if: contains(github.event.head_commit.message, '[email-operational-validation]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_DEPLOYED_SHA: 2c8938f2c07e6969790e2c210bff2be90100d92e
+      MESSAGE_ID: cmu49vhqz0005kwcjyw859za4
+      IDEMPOTENCY_KEY: internal-test-email-internal-35117460188-1
+    steps:
+      - name: Validate production access
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          missing=0
+          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            [[ -n "${!variable_name:-}" ]] || { echo "Missing production secret: $variable_name" >&2; missing=1; }
+          done
+          test "$missing" = "0"
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+      - name: Validate persisted send and idempotency
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_DEPLOYED_SHA='$EXPECTED_DEPLOYED_SHA' MESSAGE_ID='$MESSAGE_ID' IDEMPOTENCY_KEY='$IDEMPOTENCY_KEY' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          cd "$APP"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_DEPLOYED_SHA"
+          set -a
+          source .env
+          set +a
+          test "${EMAIL_RUNTIME_MODE:-}" = "DRY_RUN"
+          test "${EMAIL_EXTERNAL_WRITES_ENABLED:-false}" = "false"
+          export MESSAGE_ID IDEMPOTENCY_KEY
+          npm exec -- tsx -e 'import { prisma } from "./lib/db/prisma"; import { ManualEmailSendService } from "./modules/email-automation/application/manual-send-service"; const id=process.env.MESSAGE_ID!; const key=process.env.IDEMPOTENCY_KEY!; const m=await prisma.engageEmailMessage.findUnique({where:{id}}); if(!m) throw new Error("message missing"); if(m.status!=="SENT"||!m.externalRequestSent||!m.providerMessageId||!m.sentAt) throw new Error("persisted send invalid"); const to=Array.isArray(m.toRecipients)?m.toRecipients:[]; if(!to.some((x:any)=>x?.email==="ankitsingh@sikhadenge.in")) throw new Error("recipient mismatch"); const replay=await new ManualEmailSendService().send({workspaceId:m.workspaceId,templateId:m.templateId!,manualSenderIdentityId:m.senderIdentityId,to:[{email:"ankitsingh@sikhadenge.in"}],idempotencyKey:key,actorUserId:m.createdById}); if(!replay.replayed||replay.message.id!==m.id) throw new Error("idempotency replay failed"); const count=await prisma.engageEmailMessage.count({where:{workspaceId:m.workspaceId,idempotencyKey:key}}); if(count!==1) throw new Error("duplicate record detected"); console.log(`VALIDATION_STATUS=PASS`); console.log(`MESSAGE_STATUS=${m.status}`); console.log(`PROVIDER_MESSAGE_ID_PRESENT=${Boolean(m.providerMessageId)}`); console.log(`IDEMPOTENCY_REPLAYED=${replay.replayed}`); console.log(`DUPLICATE_RECORD_COUNT=${count}`); await prisma.$disconnect();'
+          REMOTE
