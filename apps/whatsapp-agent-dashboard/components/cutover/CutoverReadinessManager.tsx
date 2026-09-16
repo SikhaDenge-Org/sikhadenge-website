@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import ApprovedFlowGovernancePanel from "./ApprovedFlowGovernancePanel";
+import GovernanceReadinessPanel from "./GovernanceReadinessPanel";
 
 type ApprovalCandidate = {
   messageId: string;
@@ -283,6 +284,8 @@ export default function CutoverReadinessManager() {
           </button>
         </div>
       </section>
+
+      <GovernanceReadinessPanel />
 
       <ApprovedFlowGovernancePanel />
 
