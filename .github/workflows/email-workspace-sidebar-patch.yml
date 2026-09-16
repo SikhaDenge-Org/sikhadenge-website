@@ -1,0 +1,66 @@
+name: Email Workspace Sidebar Patch
+
+on:
+  push:
+    branches:
+      - email-workspace-split-20260916-v6
+    paths:
+      - .github/workflows/email-workspace-sidebar-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: email-workspace-split-20260916-v6
+          fetch-depth: 0
+
+      - name: Patch Inbox Email live status
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('apps/whatsapp-agent-dashboard/components/inbox/InboxDashboardV2.tsx')
+          s = p.read_text()
+
+          old = '  const [channelFilter, setChannelFilter] = useState<ChannelId>("whatsapp");\n  const [scope, setScope] = useState<ConversationScope>("RECENT");'
+          new = '  const [channelFilter, setChannelFilter] = useState<ChannelId>("whatsapp");\n  const [emailConnected, setEmailConnected] = useState(false);\n  const [scope, setScope] = useState<ConversationScope>("RECENT");'
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '  useEffect(() => {\n    selectedIdRef.current = selectedId;\n  }, [selectedId]);\n\n  useEffect(() => {'
+          new = '''  useEffect(() => {\n    selectedIdRef.current = selectedId;\n  }, [selectedId]);\n\n  useEffect(() => {\n    let alive = true;\n    async function loadEmailStatus() {\n      try {\n        const response = await fetch("/api/email/connections", { cache: "no-store" });\n        if (!response.ok) return;\n        const payload = (await response.json()) as { connections?: Array<{ status?: string }> };\n        const connected = payload.connections?.some((item) => item.status === "CONNECTED" || item.status === "VERIFIED") ?? false;\n        if (alive) setEmailConnected(connected);\n      } catch {\n        if (alive) setEmailConnected(false);\n      }\n    }\n    void loadEmailStatus();\n    const timer = window.setInterval(() => void loadEmailStatus(), 30000);\n    return () => {\n      alive = false;\n      window.clearInterval(timer);\n    };\n  }, []);\n\n  useEffect(() => {'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '            const unread = channelUnread[channel.id];\n            const isActive = channelFilter === channel.id;\n            const content = ('
+          new = '            const unread = channelUnread[channel.id];\n            const isActive = channelFilter === channel.id;\n            const connected = channel.id === "email" ? emailConnected : channel.connected;\n            const content = ('
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '                {channel.connected ? ('
+          new = '                {connected ? ('
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '                  className="sx-chan is-pending"\n                  href="/email"'
+          new = '                  className={`sx-chan ${emailConnected ? "is-active" : "is-pending"}`}\n                  href="/email"'
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          p.write_text(s)
+          PY
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "SikhaDenge CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add apps/whatsapp-agent-dashboard/components/inbox/InboxDashboardV2.tsx
+          git diff --cached --check
+          git commit -m "feat(email): show live Gmail status in Inbox sidebar"
+          git push origin HEAD:email-workspace-split-20260916-v6
