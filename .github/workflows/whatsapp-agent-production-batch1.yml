@@ -376,3 +376,5 @@ jobs:
 # Internal email harness deployment retry marker: 2026-09-16
 
 # Internal email harness concurrency-safe deployment marker: 2026-09-16
+
+# Internal verification template harness deployment marker: 2026-09-16
