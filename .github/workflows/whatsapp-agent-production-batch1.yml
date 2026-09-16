@@ -372,3 +372,5 @@ jobs:
 # Email sidebar active-state deployment marker: 2026-09-16
 
 # Internal email one-shot test harness deployment marker: 2026-09-16
+
+# Internal email harness deployment retry marker: 2026-09-16
