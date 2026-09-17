@@ -22,6 +22,11 @@ grep -Fq 'EMAIL_AUTOMATION_PRODUCTION_PREFLIGHT=PASS' "$script"
 grep -Fq 'EMAIL_PREFLIGHT_EXPECTED_MODE="$PREFLIGHT_EXPECTED_MODE"' "$activate"
 grep -Fq 'EMAIL_PREFLIGHT_EXPECTED_MODE=LIMITED_COHORT' "$cohort"
 grep -Fq 'EMAIL_PREFLIGHT_EXPECTED_MODE=DRY_RUN' "$cohort"
+grep -Fq 'sync_pm2_email_env_from_file' "$cohort"
+grep -Fq 'EMAIL_AUTOMATION_COHORT_ALLOWLIST' "$cohort"
+grep -Fq 'sync-pm2-limited-cohort-env' "$cohort"
+grep -Fq 'restore-pm2-env' "$cohort"
+grep -Fq 'FAILED_STAGE=' "$cohort"
 if grep -Eqi 'pm2 restart|pm2 reload|systemctl enable|systemctl start|systemctl restart|crontab[[:space:]]+-[er]|tee[[:space:]]+/etc/cron|prisma migrate|UPDATE[[:space:]]+|INSERT[[:space:]]+INTO|DELETE[[:space:]]+FROM' "$script"; then
   printf 'Email scheduler production preflight must remain read-only.\n' >&2
   exit 1
