@@ -5,6 +5,7 @@ on:
     paths:
       - "apps/whatsapp-agent-dashboard/modules/email-automation/**"
       - "apps/whatsapp-agent-dashboard/modules/index.ts"
+      - "apps/whatsapp-agent-dashboard/app/email/**"
       - "apps/whatsapp-agent-dashboard/app/api/email/**"
       - "apps/whatsapp-agent-dashboard/app/api/internal/email/**"
       - "apps/whatsapp-agent-dashboard/scripts/email-automation-*.ts"
@@ -64,6 +65,9 @@ jobs:
 
       - name: Run email automation scheduler auth contracts
         run: npx tsx modules/email-automation/tests/automation-scheduler-auth.test.ts
+
+      - name: Run email E5 inbound inbox contracts
+        run: npx tsx modules/email-automation/tests/inbound-inbox.test.ts
 
       - name: Run email automation production preflight policy
         run: bash tests/email-automation-production-preflight-policy.test.sh
