@@ -1,0 +1,441 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum DashboardRole {
+  ADMIN
+  MANAGER
+  COUNSELOR
+  ANALYST
+  VIEWER
+}
+
+enum ConversationStatus {
+  OPEN
+  WAITING
+  RESOLVED
+  CLOSED
+  SPAM
+}
+
+enum AgentMode {
+  AI
+  HUMAN
+  REVIEW_REQUIRED
+  PAUSED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageActor {
+  CUSTOMER
+  AI
+  COUNSELOR
+  SYSTEM
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
+  LOCATION
+  INTERACTIVE
+  TEMPLATE
+  REACTION
+  UNSUPPORTED
+}
+
+enum MessageStatus {
+  RECEIVED
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum LeadTemperature {
+  HOT
+  WARM
+  COLD
+  UNQUALIFIED
+}
+
+enum LeadStage {
+  NEW
+  DISCOVERY
+  QUALIFIED
+  COUNSELOR_ASSIGNED
+  DEMO_BOOKED
+  PAYMENT_PENDING
+  ENROLLED
+  NURTURE
+  CLOSED
+}
+
+enum ConsentStatus {
+  UNKNOWN
+  OPTED_IN
+  OPTED_OUT
+}
+
+enum KnowledgeStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  ARCHIVED
+}
+
+enum LearningStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  MERGED
+}
+
+enum TemplateStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  PAUSED
+  DISABLED
+}
+
+model DashboardUser {
+  id           String        @id @default(cuid())
+  name         String
+  email        String        @unique
+  passwordHash String
+  role         DashboardRole @default(COUNSELOR)
+  isActive     Boolean       @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  sessions             DashboardSession[]
+  assignedConversations WhatsAppConversation[] @relation("ConversationAssignee")
+  assignedLeads         Lead[]                 @relation("LeadAssignee")
+  sentMessages          WhatsAppMessage[]      @relation("MessageSender")
+  leadNotes             LeadNote[]
+  reviewedLearning      LearningSuggestion[]   @relation("LearningReviewer")
+  auditLogs              AuditLog[]             @relation("AuditActor")
+
+  @@index([role, isActive])
+}
+
+model DashboardSession {
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  lastSeenAt DateTime @default(now())
+  revokedAt  DateTime?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  user DashboardUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt, revokedAt])
+}
+
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  email     String
+  ipAddress String?
+  succeeded Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([ipAddress, createdAt])
+}
+
+model WhatsAppContact {
+  id                 String        @id @default(cuid())
+  waId               String        @unique
+  phone              String        @unique
+  displayName        String?
+  profileName        String?
+  email              String?
+  city               String?
+  language           String?
+  consentStatus      ConsentStatus @default(UNKNOWN)
+  marketingOptInAt   DateTime?
+  marketingOptInSource String?
+  optedOutAt         DateTime?
+  metadata           Json?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  conversations WhatsAppConversation[]
+  lead          Lead?
+
+  @@index([displayName])
+  @@index([consentStatus])
+}
+
+model WhatsAppConversation {
+  id                         String             @id @default(cuid())
+  contactId                  String
+  assignedToId               String?
+  status                     ConversationStatus @default(OPEN)
+  agentMode                  AgentMode          @default(AI)
+  source                     String?
+  campaign                   String?
+  currentIntent              String?
+  detectedLanguage           String?
+  aiConfidence               Float?
+  aiSummary                  String?
+  unreadCount                Int                @default(0)
+  lastMessageAt              DateTime?
+  serviceWindowExpiresAt     DateTime?
+  humanTakeoverAt            DateTime?
+  humanTakeoverReason        String?
+  createdAt                  DateTime           @default(now())
+  updatedAt                  DateTime           @updatedAt
+
+  contact    WhatsAppContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  assignedTo DashboardUser?  @relation("ConversationAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  messages   WhatsAppMessage[]
+  lead       Lead?
+  tags       ConversationTagLink[]
+
+  @@index([status, lastMessageAt])
+  @@index([assignedToId, status])
+  @@index([contactId, createdAt])
+  @@index([agentMode])
+}
+
+model WhatsAppMessage {
+  id                   String           @id @default(cuid())
+  conversationId       String
+  sentById             String?
+  metaMessageId        String?          @unique
+  direction            MessageDirection
+  actor                 MessageActor
+  type                  MessageType     @default(TEXT)
+  status                MessageStatus
+  text                  String?
+  mediaId               String?
+  mediaUrl              String?
+  mimeType              String?
+  filename              String?
+  replyToMetaMessageId  String?
+  aiConfidence          Float?
+  aiModel               String?
+  knowledgeReferences   Json?
+  failureCode           String?
+  failureReason         String?
+  rawPayload            Json?
+  messageTimestamp      DateTime
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  conversation WhatsAppConversation       @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sentBy       DashboardUser?             @relation("MessageSender", fields: [sentById], references: [id], onDelete: SetNull)
+  statusEvents WhatsAppMessageStatusEvent[]
+  learningSuggestions LearningSuggestion[]
+
+  @@index([conversationId, messageTimestamp])
+  @@index([status, createdAt])
+  @@index([direction, actor])
+}
+
+model WhatsAppMessageStatusEvent {
+  id            String        @id @default(cuid())
+  messageId     String
+  status        MessageStatus
+  metaTimestamp DateTime?
+  rawPayload    Json?
+  createdAt     DateTime      @default(now())
+
+  message WhatsAppMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId, createdAt])
+}
+
+model Lead {
+  id               String          @id @default(cuid())
+  contactId        String          @unique
+  conversationId   String          @unique
+  assignedToId     String?
+  stage            LeadStage       @default(NEW)
+  temperature      LeadTemperature @default(COLD)
+  score            Int             @default(0)
+  occupation       String?
+  experienceLevel  String?
+  goal             String?
+  interestedCourse String?
+  joiningTimeline  String?
+  classAvailability String?
+  feeUnderstood    Boolean         @default(false)
+  counselorRequested Boolean       @default(false)
+  nextFollowUpAt   DateTime?
+  qualifiedAt      DateTime?
+  closedAt         DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  contact      WhatsAppContact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  conversation WhatsAppConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  assignedTo   DashboardUser?       @relation("LeadAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  notes        LeadNote[]
+
+  @@index([stage, temperature])
+  @@index([assignedToId, nextFollowUpAt])
+  @@index([score])
+}
+
+model LeadNote {
+  id        String   @id @default(cuid())
+  leadId    String
+  authorId  String
+  body      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lead   Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  author DashboardUser @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([leadId, createdAt])
+}
+
+model ConversationTag {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  color     String?
+  createdAt DateTime @default(now())
+
+  conversations ConversationTagLink[]
+}
+
+model ConversationTagLink {
+  conversationId String
+  tagId          String
+  createdAt      DateTime @default(now())
+
+  conversation WhatsAppConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  tag          ConversationTag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, tagId])
+  @@index([tagId])
+}
+
+model KnowledgeDocument {
+  id            String          @id @default(cuid())
+  title         String
+  category      String
+  sourceType    String
+  sourceUrl     String?
+  version       Int             @default(1)
+  status        KnowledgeStatus @default(DRAFT)
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+  approvedAt    DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  chunks KnowledgeChunk[]
+
+  @@index([status, category])
+  @@index([effectiveFrom, effectiveTo])
+}
+
+model KnowledgeChunk {
+  id          String   @id @default(cuid())
+  documentId  String
+  heading     String?
+  content     String
+  checksum    String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  document KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, checksum])
+  @@index([documentId])
+}
+
+model LearningSuggestion {
+  id               String         @id @default(cuid())
+  sourceMessageId  String?
+  reviewedById     String?
+  status           LearningStatus @default(PENDING)
+  category         String
+  userQuestion     String
+  originalAnswer   String?
+  proposedAnswer   String
+  correctionReason String?
+  redactedPayload  Json?
+  reviewedAt       DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  sourceMessage WhatsAppMessage? @relation(fields: [sourceMessageId], references: [id], onDelete: SetNull)
+  reviewedBy    DashboardUser?   @relation("LearningReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([category])
+}
+
+model WhatsAppTemplate {
+  id               String         @id @default(cuid())
+  metaTemplateId   String?        @unique
+  name             String         @unique
+  language         String
+  category         String
+  status           TemplateStatus @default(DRAFT)
+  components       Json
+  lastSyncedAt     DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([status, category])
+}
+
+model WebhookEvent {
+  id            String   @id @default(cuid())
+  eventKey      String   @unique
+  eventType     String
+  payload       Json
+  processedAt   DateTime?
+  processingError String?
+  attemptCount  Int      @default(0)
+  receivedAt    DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([processedAt, receivedAt])
+  @@index([eventType])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorId     String?
+  action      String
+  entityType  String
+  entityId    String?
+  before      Json?
+  after       Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  actor DashboardUser? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId, createdAt])
+}

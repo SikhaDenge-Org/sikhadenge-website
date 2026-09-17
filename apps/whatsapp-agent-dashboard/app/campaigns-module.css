@@ -1,0 +1,10 @@
+.rail nav .rail-button:nth-child(6)::before {
+  background-image: var(--sd-icon-automation) !important;
+}
+
+.module-page-card[data-module="campaigns"] {
+  --module-accent: #7c3aed;
+  --module-accent-soft: #f5f3ff;
+  --module-accent-border: #ddd6fe;
+  --module-icon: url("/dashboard-icons/09-automation.png");
+}

@@ -1,0 +1,104 @@
+name: WhatsApp Agent CI
+
+on:
+  pull_request:
+    paths:
+      - "apps/whatsapp-agent-dashboard/**"
+      - "modules/whatsapp-agent/**"
+      - ".github/workflows/whatsapp-agent-ci.yml"
+  push:
+    branches:
+      - feature/whatsapp-ai-agent-roadmap
+    paths:
+      - "apps/whatsapp-agent-dashboard/**"
+      - "modules/whatsapp-agent/**"
+      - ".github/workflows/whatsapp-agent-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/whatsapp-agent-dashboard
+    env:
+      DATABASE_URL: postgresql://ci_user:ci_password@localhost:5432/sikhadenge_whatsapp_ci?schema=public
+      SHADOW_DATABASE_URL: postgresql://ci_user:ci_password@localhost:5432/sikhadenge_whatsapp_ci_shadow?schema=public
+      SESSION_SECRET: ci-only-session-secret-please-replace-in-production-1234567890
+      APP_URL: http://localhost:3100
+      INITIAL_ADMIN_EMAIL: admin@example.invalid
+      INITIAL_ADMIN_PASSWORD: CI-only-password-12345
+      INITIAL_ADMIN_NAME: CI Admin
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Capture TypeScript diagnostics
+        run: |
+          set +e
+          npm run typecheck > typecheck.log 2>&1
+          code=$?
+          echo "$code" > typecheck.exit
+          exit 0
+
+      - name: Upload TypeScript diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatsapp-agent-typecheck
+          path: |
+            apps/whatsapp-agent-dashboard/typecheck.log
+            apps/whatsapp-agent-dashboard/typecheck.exit
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Enforce TypeScript result
+        run: |
+          cat typecheck.log
+          test "$(cat typecheck.exit)" = "0"
+
+      - name: Capture production build diagnostics
+        run: |
+          set +e
+          npm run build > build.log 2>&1
+          code=$?
+          echo "$code" > build.exit
+          exit 0
+
+      - name: Upload production build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatsapp-agent-build
+          path: |
+            apps/whatsapp-agent-dashboard/build.log
+            apps/whatsapp-agent-dashboard/build.exit
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Enforce production build result
+        run: |
+          cat build.log
+          test "$(cat build.exit)" = "0"

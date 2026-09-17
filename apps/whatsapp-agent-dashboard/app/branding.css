@@ -1,0 +1,59 @@
+.brand-mark {
+  position: relative;
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  overflow: visible;
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  border-radius: 17px;
+  background:
+    radial-gradient(circle at 30% 16%, rgba(255, 255, 255, 0.22), transparent 36%),
+    linear-gradient(145deg, rgba(37, 99, 235, 0.25), rgba(8, 145, 178, 0.08));
+  box-shadow:
+    0 13px 26px rgba(7, 17, 38, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  color: transparent;
+  font-size: 0;
+}
+
+.brand-mark::before {
+  content: "";
+  display: block;
+  width: 44px;
+  height: 44px;
+  background: url("/sikhadenge-app-mark-v3.svg") center / contain no-repeat;
+  filter:
+    drop-shadow(0 8px 13px rgba(37, 99, 235, 0.3))
+    drop-shadow(0 2px 3px rgba(7, 17, 38, 0.24));
+}
+
+.brand-mark::after {
+  content: "";
+}
+
+.rail nav {
+  margin-top: 30px;
+}
+
+.login-brand {
+  width: 58px;
+  height: 58px;
+  padding: 7px;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 28% 15%, rgba(255, 255, 255, 0.85), transparent 34%),
+    linear-gradient(145deg, #edf5ff, #e5ecff);
+  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.18), inset 0 1px 0 #fff;
+  color: transparent;
+  font-size: 0;
+}
+
+.login-brand::before {
+  content: "";
+  width: 44px;
+  height: 44px;
+  display: block;
+  background: url("/sikhadenge-app-mark-v3.svg") center / contain no-repeat;
+}

@@ -1,0 +1,659 @@
+/*
+ * SikhaDenge WhatsApp Agent — balanced visibility layer.
+ * Loaded after the icon system so typography, spacing and card proportions
+ * stay consistent across the complete dashboard.
+ */
+
+:root {
+  --sd-navy: #10192b;
+  --sd-navy-soft: #17233a;
+  --sd-blue: #5b5ce2;
+  --sd-blue-dark: #4344c9;
+  --sd-teal: #0f9fa5;
+  --sd-green: #159766;
+  --sd-canvas: #f3f6fb;
+  --sd-surface: #ffffff;
+  --sd-surface-soft: #f7f9fc;
+  --sd-border: #dbe3ef;
+  --sd-border-strong: #c8d3e2;
+  --sd-text: #101828;
+  --sd-text-soft: #344054;
+  --sd-muted: #667085;
+  --sd-shadow-sm: 0 5px 16px rgba(16, 24, 40, 0.055);
+  --sd-shadow-md: 0 13px 32px rgba(16, 24, 40, 0.08);
+  --sd-shadow-lg: 0 24px 56px rgba(16, 24, 40, 0.11);
+}
+
+.dashboard-shell,
+.dashboard-shell * {
+  box-sizing: border-box;
+}
+
+.dashboard-shell {
+  grid-template-columns: 76px minmax(0, 1fr) !important;
+  background: var(--sd-canvas) !important;
+}
+
+/* Consistent sidebar proportions */
+.rail {
+  width: 76px !important;
+  padding: 16px 12px !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.07) !important;
+  background: linear-gradient(180deg, #10192b 0%, #0c1525 100%) !important;
+}
+
+.brand-mark,
+.brand-mark::before {
+  width: 48px !important;
+  height: 48px !important;
+  border-radius: 14px !important;
+}
+
+.brand-mark::before {
+  box-shadow: 0 9px 22px rgba(5, 18, 48, 0.24) !important;
+}
+
+.rail nav {
+  gap: 9px !important;
+  margin-top: 24px !important;
+}
+
+.rail-button,
+.rail-button.active,
+.rail-button:hover {
+  width: 48px !important;
+  height: 48px !important;
+  border-radius: 13px !important;
+}
+
+.rail-button::before,
+.rail nav .rail-button:nth-child(n)::before,
+.rail-bottom::before {
+  width: 40px !important;
+  height: 40px !important;
+  border-radius: 12px !important;
+  opacity: 0.86 !important;
+}
+
+.rail-button:hover::before,
+.rail-button.active::before {
+  opacity: 1 !important;
+  transform: translateY(-1px) scale(1.025) !important;
+  filter: drop-shadow(0 7px 12px rgba(91, 92, 226, 0.24)) !important;
+}
+
+.rail-button.active::after {
+  left: -11px !important;
+  top: 12px !important;
+  width: 3px !important;
+  height: 24px !important;
+  background: linear-gradient(180deg, #8b5cf6 0%, #38bdf8 100%) !important;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.45) !important;
+}
+
+/* Header and account controls */
+.workspace {
+  padding: 16px 20px 18px !important;
+  background: var(--sd-canvas) !important;
+}
+
+.topbar {
+  min-height: 66px !important;
+  margin-bottom: 14px !important;
+  gap: 18px !important;
+}
+
+.topbar > div:first-child {
+  min-height: 54px !important;
+  padding-left: 66px !important;
+}
+
+.topbar > div:first-child::before {
+  width: 50px !important;
+  height: 50px !important;
+  border-radius: 14px !important;
+  box-shadow: 0 8px 20px rgba(16, 24, 40, 0.12) !important;
+}
+
+.topbar h1 {
+  font-size: clamp(24px, 1.65vw, 28px) !important;
+  font-weight: 750 !important;
+  line-height: 1.12 !important;
+  letter-spacing: -0.035em !important;
+}
+
+.eyebrow {
+  margin-bottom: 4px !important;
+  color: #596780 !important;
+  font-size: 10px !important;
+  font-weight: 750 !important;
+  line-height: 1.25 !important;
+  letter-spacing: 0.11em !important;
+}
+
+.system-status,
+.secondary-button {
+  min-height: 40px !important;
+  padding: 9px 13px !important;
+  border-radius: 11px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+}
+
+.system-status {
+  border-color: #b7ebd1 !important;
+  background: #effbf5 !important;
+  color: #08734f !important;
+}
+
+.secondary-button {
+  border-color: var(--sd-border) !important;
+  background: #fbfcfe !important;
+  color: #667085 !important;
+}
+
+.session-toolbar {
+  top: 14px !important;
+  right: 18px !important;
+  min-width: 210px !important;
+  min-height: 44px !important;
+  padding: 5px 6px 5px 13px !important;
+  border-radius: 12px !important;
+  border-color: var(--sd-border) !important;
+  box-shadow: var(--sd-shadow-sm) !important;
+}
+
+.session-toolbar strong {
+  font-size: 12px !important;
+  font-weight: 750 !important;
+  line-height: 1.2 !important;
+}
+
+.session-toolbar small {
+  margin-top: 2px !important;
+  font-size: 9.5px !important;
+  font-weight: 600 !important;
+  line-height: 1.2 !important;
+}
+
+.logout-button {
+  min-height: 34px !important;
+  padding: 8px 11px !important;
+  border-radius: 9px !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+}
+
+/* Equal metric-card system */
+.metric-row {
+  gap: 12px !important;
+  margin-bottom: 14px !important;
+}
+
+.metric-card,
+.metric-card:nth-child(n) {
+  min-height: 96px !important;
+  padding: 16px 16px 14px 76px !important;
+  border-color: var(--sd-border) !important;
+  border-radius: 15px !important;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%) !important;
+  box-shadow: var(--sd-shadow-sm) !important;
+}
+
+.metric-card::before,
+.metric-card:nth-child(n)::before {
+  left: 16px !important;
+  top: 19px !important;
+  width: 48px !important;
+  height: 48px !important;
+  border-radius: 14px !important;
+  box-shadow: 0 8px 18px rgba(55, 65, 81, 0.105) !important;
+}
+
+.metric-card span {
+  color: #475467 !important;
+  font-size: 11.5px !important;
+  font-weight: 650 !important;
+  line-height: 1.25 !important;
+}
+
+.metric-card strong {
+  margin: 3px 0 !important;
+  font-size: 25px !important;
+  font-weight: 750 !important;
+  line-height: 1 !important;
+}
+
+.metric-card small {
+  color: #69778d !important;
+  font-size: 10.5px !important;
+  font-weight: 500 !important;
+  line-height: 1.35 !important;
+}
+
+/* Main three-column work area */
+.inbox-grid {
+  grid-template-columns: 320px minmax(460px, 1fr) 320px !important;
+  border-color: var(--sd-border) !important;
+  border-radius: 18px !important;
+  box-shadow: var(--sd-shadow-md) !important;
+}
+
+.conversation-panel {
+  border-right-color: var(--sd-border) !important;
+}
+
+.details-panel {
+  padding: 20px !important;
+  border-left-color: var(--sd-border) !important;
+}
+
+.panel-heading,
+.chat-header {
+  min-height: 80px !important;
+  padding: 17px 18px !important;
+  border-bottom-color: var(--sd-border) !important;
+}
+
+.panel-heading h2,
+.chat-header h2,
+.lead-card-head h2 {
+  font-size: 18px !important;
+  font-weight: 750 !important;
+  line-height: 1.25 !important;
+}
+
+.icon-button {
+  width: 38px !important;
+  height: 38px !important;
+  border-radius: 10px !important;
+}
+
+.search-box {
+  height: 44px !important;
+  margin: 14px 14px 10px !important;
+  padding: 0 12px !important;
+  border-color: var(--sd-border) !important;
+  border-radius: 11px !important;
+  background: #f7f9fc !important;
+}
+
+.search-box input {
+  font-size: 12px !important;
+  font-weight: 500 !important;
+}
+
+.search-box input::placeholder {
+  color: #8a98ad !important;
+}
+
+.filter-tabs {
+  gap: 7px !important;
+  padding: 4px 14px 12px !important;
+}
+
+.filter-tabs button {
+  min-height: 34px !important;
+  padding: 8px 11px !important;
+  border-radius: 9px !important;
+  color: #667085 !important;
+  font-size: 11px !important;
+  font-weight: 650 !important;
+}
+
+.filter-tabs button.active {
+  border-color: #c9cdfa !important;
+  background: #f0f1ff !important;
+  color: #4748c8 !important;
+}
+
+.conversation-item {
+  min-height: 86px !important;
+  padding: 14px !important;
+  gap: 12px !important;
+  border-top-color: #edf1f6 !important;
+}
+
+.conversation-item.selected {
+  background: #f2f4ff !important;
+  box-shadow: inset 3px 0 #5b5ce2 !important;
+}
+
+.avatar {
+  width: 42px !important;
+  height: 42px !important;
+  border-color: #d9ddfb !important;
+  background: #f0f1ff !important;
+  color: #4344c9 !important;
+  font-size: 12px !important;
+}
+
+.avatar.large {
+  width: 46px !important;
+  height: 46px !important;
+}
+
+.conversation-name-row strong {
+  font-size: 12.5px !important;
+  font-weight: 700 !important;
+}
+
+.conversation-name-row time {
+  font-size: 10px !important;
+}
+
+.conversation-preview {
+  margin: 5px 0 7px !important;
+  font-size: 11px !important;
+  line-height: 1.4 !important;
+}
+
+.conversation-meta {
+  font-size: 10px !important;
+  line-height: 1.35 !important;
+}
+
+.temperature {
+  padding: 4px 7px !important;
+  font-size: 9px !important;
+}
+
+.unread-count {
+  min-width: 20px !important;
+  height: 20px !important;
+  font-size: 9px !important;
+}
+
+.panel-empty-state {
+  padding: 38px 24px !important;
+}
+
+.panel-empty-state strong,
+.empty-chat-state strong {
+  color: var(--sd-text) !important;
+  font-size: 15px !important;
+  font-weight: 750 !important;
+  line-height: 1.3 !important;
+}
+
+.panel-empty-state p,
+.empty-chat-state p {
+  margin-top: 7px !important;
+  color: #69778d !important;
+  font-size: 11.5px !important;
+  line-height: 1.55 !important;
+}
+
+/* Chat readability */
+.chat-panel {
+  background: #f8fafc !important;
+}
+
+.chat-person p,
+.ai-switch {
+  color: #667085 !important;
+  font-size: 11px !important;
+}
+
+.context-strip {
+  min-height: 48px !important;
+  gap: 7px !important;
+  padding: 8px 16px !important;
+  border-bottom-color: var(--sd-border) !important;
+}
+
+.context-strip span {
+  min-height: 26px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  padding: 6px 9px !important;
+  border-radius: 8px !important;
+  color: #596780 !important;
+  font-size: 10px !important;
+  font-weight: 650 !important;
+  line-height: 1.2 !important;
+}
+
+.message-list,
+.messages {
+  color: var(--sd-text-soft) !important;
+  font-size: 12px !important;
+}
+
+.message-bubble,
+.message-row p {
+  font-size: 12px !important;
+  line-height: 1.55 !important;
+}
+
+.agent-thinking {
+  border-color: #d9ddfb !important;
+  background: #f5f6ff !important;
+}
+
+.agent-thinking strong {
+  font-size: 11.5px !important;
+  font-weight: 700 !important;
+}
+
+.agent-thinking p {
+  font-size: 11px !important;
+  line-height: 1.5 !important;
+}
+
+.composer {
+  min-height: 72px !important;
+  padding: 11px 13px !important;
+  gap: 10px !important;
+  border-top-color: var(--sd-border) !important;
+  background: #ffffff !important;
+}
+
+.composer-tools {
+  gap: 5px !important;
+}
+
+.composer-tools button {
+  width: 34px !important;
+  height: 34px !important;
+  border-radius: 9px !important;
+  font-size: 18px !important;
+}
+
+.composer-tools button:nth-child(2)::before,
+.composer-tools button:nth-child(3)::before {
+  width: 27px !important;
+  height: 27px !important;
+  border-radius: 8px !important;
+}
+
+.composer textarea {
+  min-height: 48px !important;
+  padding: 12px 13px !important;
+  border-color: var(--sd-border) !important;
+  border-radius: 11px !important;
+  background: #f7f9fc !important;
+  color: var(--sd-text-soft) !important;
+  font-size: 11.5px !important;
+  line-height: 1.45 !important;
+}
+
+.composer textarea::placeholder {
+  color: #8a98ad !important;
+}
+
+.send-button {
+  min-width: 80px !important;
+  min-height: 48px !important;
+  border-radius: 11px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+}
+
+/* Lead intelligence panel */
+.lead-card-head {
+  padding-bottom: 15px !important;
+  border-bottom-color: var(--sd-border) !important;
+}
+
+.score-block {
+  gap: 12px !important;
+  padding: 16px 0 !important;
+}
+
+.score-ring {
+  width: 66px !important;
+  height: 66px !important;
+  border-color: #c9cdfa !important;
+  background: #f4f5ff !important;
+}
+
+.score-ring strong {
+  font-size: 21px !important;
+}
+
+.score-ring span {
+  font-size: 10px !important;
+}
+
+.score-block > div:last-child > strong {
+  font-size: 12.5px !important;
+  font-weight: 700 !important;
+}
+
+.score-block p,
+.summary-copy,
+.learning-card p {
+  color: #667085 !important;
+  font-size: 11px !important;
+  line-height: 1.55 !important;
+}
+
+.detail-section {
+  padding: 16px 0 !important;
+  border-top-color: #edf1f6 !important;
+}
+
+.detail-section h3,
+.section-title-row h3 {
+  color: #344054 !important;
+  font-size: 12px !important;
+  font-weight: 750 !important;
+  line-height: 1.3 !important;
+}
+
+.detail-section dl {
+  gap: 10px !important;
+}
+
+.detail-section dt {
+  color: #78869b !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+}
+
+.detail-section dd {
+  color: #344054 !important;
+  font-size: 11px !important;
+  font-weight: 650 !important;
+}
+
+.section-title-row button,
+.learning-card button,
+.agent-thinking button {
+  min-height: 32px !important;
+  padding: 7px 10px !important;
+  border-radius: 9px !important;
+  font-size: 10px !important;
+  font-weight: 650 !important;
+}
+
+.task-check {
+  min-height: 34px !important;
+  color: #475467 !important;
+  font-size: 11px !important;
+  line-height: 1.4 !important;
+}
+
+.learning-card {
+  padding: 15px !important;
+  border-color: #d9ddfb !important;
+  border-radius: 13px !important;
+  background: linear-gradient(180deg, #f8f8ff 0%, #f3f5ff 100%) !important;
+}
+
+.learning-card span {
+  color: #5b5ce2 !important;
+  font-size: 9.5px !important;
+  font-weight: 750 !important;
+}
+
+.learning-card strong {
+  font-size: 12px !important;
+  font-weight: 750 !important;
+}
+
+@media (max-width: 1280px) {
+  .workspace {
+    padding-right: 14px !important;
+    padding-left: 14px !important;
+  }
+
+  .inbox-grid {
+    grid-template-columns: 300px minmax(420px, 1fr) 290px !important;
+  }
+
+  .metric-card,
+  .metric-card:nth-child(n) {
+    padding-right: 12px !important;
+    padding-left: 70px !important;
+  }
+
+  .metric-card::before,
+  .metric-card:nth-child(n)::before {
+    left: 13px !important;
+    width: 44px !important;
+    height: 44px !important;
+  }
+}
+
+@media (max-width: 980px) {
+  .topbar h1 {
+    font-size: 23px !important;
+  }
+
+  .metric-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .dashboard-shell {
+    grid-template-columns: 1fr !important;
+  }
+
+  .workspace {
+    padding: 12px !important;
+  }
+
+  .topbar > div:first-child {
+    padding-left: 58px !important;
+  }
+
+  .topbar > div:first-child::before {
+    width: 44px !important;
+    height: 44px !important;
+  }
+
+  .metric-card,
+  .metric-card:nth-child(n) {
+    min-height: 90px !important;
+    padding-left: 66px !important;
+  }
+
+  .metric-card::before,
+  .metric-card:nth-child(n)::before {
+    width: 40px !important;
+    height: 40px !important;
+  }
+}
