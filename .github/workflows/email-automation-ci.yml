@@ -5,15 +5,20 @@ on:
     paths:
       - "apps/whatsapp-agent-dashboard/modules/email-automation/**"
       - "apps/whatsapp-agent-dashboard/modules/index.ts"
+      - "apps/whatsapp-agent-dashboard/app/email/**"
       - "apps/whatsapp-agent-dashboard/app/api/email/**"
       - "apps/whatsapp-agent-dashboard/app/api/internal/email/**"
       - "apps/whatsapp-agent-dashboard/scripts/email-automation-*.ts"
       - "apps/whatsapp-agent-dashboard/scripts/email-automation-*.sh"
+      - "apps/whatsapp-agent-dashboard/scripts/email-inbound-*.ts"
+      - "apps/whatsapp-agent-dashboard/scripts/email-inbound-*.sh"
       - "apps/whatsapp-agent-dashboard/tests/email-automation-*.sh"
+      - "apps/whatsapp-agent-dashboard/tests/email-inbound-*.sh"
       - "apps/whatsapp-agent-dashboard/package.json"
       - "apps/whatsapp-agent-dashboard/prisma/schema.prisma"
       - "apps/whatsapp-agent-dashboard/prisma/migrations/**"
       - ".github/workflows/email-automation-ci.yml"
+      - ".github/workflows/whatsapp-agent-email-inbound-*.yml"
 
 permissions:
   contents: read
@@ -64,6 +69,12 @@ jobs:
 
       - name: Run email automation scheduler auth contracts
         run: npx tsx modules/email-automation/tests/automation-scheduler-auth.test.ts
+
+      - name: Run email E5 inbound inbox contracts
+        run: npx tsx modules/email-automation/tests/inbound-inbox.test.ts
+
+      - name: Run email E5 production inbound safety policy
+        run: bash tests/email-inbound-production-policy.test.sh
 
       - name: Run email automation production preflight policy
         run: bash tests/email-automation-production-preflight-policy.test.sh

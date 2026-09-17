@@ -1,0 +1,152 @@
+import { createHash } from "node:crypto";
+import { Prisma } from "@prisma/client";
+
+import { prisma } from "@/lib/db/prisma";
+import { enqueueEmailAutomationEvent, supersedePendingEmailAutomationEvents } from "../automation/event-outbox";
+
+function clean(value: unknown, max = 500): string {
+  return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+function normalizedEmail(value: unknown): string {
+  const email = clean(value, 320).toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("A valid email address is required.");
+  return email;
+}
+function json(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
+function arr(value: unknown): unknown[] { return Array.isArray(value) ? value : []; }
+function eventKey(parts: readonly string[]): string {
+  return createHash("sha256").update(parts.join("|")).digest("hex");
+}
+
+async function resolveWorkspaceSafeContactId(workspaceId: string, fromAddress: string): Promise<string | null> {
+  const prior = await prisma.engageEmailInboundMessage.findFirst({
+    where: {
+      workspaceId,
+      fromAddress: { equals: fromAddress, mode: "insensitive" },
+      contactId: { not: null },
+    },
+    orderBy: { receivedAt: "desc" },
+    select: { contactId: true },
+  });
+  if (prior?.contactId) return prior.contactId;
+
+  const [automationRefs, analyticsRefs] = await Promise.all([
+    prisma.engageEmailAutomationEvent.findMany({
+      where: { workspaceId, contactId: { not: null } },
+      orderBy: { updatedAt: "desc" },
+      take: 500,
+      select: { contactId: true },
+    }),
+    prisma.engageEmailAnalyticsEvent.findMany({
+      where: { workspaceId, contactId: { not: null } },
+      orderBy: { occurredAt: "desc" },
+      take: 500,
+      select: { contactId: true },
+    }),
+  ]);
+  const ids = [...new Set([...automationRefs, ...analyticsRefs].map((row) => row.contactId).filter((id): id is string => Boolean(id)))];
+  if (!ids.length) return null;
+  const matches = await prisma.whatsAppContact.findMany({
+    where: { id: { in: ids }, email: { equals: fromAddress, mode: "insensitive" } },
+    select: { id: true },
+    take: 2,
+  });
+  return matches.length === 1 ? matches[0].id : null;
+}
+
+export async function ingestWorkspaceSafeInboundEmail(input: {
+  workspaceId: string;
+  connectionId?: string | null;
+  provider: string;
+  providerMessageId: string;
+  providerThreadId?: string | null;
+  from: string;
+  to?: unknown;
+  cc?: unknown;
+  replyTo?: unknown;
+  subject?: string;
+  snippet?: string;
+  bodyText?: string;
+  bodyHtml?: string;
+  attachments?: unknown;
+  classification?: "INBOUND" | "BOUNCE";
+  receivedAt?: string;
+}) {
+  const provider = clean(input.provider, 40);
+  const providerMessageId = clean(input.providerMessageId, 240);
+  if (!provider || !providerMessageId) throw new Error("provider and providerMessageId are required.");
+  const from = normalizedEmail(input.from);
+  const receivedAt = input.receivedAt ? new Date(input.receivedAt) : new Date();
+  if (Number.isNaN(receivedAt.getTime())) throw new Error("receivedAt is invalid.");
+
+  const prior = await prisma.engageEmailInboundMessage.findUnique({
+    where: { workspaceId_provider_providerMessageId: { workspaceId: input.workspaceId, provider, providerMessageId } },
+  });
+  if (prior) return { message: prior, replayed: true };
+
+  const contactId = await resolveWorkspaceSafeContactId(input.workspaceId, from);
+  const threadId = clean(input.providerThreadId, 240) || null;
+  const classification = input.classification === "BOUNCE" ? "BOUNCE" : "INBOUND";
+
+  return prisma.$transaction(async (tx) => {
+    const stored = await tx.engageEmailInboundMessage.create({
+      data: {
+        workspaceId: input.workspaceId,
+        connectionId: clean(input.connectionId, 100) || null,
+        provider,
+        providerMessageId,
+        providerThreadId: threadId,
+        contactId,
+        fromAddress: from,
+        toRecipients: json(arr(input.to)),
+        ccRecipients: json(arr(input.cc)),
+        replyTo: input.replyTo ? json(input.replyTo) : Prisma.JsonNull,
+        subject: clean(input.subject, 500),
+        snippet: clean(input.snippet, 1000) || null,
+        bodyText: clean(input.bodyText, 100000) || null,
+        bodyHtml: clean(input.bodyHtml, 200000) || null,
+        attachments: json(arr(input.attachments)),
+        classification,
+        receivedAt,
+      },
+    });
+
+    if (classification === "BOUNCE") {
+      const sent = threadId
+        ? await tx.engageEmailMessage.findFirst({
+            where: { workspaceId: input.workspaceId, OR: [{ providerMessageId }, { providerThreadId: threadId }] },
+            orderBy: { createdAt: "desc" },
+          })
+        : await tx.engageEmailMessage.findFirst({
+            where: { workspaceId: input.workspaceId, providerMessageId },
+            orderBy: { createdAt: "desc" },
+          });
+      if (sent) {
+        await tx.engageEmailMessage.update({ where: { id: sent.id }, data: { status: "BOUNCED", lastError: "Provider reported a bounce." } });
+        await tx.engageEmailAnalyticsEvent.create({
+          data: { workspaceId: input.workspaceId, messageId: sent.id, inboundMessageId: stored.id, contactId, eventType: "BOUNCED", provider, eventKey: eventKey(["bounce", stored.id]), occurredAt: receivedAt },
+        });
+        if (contactId) await enqueueEmailAutomationEvent(tx, { workspaceId: input.workspaceId, sourceEventId: stored.id, trigger: "EMAIL_BOUNCED", contactId, payload: { inboundMessageId: stored.id, messageId: sent.id, providerMessageId } });
+      }
+    } else {
+      await tx.engageEmailAnalyticsEvent.create({
+        data: { workspaceId: input.workspaceId, inboundMessageId: stored.id, contactId, eventType: "RECEIVED", provider, eventKey: eventKey(["received", stored.id]), occurredAt: receivedAt },
+      });
+      if (contactId) await enqueueEmailAutomationEvent(tx, { workspaceId: input.workspaceId, sourceEventId: stored.id, trigger: "EMAIL_RECEIVED", relatedTriggers: [], contactId, payload: { inboundMessageId: stored.id, subject: stored.subject, fromAddress: from, providerThreadId: threadId } });
+      const sent = threadId ? await tx.engageEmailMessage.findFirst({
+        where: { workspaceId: input.workspaceId, providerThreadId: threadId, status: { in: ["SENT", "DELIVERED"] } },
+        orderBy: { sentAt: "desc" },
+      }) : null;
+      if (sent && contactId) {
+        await tx.engageEmailAnalyticsEvent.create({
+          data: { workspaceId: input.workspaceId, messageId: sent.id, inboundMessageId: stored.id, contactId, eventType: "REPLIED", provider, eventKey: eventKey(["reply", stored.id]), occurredAt: receivedAt },
+        });
+        await enqueueEmailAutomationEvent(tx, { workspaceId: input.workspaceId, sourceEventId: stored.id, trigger: "EMAIL_REPLIED", contactId, payload: { inboundMessageId: stored.id, messageId: sent.id, providerThreadId: threadId } });
+        await supersedePendingEmailAutomationEvents(tx, { workspaceId: input.workspaceId, trigger: "NO_REPLY", contactId });
+      }
+    }
+    return { message: stored, replayed: false };
+  });
+}

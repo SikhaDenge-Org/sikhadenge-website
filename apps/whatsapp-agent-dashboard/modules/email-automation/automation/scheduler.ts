@@ -5,6 +5,7 @@ import { listAutomationFlows } from "@/lib/automation/automation-service";
 import { enqueueEmailAutomationEvent } from "./event-outbox";
 import { processDueEmailCampaigns } from "../campaigns/campaign-service";
 import { processDueEmailSequences } from "../finalization/platform-service";
+import { syncWatchedGmailMailboxes } from "../inbound/gmail-inbound-service";
 import { getEmailRuntimePolicy } from "../application/runtime-policy";
 import { processEmailAutomationEvents } from "./dispatcher";
 
@@ -29,6 +30,7 @@ export async function getEmailAutomationSchedulerHealth() {
   return {
     runtimeEnabled: policy.runtimeEnabled,
     automationEnabled: policy.automationEnabled,
+    inboundSyncEnabled: policy.inboundSyncEnabled,
     runtimeMode: policy.mode,
     externalWritesEnabled: policy.externalWritesEnabled,
     pending,
@@ -94,11 +96,13 @@ export async function processEmailAutomationScheduler(input: {
     });
     results.push({ workspaceId: candidate.workspaceId, ...result });
   }
+  const inboundSync = await syncWatchedGmailMailboxes({ limit: Math.min(Math.max(input.workspaceLimit ?? 20, 1), 50) });
   const campaignResults = await processDueEmailCampaigns(20);
   const sequenceResults = await processDueEmailSequences(50);
   const summary = {
     workspacesScanned: candidates.length,
     scheduledMaterialized,
+    inboundSync,
     campaignRuns: campaignResults.length,
     campaignResults,
     sequenceResults,
