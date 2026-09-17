@@ -1,0 +1,153 @@
+name: WhatsApp Agent Phase17 Canary Execution Dry Run
+
+on:
+  push:
+    branches:
+      - ops/phase17-canary-readiness-20260917
+    paths:
+      - ".github/workflows/whatsapp-agent-phase17-canary-execution-dryrun.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-phase17-canary-execution-dryrun
+  cancel-in-progress: true
+
+jobs:
+  production-canary-dryrun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_RELEASE_SHA: bb203d95f6fbec3d5a5ebf8e6e0db6ca03a5bb02
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then echo SSH_PORT=22 >> "$GITHUB_ENV"; SSH_PORT=22; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Execute current production canary dry-run gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' RELEASE_BRANCH='$RELEASE_BRANCH' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ENV_FILE="$APP/.env"
+          WORKSPACE_ID=engagews_default
+
+          envv() {
+            node - "$ENV_FILE" "$1" <<'NODE'
+          const fs=require('node:fs'); const [file,key]=process.argv.slice(2);
+          for(const raw of fs.readFileSync(file,'utf8').split(/\r?\n/)){
+            let line=raw.trim(); if(!line||line.startsWith('#')) continue;
+            if(line.startsWith('export ')) line=line.slice(7).trim();
+            const i=line.indexOf('='); if(i<1||line.slice(0,i).trim()!==key) continue;
+            let value=line.slice(i+1).trim();
+            if(value.length>=2&&((value.startsWith('"')&&value.endsWith('"'))||(value.startsWith("'")&&value.endsWith("'")))) value=value.slice(1,-1);
+            process.stdout.write(value); process.exit(0);
+          }
+          process.exit(1);
+          NODE
+          }
+
+          test -f "$ENV_FILE"
+          release_sha="$(git -C "$APP" ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')"
+          live_sha="$(git -C "$APP" rev-parse HEAD)"
+          dirty="$(git -C "$APP" status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          pm2_state="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(String(p?.pm2_env?.status||"missing"))})')"
+          login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login || true)"
+          printf 'RELEASE_SHA=%s\nLIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\nPM2_STATE=%s\nLOGIN_HTTP=%s\n' "$release_sha" "$live_sha" "$dirty" "$pm2_state" "$login_http"
+          test "$release_sha" = "$EXPECTED_RELEASE_SHA"
+          test "$live_sha" = "$EXPECTED_RELEASE_SHA"
+          test "$dirty" = "0"
+          test "$pm2_state" = "online"
+          test "$login_http" = "200"
+
+          provider_mode="$(envv WHATSAPP_OUTBOUND_MODE 2>/dev/null || true)"
+          cutover="$(envv WHATSAPP_CUTOVER_APPROVED 2>/dev/null || true)"
+          live_ack="$(envv WHATSAPP_OUTBOUND_LIVE_ACK 2>/dev/null || true)"
+          kill="$(envv WHATSAPP_OUTBOUND_KILL_SWITCH 2>/dev/null || true)"
+          token="$(envv WHATSAPP_ACCESS_TOKEN 2>/dev/null || envv META_WHATSAPP_ACCESS_TOKEN 2>/dev/null || true)"
+          phone_id="$(envv WHATSAPP_PHONE_NUMBER_ID 2>/dev/null || envv META_WHATSAPP_PHONE_NUMBER_ID 2>/dev/null || true)"
+          graph_version="$(envv WHATSAPP_GRAPH_VERSION 2>/dev/null || envv META_GRAPH_API_VERSION 2>/dev/null || true)"
+          printf 'WHATSAPP_OUTBOUND_MODE=%s\nWHATSAPP_CUTOVER_APPROVED=%s\nWHATSAPP_OUTBOUND_LIVE_ACK_SET=%s\nWHATSAPP_OUTBOUND_KILL_SWITCH=%s\n' "${provider_mode:-disabled}" "${cutover:-false}" "$([[ -n "$live_ack" ]] && echo true || echo false)" "${kill:-unset}"
+          printf 'META_ACCESS_TOKEN_PRESENT=%s\nMETA_PHONE_NUMBER_ID_PRESENT=%s\nMETA_GRAPH_VERSION_PRESENT=%s\n' "$([[ -n "$token" ]] && echo true || echo false)" "$([[ -n "$phone_id" ]] && echo true || echo false)" "$([[ -n "$graph_version" ]] && echo true || echo false)"
+          test "${provider_mode:-disabled}" != "live"
+          test "${cutover:-false}" != "true"
+          test -z "$live_ack"
+          test "${kill:-on}" = "on"
+          test -n "$token"
+          test -n "$phone_id"
+          test -n "$graph_version"
+
+          export DATABASE_URL="$(envv DATABASE_URL)"
+          DB="$(node "$APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")"
+          state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,COALESCE((\"scope\"->>'externalWritesRequested'),'false'),\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
+          printf 'CONTROLLED_LAUNCH_STATE=%s\n' "$state"
+          test "$state" = "ONE_CONNECTED_ACCOUNT|SHADOW|NO_EXTERNAL_WRITES|false|false|2"
+
+          queued="$(psql "$DB" -X -Atqc "SELECT COUNT(*) FROM \"WhatsAppMessage\" WHERE \"direction\"='OUTBOUND' AND \"status\"='QUEUED';")"
+          active_approvals="$(psql "$DB" -X -Atqc "SELECT COUNT(*) FROM \"EngageControlledLaunchOutboundApproval\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"consumedAt\" IS NULL AND \"revokedAt\" IS NULL AND \"expiresAt\">NOW();")"
+          transitions="$(psql "$DB" -X -Atqc "SELECT COUNT(*) FROM \"EngageControlledLaunchTransition\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
+          outbound_before="$(psql "$DB" -X -A -F '|' -t -c "SELECT COUNT(*),COALESCE(MAX(\"updatedAt\")::text,'') FROM \"WhatsAppMessage\" WHERE \"direction\"='OUTBOUND';")"
+          expected_connection="whatsapp:${phone_id}"
+          active_connection_count="$(psql "$DB" -X -v conn="$expected_connection" -Atqc "SELECT COUNT(*) FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\"='WHATSAPP' AND \"id\"=:'conn' AND \"status\" IN ('CONNECTED','DEGRADED');")"
+          scope_connection_count="$(psql "$DB" -X -v conn="$expected_connection" -Atqc "SELECT COUNT(*) FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"scope\"->'connectedAccountIds' ? :'conn';")"
+          printf 'QUEUED_OUTBOUND_MESSAGES=%s\nACTIVE_EXACT_MESSAGE_APPROVALS=%s\nCONTROLLED_LAUNCH_TRANSITIONS=%s\n' "$queued" "$active_approvals" "$transitions"
+          printf 'PROVIDER_CONNECTION_BINDING_ACTIVE=%s\nPROVIDER_CONNECTION_SCOPED=%s\n' "$active_connection_count" "$scope_connection_count"
+          test "$queued" = "0"
+          test "$active_approvals" = "0"
+          test "$transitions" = "2"
+          test "$active_connection_count" = "1"
+          test "$scope_connection_count" = "1"
+
+          cd "$APP"
+          ./node_modules/.bin/tsx tests/engageos-phase17-controlled-launch.test.ts
+          ./node_modules/.bin/tsx tests/engageos-phase17-controlled-launch-state.test.ts
+          ./node_modules/.bin/tsx tests/engageos-phase17-g1-outbound-guard.test.ts
+          ./node_modules/.bin/tsx tests/engageos-phase17-g2-outbound-approval.test.ts
+
+          outbound_after="$(psql "$DB" -X -A -F '|' -t -c "SELECT COUNT(*),COALESCE(MAX(\"updatedAt\")::text,'') FROM \"WhatsAppMessage\" WHERE \"direction\"='OUTBOUND';")"
+          state_after="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,COALESCE((\"scope\"->>'externalWritesRequested'),'false'),\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
+          test "$outbound_after" = "$outbound_before"
+          test "$state_after" = "$state"
+          test "$(envv WHATSAPP_OUTBOUND_MODE 2>/dev/null || true)" != "live"
+          test "$(envv WHATSAPP_OUTBOUND_KILL_SWITCH 2>/dev/null || echo on)" = "on"
+          test -z "$(git -C "$APP" status --porcelain --untracked-files=no)"
+
+          printf 'CANARY_POLICY_PATH_VERIFIED=true\n'
+          printf 'CANARY_PROVIDER_BINDING_VERIFIED=true\n'
+          printf 'CANARY_EXECUTOR_READY=true\n'
+          printf 'PENDING_BOUNDARY=EXPLICIT_SINGLE_RECIPIENT_SINGLE_MESSAGE_AUTHORIZATION\n'
+          printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          printf 'PASS: PHASE17_CANARY_EXECUTION_DRYRUN\n'
+          REMOTE
