@@ -122,84 +122,85 @@ jobs:
 
           cd "$APP"
           export CANARY_ENV_FILE="$ENV_FILE"
-          npx tsx -e '
-            import fs from "node:fs";
-            import { MessageDirection, MessageStatus } from "@prisma/client";
-            import { prisma } from "./lib/db/prisma";
-            import { readLegacyWhatsAppMappingMetadata } from "./modules/channels/whatsapp/application/legacy-identity-mapping";
-            import { fingerprintQueuedOutboundMessage, getActiveControlledLaunchOutboundApproval } from "./modules/release/application/controlled-launch-outbound-approval";
+          npx tsx -e "$(cat <<'TS'
+          import fs from "node:fs";
+          import { MessageDirection, MessageStatus } from "@prisma/client";
+          import { prisma } from "./lib/db/prisma";
+          import { readLegacyWhatsAppMappingMetadata } from "./modules/channels/whatsapp/application/legacy-identity-mapping";
+          import { fingerprintQueuedOutboundMessage, getActiveControlledLaunchOutboundApproval } from "./modules/release/application/controlled-launch-outbound-approval";
 
-            const workspaceId="engagews_default";
-            const stateVersion=2;
-            const normalizeDigits=(v:string)=>v.replace(/\D/g,"");
-            const mask=(v:string)=>{const d=normalizeDigits(v);return d.length>4?`***${d.slice(-4)}`:"***";};
-            const truthy=(v:unknown)=>v===true||(typeof v==="string"&&v.trim().toLowerCase()==="true");
-            const markerKeys=new Set(["isTest","isInternal","internalTest","testIdentity","internalTestIdentity","isInternalTestIdentity"]);
-            const markerPaths=(value:unknown,path="metadata",out:string[]=[]):string[]=>{
-              if(!value||typeof value!=="object") return out;
-              if(Array.isArray(value)){value.forEach((x,i)=>markerPaths(x,`${path}[${i}]`,out));return out;}
-              for(const [key,val] of Object.entries(value as Record<string,unknown>)){
-                const p=`${path}.${key}`;
-                if(markerKeys.has(key)&&truthy(val)) out.push(p);
-                if(val&&typeof val==="object") markerPaths(val,p,out);
-              }
-              return out;
-            };
-            const envEntries=(()=>{
-              const file=process.env.CANARY_ENV_FILE||""; if(!file||!fs.existsSync(file)) return [] as Array<[string,string]>;
-              const rows:Array<[string,string]>=[];
-              for(const raw of fs.readFileSync(file,"utf8").split(/\r?\n/)){
-                let line=raw.trim(); if(!line||line.startsWith("#")) continue;
-                if(line.startsWith("export ")) line=line.slice(7).trim();
-                const i=line.indexOf("="); if(i<1) continue;
-                const key=line.slice(0,i).trim(); let value=line.slice(i+1).trim();
-                if(value.length>=2&&((value.startsWith("\"")&&value.endsWith("\""))||(value.startsWith("\'")&&value.endsWith("\'")))) value=value.slice(1,-1);
-                if(/^(WHATSAPP|META).*?(TEST|INTERNAL).*?(WA|PHONE|RECIPIENT|IDENTITY|NUMBER)/i.test(key)) rows.push([key,value]);
-              }
-              return rows;
-            })();
+          const workspaceId="engagews_default";
+          const stateVersion=2;
+          const normalizeDigits=(v:string)=>v.replace(/\D/g,"");
+          const mask=(v:string)=>{const d=normalizeDigits(v);return d.length>4?`***${d.slice(-4)}`:"***";};
+          const truthy=(v:unknown)=>v===true||(typeof v==="string"&&v.trim().toLowerCase()==="true");
+          const markerKeys=new Set(["isTest","isInternal","internalTest","testIdentity","internalTestIdentity","isInternalTestIdentity"]);
+          const markerPaths=(value:unknown,path="metadata",out:string[]=[]):string[]=>{
+            if(!value||typeof value!=="object") return out;
+            if(Array.isArray(value)){value.forEach((x,i)=>markerPaths(x,`${path}[${i}]`,out));return out;}
+            for(const [key,val] of Object.entries(value as Record<string,unknown>)){
+              const p=`${path}.${key}`;
+              if(markerKeys.has(key)&&truthy(val)) out.push(p);
+              if(val&&typeof val==="object") markerPaths(val,p,out);
+            }
+            return out;
+          };
+          const envEntries=(()=>{
+            const file=process.env.CANARY_ENV_FILE||""; if(!file||!fs.existsSync(file)) return [] as Array<[string,string]>;
+            const rows:Array<[string,string]>=[];
+            for(const raw of fs.readFileSync(file,"utf8").split(/\r?\n/)){
+              let line=raw.trim(); if(!line||line.startsWith("#")) continue;
+              if(line.startsWith("export ")) line=line.slice(7).trim();
+              const i=line.indexOf("="); if(i<1) continue;
+              const key=line.slice(0,i).trim(); let value=line.slice(i+1).trim();
+              if(value.length>=2&&((value.startsWith("\"")&&value.endsWith("\""))||(value.startsWith("'")&&value.endsWith("'")))) value=value.slice(1,-1);
+              if(/^(WHATSAPP|META).*?(TEST|INTERNAL).*?(WA|PHONE|RECIPIENT|IDENTITY|NUMBER)/i.test(key)) rows.push([key,value]);
+            }
+            return rows;
+          })();
 
-            (async()=>{
-              const queued=await prisma.whatsAppMessage.findMany({
-                where:{direction:MessageDirection.OUTBOUND,status:MessageStatus.QUEUED},
-                orderBy:[{createdAt:"asc"},{id:"asc"}],
-                take:50,
-                select:{id:true,type:true,actor:true,text:true,mediaId:true,mediaUrl:true,mimeType:true,filename:true,replyToMetaMessageId:true,rawPayload:true,messageTimestamp:true,createdAt:true,conversation:{select:{contact:{select:{id:true,waId:true,metadata:true}}}}}
-              });
-              console.log(`QUEUED_CANDIDATE_COUNT=${queued.length}`);
-              let explicitCount=0;
-              for(const m of queued){
-                const c=m.conversation.contact;
-                const mapping=readLegacyWhatsAppMappingMetadata(c.metadata);
-                if(!mapping){console.log(`CANDIDATE messageId=${m.id} mapping=missing`);continue;}
-                const fingerprint=fingerprintQueuedOutboundMessage({...m,recipientWaId:c.waId});
-                const approval=await getActiveControlledLaunchOutboundApproval({workspaceId:mapping.workspaceId,connectionId:mapping.connectionId,messageId:m.id,contentFingerprint:fingerprint,controlledLaunchStateVersion:stateVersion});
-                const metadataMarkers=markerPaths(c.metadata);
-                const envMarkerKeys=envEntries.filter(([,value])=>normalizeDigits(value)===normalizeDigits(c.waId)&&normalizeDigits(value).length>=6).map(([key])=>key);
-                const explicitInternalTest=metadataMarkers.length>0||envMarkerKeys.length>0;
-                if(explicitInternalTest) explicitCount++;
-                const bodyLength=(m.text||m.filename||"").length;
-                console.log(JSON.stringify({
-                  messageId:m.id,
-                  queuedAt:m.messageTimestamp.toISOString(),
-                  type:m.type,
-                  actor:m.actor||null,
-                  recipientMasked:mask(c.waId),
-                  workspaceId:mapping.workspaceId,
-                  connectionId:mapping.connectionId,
-                  contentFingerprint:fingerprint,
-                  bodyLength,
-                  activeExactApproval:Boolean(approval),
-                  explicitInternalTestMarker:explicitInternalTest,
-                  metadataMarkerPaths:metadataMarkers,
-                  matchingTestEnvKeys:envMarkerKeys
-                }));
-              }
-              console.log(`EXPLICIT_INTERNAL_TEST_CANDIDATE_COUNT=${explicitCount}`);
-              console.log("EXTERNAL_WRITE_SENT=false");
-              console.log("PASS: PHASE17_CANARY_CANDIDATE_INVENTORY");
-            })().then(async()=>{await prisma.$disconnect()}).catch(async(error)=>{console.error(error instanceof Error?error.message:error);await prisma.$disconnect().catch(()=>undefined);process.exit(1)});
-          '
+          (async()=>{
+            const queued=await prisma.whatsAppMessage.findMany({
+              where:{direction:MessageDirection.OUTBOUND,status:MessageStatus.QUEUED},
+              orderBy:[{createdAt:"asc"},{id:"asc"}],
+              take:50,
+              select:{id:true,type:true,actor:true,text:true,mediaId:true,mediaUrl:true,mimeType:true,filename:true,replyToMetaMessageId:true,rawPayload:true,messageTimestamp:true,createdAt:true,conversation:{select:{contact:{select:{id:true,waId:true,metadata:true}}}}}
+            });
+            console.log(`QUEUED_CANDIDATE_COUNT=${queued.length}`);
+            let explicitCount=0;
+            for(const m of queued){
+              const c=m.conversation.contact;
+              const mapping=readLegacyWhatsAppMappingMetadata(c.metadata);
+              if(!mapping){console.log(`CANDIDATE messageId=${m.id} mapping=missing`);continue;}
+              const fingerprint=fingerprintQueuedOutboundMessage({...m,recipientWaId:c.waId});
+              const approval=await getActiveControlledLaunchOutboundApproval({workspaceId:mapping.workspaceId,connectionId:mapping.connectionId,messageId:m.id,contentFingerprint:fingerprint,controlledLaunchStateVersion:stateVersion});
+              const metadataMarkers=markerPaths(c.metadata);
+              const envMarkerKeys=envEntries.filter(([,value])=>normalizeDigits(value)===normalizeDigits(c.waId)&&normalizeDigits(value).length>=6).map(([key])=>key);
+              const explicitInternalTest=metadataMarkers.length>0||envMarkerKeys.length>0;
+              if(explicitInternalTest) explicitCount++;
+              const bodyLength=(m.text||m.filename||"").length;
+              console.log(JSON.stringify({
+                messageId:m.id,
+                queuedAt:m.messageTimestamp.toISOString(),
+                type:m.type,
+                actor:m.actor||null,
+                recipientMasked:mask(c.waId),
+                workspaceId:mapping.workspaceId,
+                connectionId:mapping.connectionId,
+                contentFingerprint:fingerprint,
+                bodyLength,
+                activeExactApproval:Boolean(approval),
+                explicitInternalTestMarker:explicitInternalTest,
+                metadataMarkerPaths:metadataMarkers,
+                matchingTestEnvKeys:envMarkerKeys
+              }));
+            }
+            console.log(`EXPLICIT_INTERNAL_TEST_CANDIDATE_COUNT=${explicitCount}`);
+            console.log("EXTERNAL_WRITE_SENT=false");
+            console.log("PASS: PHASE17_CANARY_CANDIDATE_INVENTORY");
+          })().then(async()=>{await prisma.$disconnect()}).catch(async(error)=>{console.error(error instanceof Error?error.message:error);await prisma.$disconnect().catch(()=>undefined);process.exit(1)});
+          TS
+          )"
 
           test -z "$(git -C "$APP" status --porcelain --untracked-files=no)"
           REMOTE
