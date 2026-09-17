@@ -359,6 +359,8 @@ jobs:
               -o BatchMode=yes \
               -o IdentitiesOnly=yes \
               -o StrictHostKeyChecking=yes \
+              -o ConnectTimeout=10 \
+              -o ConnectionAttempts=1 \
               "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/engageos-${PRODUCTION_RUN_ID}/${file_name}" \
               "production-evidence/${file_name}" >/dev/null 2>&1 || true
           done
