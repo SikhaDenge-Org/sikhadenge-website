@@ -1,0 +1,10 @@
+name: Phase17 Provider Binding Fix Investigation Marker
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  marker:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo provider-binding-fix-investigation
