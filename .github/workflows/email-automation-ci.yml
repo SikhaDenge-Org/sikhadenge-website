@@ -76,6 +76,9 @@ jobs:
       - name: Run email E5 production inbound safety policy
         run: bash tests/email-inbound-production-policy.test.sh
 
+      - name: Run email E5 polling bootstrap contract
+        run: bash tests/email-inbound-polling-bootstrap-contract.test.sh
+
       - name: Run email automation production preflight policy
         run: bash tests/email-automation-production-preflight-policy.test.sh
 
