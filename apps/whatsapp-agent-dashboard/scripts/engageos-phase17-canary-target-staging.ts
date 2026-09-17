@@ -296,6 +296,9 @@ async function runDryRun(workspaceId: string) {
     if (text.length > MAX_TEXT_LENGTH) throw new Error("Canary text exceeds 4,096 characters.");
     const conversation = recipient.conversations.find((candidate) => candidate.id === conversationId);
     if (!conversation) throw new Error("Exact conversation ID does not belong to the target WhatsApp contact.");
+    if (!conversation.serviceWindowOpen) {
+      throw new Error("Initial Phase17 TEXT canary requires an open WhatsApp service window.");
+    }
     await assertFailClosedBaseline(workspaceId, recipient.connection.id);
     computedIntentHash = intentHash({
       workspaceId,
@@ -363,6 +366,9 @@ async function runStage(workspaceId: string) {
 
   const conversation = recipient.conversations.find((candidate) => candidate.id === conversationId);
   if (!conversation) throw new Error("Exact conversation ID does not belong to the exact target waId.");
+  if (!conversation.serviceWindowOpen) {
+    throw new Error("Initial Phase17 TEXT canary requires an open WhatsApp service window.");
+  }
 
   const expectedIntentHash = intentHash({
     workspaceId,
