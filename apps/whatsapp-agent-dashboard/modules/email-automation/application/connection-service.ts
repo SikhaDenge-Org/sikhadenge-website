@@ -41,8 +41,15 @@ export class EmailConnectionService {
   }): Promise<{ connection: EmailConnection; senders: readonly EmailSenderIdentity[] }> {
     const adapter = this.deps.providers.get(input.provider);
     const oauth = await adapter.completeOAuth(input);
-    const connectionId = this.id();
     const now = this.now();
+    const workspaceConnections = await this.deps.connections.listByWorkspace(input.workspaceId);
+    const existingConnection = workspaceConnections.find(
+      (connection) =>
+        connection.provider === input.provider &&
+        connection.status !== "REVOKED" &&
+        connection.externalAccountId === oauth.externalAccountId,
+    );
+    const connectionId = existingConnection?.id ?? this.id();
 
     const pendingConnection: EmailConnection = {
       id: connectionId,
@@ -50,18 +57,30 @@ export class EmailConnectionService {
       provider: input.provider,
       displayName: oauth.displayName,
       externalAccountId: oauth.externalAccountId,
-      status: "PENDING",
-      connectedAt: null,
-      lastVerifiedAt: null,
+      status: existingConnection?.status ?? "PENDING",
+      connectedAt: existingConnection?.connectedAt ?? null,
+      lastVerifiedAt: existingConnection?.lastVerifiedAt ?? null,
       revokedAt: null,
     };
 
-    await this.deps.connections.save(pendingConnection);
+    if (!existingConnection) {
+      await this.deps.connections.save(pendingConnection);
+    }
+
+    const previousCredentials = existingConnection
+      ? await this.deps.credentials.loadOAuthCredentials({
+          workspaceId: input.workspaceId,
+          connectionId,
+        })
+      : null;
     await this.deps.credentials.storeOAuthCredentials({
       workspaceId: input.workspaceId,
       connectionId,
       provider: input.provider,
-      credentials: oauth.credentials,
+      credentials: {
+        ...oauth.credentials,
+        refreshToken: oauth.credentials.refreshToken ?? previousCredentials?.refreshToken ?? null,
+      },
     });
 
     const discovered = await adapter.listSenderIdentities(pendingConnection);
@@ -69,7 +88,7 @@ export class EmailConnectionService {
     const connection: EmailConnection = {
       ...pendingConnection,
       status: "CONNECTED",
-      connectedAt: now,
+      connectedAt: existingConnection?.connectedAt ?? now,
       lastVerifiedAt: now,
     };
     await this.deps.connections.save(connection);
