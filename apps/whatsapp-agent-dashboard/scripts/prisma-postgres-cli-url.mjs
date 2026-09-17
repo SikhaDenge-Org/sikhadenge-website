@@ -13,6 +13,7 @@
 // Align exact production SHA before guarded Email internal-recipient test — 2026-09-17
 // Email lifecycle readiness audit after guarded DRY_RUN activation — 2026-09-17
 // Align production SHA after lifecycle readiness before internal-recipient test — 2026-09-17
+// Guarded Email internal-recipient delivery verification — 2026-09-17
 const rawUrl = process.argv[2] ?? "";
 
 if (!rawUrl.trim()) {
