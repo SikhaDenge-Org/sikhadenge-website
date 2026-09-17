@@ -1,0 +1,107 @@
+name: WhatsApp Agent Phase17 Canonical Connection Audit
+
+on:
+  push:
+    branches:
+      - ops/phase17-canonical-connection-audit-20260917
+    paths:
+      - ".github/workflows/whatsapp-agent-phase17-canonical-connection-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  canonical-connection-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then echo SSH_PORT=22 >> "$GITHUB_ENV"; SSH_PORT=22; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Audit canonical WhatsApp connection mapping without writes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ENV_FILE="$APP/.env"
+          WORKSPACE_ID=engagews_default
+
+          envv() {
+            node - "$ENV_FILE" "$1" <<'NODE'
+          const fs=require('node:fs'); const [file,key]=process.argv.slice(2);
+          for(const raw of fs.readFileSync(file,'utf8').split(/\r?\n/)){
+            let line=raw.trim(); if(!line||line.startsWith('#')) continue;
+            const i=line.indexOf('='); if(i<1||line.slice(0,i).trim()!==key) continue;
+            let value=line.slice(i+1).trim();
+            if(value.length>=2&&((value.startsWith('"')&&value.endsWith('"'))||(value.startsWith("'")&&value.endsWith("'")))) value=value.slice(1,-1);
+            process.stdout.write(value); process.exit(0);
+          }
+          process.exit(1);
+          NODE
+          }
+          test -f "$ENV_FILE"
+          phone_id="$(envv WHATSAPP_PHONE_NUMBER_ID 2>/dev/null || envv META_WHATSAPP_PHONE_NUMBER_ID)"
+          mode="$(envv WHATSAPP_OUTBOUND_MODE 2>/dev/null || echo disabled)"
+          kill="$(envv WHATSAPP_OUTBOUND_KILL_SWITCH 2>/dev/null || echo on)"
+          [[ "$phone_id" =~ ^[0-9]+$ ]]
+          test "$mode" != live
+          test "$kill" = on
+          export DATABASE_URL="$(envv DATABASE_URL)"
+          DB="$(node "$APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")"
+
+          state="$(psql "$DB" -X -Atqc "SELECT \"stage\"||'|'||\"mode\"||'|'||\"writePolicy\"||'|'||\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
+          candidate_id="$(psql "$DB" -X -Atqc "SELECT \"scope\"->'connectedAccountIds'->>0 FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
+          [[ "$candidate_id" =~ ^[A-Za-z0-9_-]+$ ]]
+          candidate_tuple="$(psql "$DB" -X -Atqc "SELECT \"channel\"||'|'||\"status\"||'|'||CASE WHEN \"externalAccountId\"='${phone_id}' THEN 'provider_match' ELSE 'provider_mismatch' END FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"id\"='${candidate_id}';")"
+          legacy_alias="whatsapp:${phone_id}"
+
+          mapped_total="$(psql "$DB" -X -Atqc "SELECT COUNT(*) FROM \"WhatsAppContact\" WHERE \"metadata\"#>>'{engageos,whatsappIdentity,connectionId}' IS NOT NULL;")"
+          mapped_canonical="$(psql "$DB" -X -Atqc "SELECT COUNT(*) FROM \"WhatsAppContact\" WHERE \"metadata\"#>>'{engageos,whatsappIdentity,connectionId}'='${candidate_id}';")"
+          mapped_legacy="$(psql "$DB" -X -Atqc "SELECT COUNT(*) FROM \"WhatsAppContact\" WHERE \"metadata\"#>>'{engageos,whatsappIdentity,connectionId}'='${legacy_alias}';")"
+          mapped_other="$(psql "$DB" -X -Atqc "SELECT COUNT(*) FROM \"WhatsAppContact\" WHERE \"metadata\"#>>'{engageos,whatsappIdentity,connectionId}' IS NOT NULL AND \"metadata\"#>>'{engageos,whatsappIdentity,connectionId}' NOT IN ('${candidate_id}','${legacy_alias}');")"
+          queued="$(psql "$DB" -X -Atqc "SELECT COUNT(*) FROM \"WhatsAppMessage\" WHERE \"direction\"='OUTBOUND' AND \"status\"='QUEUED';")"
+          printf 'LIVE_SHA=%s\n' "$(git -C "$APP" rev-parse HEAD)"
+          printf 'CONTROLLED_LAUNCH_STATE=%s\n' "$state"
+          printf 'SCOPED_CONNECTION_PRESENT=%s\n' "$([[ -n "$candidate_id" ]] && echo true || echo false)"
+          printf 'SCOPED_CONNECTION_STATUS=%s\n' "$candidate_tuple"
+          printf 'MAPPED_CONTACTS_TOTAL=%s\n' "$mapped_total"
+          printf 'MAPPED_CONTACTS_CANONICAL_ID=%s\n' "$mapped_canonical"
+          printf 'MAPPED_CONTACTS_LEGACY_ALIAS=%s\n' "$mapped_legacy"
+          printf 'MAPPED_CONTACTS_OTHER_CONNECTION=%s\n' "$mapped_other"
+          printf 'QUEUED_OUTBOUND_MESSAGES=%s\n' "$queued"
+          canonical_ready=false
+          if [[ "$mapped_total" -gt 0 && "$mapped_canonical" = "$mapped_total" && "$mapped_legacy" = 0 && "$mapped_other" = 0 ]]; then canonical_ready=true; fi
+          printf 'CANONICAL_MAPPING_READY=%s\n' "$canonical_ready"
+          printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          printf 'PASS: PHASE17_CANONICAL_CONNECTION_AUDIT\n'
+          REMOTE
