@@ -141,7 +141,7 @@ jobs:
           machine_current="$(psql "$dburl" -X -Atqc "SELECT COUNT(*) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"entityId\"='${live_sha}' AND \"reasonCode\"='MACHINE_VERIFIED_EXACT_SHA' AND outcome='VERIFIED';")"
           operator_current="$(psql "$dburl" -X -Atqc "SELECT COUNT(*) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"entityId\"='${live_sha}' AND \"reasonCode\"='OPERATOR_VERIFIED_EXACT_SHA' AND outcome='VERIFIED';")"
           printf 'CONTROLLED=%s\nQUEUED_OUTBOUND=%s\nACTIVE_EXACT_MESSAGE_APPROVALS=%s\nCURRENT_LIVE_MACHINE_EVIDENCE=%s\nCURRENT_LIVE_OPERATOR_EVIDENCE=%s\n' "$controlled" "$queued" "$approvals" "$machine_current" "$operator_current"
-          test "$controlled" = "ONE_CONNECTED_ACCOUNT|SHADOW|NO_EXTERNAL_WRITES|f|false|2"
+          test "$controlled" = "ONE_CONNECTED_ACCOUNT|SHADOW|NO_EXTERNAL_WRITES|false|false|2"
           test "$queued" = "0"
           test "$approvals" = "0"
 
