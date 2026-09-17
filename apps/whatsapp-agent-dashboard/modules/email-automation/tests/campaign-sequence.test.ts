@@ -84,7 +84,7 @@ assert.match(campaignUi, /\/api\/email\/campaigns/);
 assert.match(campaignUi, /\/api\/email\/templates/);
 assert.match(campaignUi, /\/api\/email\/connections/);
 assert.match(campaignUi, /\/api\/email\/runtime/);
-assert.match(campaignUi, /action:\s*"DISPATCH"/);
+assert.match(campaignUi, /control\(c\.id,\s*"DISPATCH"\)/);
 assert.match(campaignUi, /"PAUSED"/);
 assert.match(campaignUi, /"CANCELLED"/);
 assert.match(sequenceUi, /\/api\/email\/sequences/);
