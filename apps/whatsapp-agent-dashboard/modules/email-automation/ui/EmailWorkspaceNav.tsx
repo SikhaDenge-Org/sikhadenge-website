@@ -6,6 +6,7 @@ import styles from "./email-workspace-nav.module.css";
 
 const ITEMS = [
   ["Overview", "/email", "Command center", "◇"],
+  ["Inbox", "/email/inbox", "Unified threads", "✉"],
   ["Accounts", "/email/accounts", "Gmail & senders", "@"],
   ["Templates", "/email/templates", "Reusable designs", "▤"],
   ["Send", "/email/send", "Manual send", "↗"],
