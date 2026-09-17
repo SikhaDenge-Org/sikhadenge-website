@@ -140,6 +140,7 @@ jobs:
           test -n "$token"
           test -n "$phone_id"
           test -n "$graph_version"
+          [[ "$phone_id" =~ ^[0-9]+$ ]]
 
           export DATABASE_URL="$(envv DATABASE_URL)"
           DB="$(node "$APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")"
@@ -152,8 +153,8 @@ jobs:
           transitions="$(psql "$DB" -X -Atqc "SELECT COUNT(*) FROM \"EngageControlledLaunchTransition\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
           outbound_before="$(psql "$DB" -X -A -F '|' -t -c "SELECT COUNT(*),COALESCE(MAX(\"updatedAt\")::text,'') FROM \"WhatsAppMessage\" WHERE \"direction\"='OUTBOUND';")"
           expected_connection="whatsapp:${phone_id}"
-          active_connection_count="$(psql "$DB" -X -v conn="$expected_connection" -Atqc "SELECT COUNT(*) FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\"='WHATSAPP' AND \"id\"=:'conn' AND \"status\" IN ('CONNECTED','DEGRADED');")"
-          scope_connection_count="$(psql "$DB" -X -v conn="$expected_connection" -Atqc "SELECT COUNT(*) FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"scope\"->'connectedAccountIds' ? :'conn';")"
+          active_connection_count="$(psql "$DB" -X -Atqc "SELECT COUNT(*) FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\"='WHATSAPP' AND \"id\"='${expected_connection}' AND \"status\" IN ('CONNECTED','DEGRADED');")"
+          scope_connection_count="$(psql "$DB" -X -Atqc "SELECT COUNT(*) FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"scope\"->'connectedAccountIds' ? '${expected_connection}';")"
           printf 'QUEUED_OUTBOUND_MESSAGES=%s\nACTIVE_EXACT_MESSAGE_APPROVALS=%s\nCONTROLLED_LAUNCH_TRANSITIONS=%s\n' "$queued" "$active_approvals" "$transitions"
           printf 'PROVIDER_CONNECTION_BINDING_ACTIVE=%s\nPROVIDER_CONNECTION_SCOPED=%s\n' "$active_connection_count" "$scope_connection_count"
           test "$queued" = "0"
