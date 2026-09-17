@@ -11,6 +11,7 @@ BACKUP_ROOT="${BACKUP_ROOT:-/root/sikhadenge-backups}"
 BACKUP_DIR="$BACKUP_ROOT/$RUN_ID"
 ACTIVATION_ACCOUNT="${EMAIL_INBOUND_ACTIVATION_ACCOUNT:-}"
 BASE_URL="${EMAIL_AUTOMATION_SCHEDULER_BASE_URL:-http://127.0.0.1:3100}"
+INBOUND_MODE=""
 
 fail(){ printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 read_env_value(){
@@ -21,9 +22,11 @@ for(const raw of fs.readFileSync(file,'utf8').split(/\r?\n/)){const line=raw.tri
 NODE
 }
 sync_pm2_inbound_env(){
-  local value
-  value="$(read_env_value EMAIL_INBOUND_SYNC_ENABLED)"
-  if [[ -n "$value" ]]; then export EMAIL_INBOUND_SYNC_ENABLED="$value"; else unset EMAIL_INBOUND_SYNC_ENABLED; fi
+  local key value
+  for key in EMAIL_INBOUND_SYNC_ENABLED EMAIL_GMAIL_INBOUND_MODE; do
+    value="$(read_env_value "$key")"
+    if [[ -n "$value" ]]; then export "$key=$value"; else unset "$key" || true; fi
+  done
   pm2 restart "$PM2_PROCESS_NAME" --update-env >/dev/null
 }
 
@@ -32,7 +35,11 @@ sync_pm2_inbound_env(){
 [[ -f "$ENV_FILE" ]] || fail "ENV_FILE not found"
 cd "$LIVE_APP"
 [[ "$(git rev-parse HEAD 2>/dev/null || true)" == "$EXPECTED_RELEASE_SHA" ]] || fail "git SHA mismatch"
-printf 'EMAIL_INBOUND_ACTIVATION_PLAN\nAPPLY=%s\nACCOUNT=%s\nSEND_RUNTIME_MUST_REMAIN=DRY_RUN\nEXTERNAL_WRITES_MUST_REMAIN=false\n' "$APPLY" "$ACTIVATION_ACCOUNT"
+INBOUND_MODE="${EMAIL_GMAIL_INBOUND_MODE:-$(read_env_value EMAIL_GMAIL_INBOUND_MODE)}"
+INBOUND_MODE="${INBOUND_MODE:-POLLING}"
+INBOUND_MODE="$(printf '%s' "$INBOUND_MODE" | tr '[:lower:]' '[:upper:]')"
+[[ "$INBOUND_MODE" == "POLLING" || "$INBOUND_MODE" == "WATCH" ]] || fail "EMAIL_GMAIL_INBOUND_MODE must be POLLING or WATCH"
+printf 'EMAIL_INBOUND_ACTIVATION_PLAN\nAPPLY=%s\nACCOUNT=%s\nMODE=%s\nSEND_RUNTIME_MUST_REMAIN=DRY_RUN\nEXTERNAL_WRITES_MUST_REMAIN=false\n' "$APPLY" "$ACTIVATION_ACCOUNT" "$INBOUND_MODE"
 [[ "$APPLY" == "1" ]] || { printf 'INFO: preview only\n'; exit 0; }
 [[ "$(id -u)" == "0" ]] || fail "APPLY=1 requires root"
 install -d -m 700 "$BACKUP_DIR"
@@ -49,7 +56,7 @@ restore(){
     restored=1
   fi
   if [[ "$code" == "0" ]]; then
-    printf 'STATUS=PASS_EMAIL_INBOUND_ENABLED\nACCOUNT=%s\n' "$ACTIVATION_ACCOUNT" > "$BACKUP_DIR/inbound-activation-result.txt"
+    printf 'STATUS=PASS_EMAIL_INBOUND_ENABLED\nACCOUNT=%s\nMODE=%s\n' "$ACTIVATION_ACCOUNT" "$INBOUND_MODE" > "$BACKUP_DIR/inbound-activation-result.txt"
   else
     printf 'STATUS=FAILED_EMAIL_INBOUND_ACTIVATION_ROLLED_BACK\nFAILED_STAGE=%s\nEXIT_CODE=%s\n' "$stage" "$code" > "$BACKUP_DIR/inbound-activation-result.txt"
   fi
@@ -65,10 +72,11 @@ set +a
 [[ "${EMAIL_RUNTIME_MODE:-}" == "DRY_RUN" ]] || fail "Email send runtime must remain DRY_RUN"
 [[ "${EMAIL_EXTERNAL_WRITES_ENABLED:-false}" != "true" ]] || fail "Email external writes must remain disabled"
 [[ ${#EMAIL_AUTOMATION_SCHEDULER_TOKEN} -ge 32 ]] || fail "scheduler token missing"
+if [[ "$INBOUND_MODE" == "WATCH" && -z "${GOOGLE_GMAIL_PUBSUB_TOPIC:-}" ]]; then fail "GOOGLE_GMAIL_PUBSUB_TOPIC is required in WATCH mode"; fi
 
 stage="enable-inbound-flag"
-node - "$ENV_FILE" <<'NODE'
-const fs=require('node:fs'),path=require('node:path');const file=process.argv[2],original=fs.readFileSync(file,'utf8'),stat=fs.statSync(file);const key='EMAIL_INBOUND_SYNC_ENABLED';const kept=original.split(/\r?\n/).filter(raw=>{const line=raw.trim();if(!line||line.startsWith('#'))return true;const n=line.startsWith('export ')?line.slice(7).trim():line;const i=n.indexOf('=');return i<1||n.slice(0,i).trim()!==key;});while(kept.length&&kept.at(-1)==='')kept.pop();kept.push(`${key}=true`,'');const tmp=path.join(path.dirname(file),`.${path.basename(file)}.${process.pid}.tmp`);fs.writeFileSync(tmp,kept.join('\n'),{mode:stat.mode});fs.chmodSync(tmp,stat.mode);try{fs.chownSync(tmp,stat.uid,stat.gid)}catch{}fs.renameSync(tmp,file);
+node - "$ENV_FILE" "$INBOUND_MODE" <<'NODE'
+const fs=require('node:fs'),path=require('node:path');const [file,mode]=process.argv.slice(2),original=fs.readFileSync(file,'utf8'),stat=fs.statSync(file);const values={EMAIL_INBOUND_SYNC_ENABLED:'true',EMAIL_GMAIL_INBOUND_MODE:mode};const keys=new Set(Object.keys(values));const kept=original.split(/\r?\n/).filter(raw=>{const line=raw.trim();if(!line||line.startsWith('#'))return true;const n=line.startsWith('export ')?line.slice(7).trim():line;const i=n.indexOf('=');return i<1||!keys.has(n.slice(0,i).trim());});while(kept.length&&kept.at(-1)==='')kept.pop();for(const [key,value] of Object.entries(values))kept.push(`${key}=${value}`);kept.push('');const tmp=path.join(path.dirname(file),`.${path.basename(file)}.${process.pid}.tmp`);fs.writeFileSync(tmp,kept.join('\n'),{mode:stat.mode});fs.chmodSync(tmp,stat.mode);try{fs.chownSync(tmp,stat.uid,stat.gid)}catch{}fs.renameSync(tmp,file);
 NODE
 sync_pm2_inbound_env
 sleep 4
@@ -84,14 +92,14 @@ node - "$health" <<'NODE'
 const fs=require('node:fs');const h=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));if(h.runtimeMode!=='DRY_RUN')throw new Error('send runtime drifted from DRY_RUN');if(h.externalWritesEnabled!==false)throw new Error('external writes drifted enabled');if(h.inboundSyncEnabled!==true)throw new Error('inbound sync flag not active');
 NODE
 
-stage="start-watch-and-first-sync"
-EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" EMAIL_INBOUND_ACTIVATION_ACCOUNT="$ACTIVATION_ACCOUNT" \
+stage="initialize-cursor-and-first-sync"
+EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" EMAIL_INBOUND_ACTIVATION_ACCOUNT="$ACTIVATION_ACCOUNT" EMAIL_GMAIL_INBOUND_MODE="$INBOUND_MODE" \
   npx tsx scripts/email-inbound-production-activate.ts | tee "$BACKUP_DIR/inbound-activation.json"
 
 stage="verify-scheduler"
 systemctl is-active --quiet sikhadenge-email-automation-scheduler.timer || fail "email automation scheduler timer is not active"
 chmod 600 "$BACKUP_DIR"/*
 trap - ERR EXIT INT TERM
-printf 'EMAIL_INBOUND_PRODUCTION_ACTIVATION=PASS\nEVIDENCE_DIR=%s\n' "$BACKUP_DIR"
-printf 'STATUS=PASS_EMAIL_INBOUND_ENABLED\nACCOUNT=%s\n' "$ACTIVATION_ACCOUNT" > "$BACKUP_DIR/inbound-activation-result.txt"
+printf 'EMAIL_INBOUND_PRODUCTION_ACTIVATION=PASS\nMODE=%s\nEVIDENCE_DIR=%s\n' "$INBOUND_MODE" "$BACKUP_DIR"
+printf 'STATUS=PASS_EMAIL_INBOUND_ENABLED\nACCOUNT=%s\nMODE=%s\n' "$ACTIVATION_ACCOUNT" "$INBOUND_MODE" > "$BACKUP_DIR/inbound-activation-result.txt"
 chmod 600 "$BACKUP_DIR/inbound-activation-result.txt"

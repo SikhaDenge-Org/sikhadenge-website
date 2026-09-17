@@ -29,9 +29,11 @@ function watchStateFromCapabilities(value: unknown) {
     expiration: typeof state.expiration === "string" ? state.expiration.trim() : "",
     watchStartedAt: typeof state.watchStartedAt === "string" ? state.watchStartedAt.trim() : "",
     lastSyncedAt: typeof state.lastSyncedAt === "string" ? state.lastSyncedAt.trim() : "",
+    syncMode: state.syncMode === "WATCH" ? "WATCH" : state.syncMode === "POLLING" ? "POLLING" : "",
+    cursorInitializedAt: typeof state.cursorInitializedAt === "string" ? state.cursorInitializedAt.trim() : "",
   };
 }
-async function persistGmailInboundState(input:{workspaceId:string;connectionId:string;historyId:string;expiration?:string|null;watchStartedAt?:string|null;lastSyncedAt?:string|null}) {
+async function persistGmailInboundState(input:{workspaceId:string;connectionId:string;historyId:string;expiration?:string|null;watchStartedAt?:string|null;lastSyncedAt?:string|null;syncMode?:"POLLING"|"WATCH"|null;cursorInitializedAt?:string|null}) {
   const row = await prisma.engageChannelConnection.findFirst({
     where: { id: input.connectionId, workspaceId: input.workspaceId, channel: "EMAIL" },
     select: { id: true, capabilities: true },
@@ -44,6 +46,8 @@ async function persistGmailInboundState(input:{workspaceId:string;connectionId:s
     expiration: (input.expiration ?? current.expiration) || null,
     watchStartedAt: (input.watchStartedAt ?? current.watchStartedAt) || null,
     lastSyncedAt: (input.lastSyncedAt ?? current.lastSyncedAt) || null,
+    syncMode: (input.syncMode ?? current.syncMode) || null,
+    cursorInitializedAt: (input.cursorInitializedAt ?? current.cursorInitializedAt) || null,
   };
   await prisma.engageChannelConnection.update({
     where: { id: row.id },
@@ -55,7 +59,7 @@ async function gmailInboundState(workspaceId:string, connectionId:string) {
     where: { id: connectionId, workspaceId, channel: "EMAIL" },
     select: { capabilities: true },
   });
-  return row ? watchStateFromCapabilities(row.capabilities) : { historyId:"", expiration:"", watchStartedAt:"", lastSyncedAt:"" };
+  return row ? watchStateFromCapabilities(row.capabilities) : { historyId:"", expiration:"", watchStartedAt:"", lastSyncedAt:"", syncMode:"", cursorInitializedAt:"" };
 }
 
 async function gmailContext(workspaceId: string, connectionId: string) {
@@ -63,6 +67,18 @@ async function gmailContext(workspaceId: string, connectionId: string) {
   if (!connection || connection.provider !== "GOOGLE_GMAIL" || connection.status !== "CONNECTED") throw new Error("Connected Gmail account is required.");
   const adapter = runtime.providers.get("GOOGLE_GMAIL"); if (!(adapter instanceof GmailEmailProviderAdapter)) throw new Error("Gmail provider is unavailable.");
   return { connection, token: await adapter.getAccessTokenForConnection(workspaceId, connectionId) };
+}
+export async function bootstrapGmailHistoryCursor(input: { workspaceId: string; connectionId: string }) {
+  if (process.env.EMAIL_INBOUND_SYNC_ENABLED !== "true") throw new Error("Email inbound sync is disabled.");
+  const { token } = await gmailContext(input.workspaceId, input.connectionId);
+  const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", { headers: { authorization: `Bearer ${token}` }, cache: "no-store" });
+  if (!response.ok) throw new Error(`Gmail profile bootstrap failed with HTTP ${response.status}.`);
+  const body = await response.json() as { historyId?: string };
+  const historyId = body.historyId?.trim();
+  if (!historyId) throw new Error("Gmail profile did not include a historyId.");
+  const initializedAt = new Date().toISOString();
+  await persistGmailInboundState({ workspaceId: input.workspaceId, connectionId: input.connectionId, historyId, expiration: null, watchStartedAt: null, lastSyncedAt: null, syncMode: "POLLING", cursorInitializedAt: initializedAt });
+  return { historyId, expiration: null, persisted: true, mode: "POLLING" as const, cursorInitializedAt: initializedAt };
 }
 export async function startGmailMailboxWatch(input: { workspaceId: string; connectionId: string }) {
   if (process.env.EMAIL_INBOUND_SYNC_ENABLED !== "true") throw new Error("Email inbound sync is disabled.");
@@ -73,14 +89,15 @@ export async function startGmailMailboxWatch(input: { workspaceId: string; conne
   const body = await response.json() as { historyId?: string; expiration?: string };
   const historyId = body.historyId?.trim();
   if (!historyId) throw new Error("Gmail watch response did not include a historyId.");
-  await persistGmailInboundState({ workspaceId: input.workspaceId, connectionId: input.connectionId, historyId, expiration: body.expiration ?? null, watchStartedAt: new Date().toISOString(), lastSyncedAt: null });
-  return { historyId, expiration: body.expiration ?? null, persisted: true };
+  const initializedAt = new Date().toISOString();
+  await persistGmailInboundState({ workspaceId: input.workspaceId, connectionId: input.connectionId, historyId, expiration: body.expiration ?? null, watchStartedAt: initializedAt, lastSyncedAt: null, syncMode: "WATCH", cursorInitializedAt: initializedAt });
+  return { historyId, expiration: body.expiration ?? null, persisted: true, mode: "WATCH" as const, cursorInitializedAt: initializedAt };
 }
 export async function syncGmailHistory(input: { workspaceId: string; connectionId: string; startHistoryId?: string | null }) {
   if (process.env.EMAIL_INBOUND_SYNC_ENABLED !== "true") throw new Error("Email inbound sync is disabled.");
   const state = await gmailInboundState(input.workspaceId, input.connectionId);
   const startHistoryId = input.startHistoryId?.trim() || state.historyId;
-  if (!startHistoryId) throw new Error("Gmail watch is not initialized for this connection.");
+  if (!startHistoryId) throw new Error("Gmail inbound cursor is not initialized for this connection.");
   const { token } = await gmailContext(input.workspaceId, input.connectionId); const ids = new Set<string>(); let pageToken = ""; let latestHistoryId = startHistoryId;
   do {
     const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/history");
