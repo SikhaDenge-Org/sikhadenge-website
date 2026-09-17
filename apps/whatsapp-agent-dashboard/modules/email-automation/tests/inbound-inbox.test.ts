@@ -76,8 +76,8 @@ assert.match(safeIngest, /resolveWorkspaceSafeContactId/);
 assert.match(safeIngest, /engageEmailInboundMessage\.findFirst/);
 assert.match(safeIngest, /engageEmailAutomationEvent\.findMany/);
 assert.match(safeIngest, /engageEmailAnalyticsEvent\.findMany/);
-assert.match(safeIngest, /where:\s*\{ workspaceId, fromAddress:/);
-assert.match(safeIngest, /where:\s*\{ workspaceId, contactId:/);
+assert.match(safeIngest, /where:\s*\{\s*workspaceId,\s*fromAddress:/);
+assert.match(safeIngest, /where:\s*\{\s*workspaceId,\s*contactId:/);
 assert.match(safeIngest, /matches\.length === 1 \? matches\[0\]\.id : null/);
 assert.doesNotMatch(safeIngest, /whatsAppContact\.findFirst\(\{\s*where:\s*\{\s*email/);
 
