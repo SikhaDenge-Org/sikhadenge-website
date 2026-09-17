@@ -75,7 +75,7 @@ async function main() {
       contactId: "contact-1",
       waId: "919999999999",
       phoneNumberId: "12345",
-      metadata: merged,
+      metadata: merged as never,
     },
   );
   assert.equal(refreshed.updated, true);
