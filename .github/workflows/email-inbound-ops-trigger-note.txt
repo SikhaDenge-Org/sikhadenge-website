@@ -1,0 +1,5 @@
+Email inbound production operations trigger note.
+
+This file is intentionally non-runtime and exists only to create auditable, fail-closed GitHub push triggers for Email E5 inbound production operations.
+
+2026-09-17: Run inbound readiness against deployed parent SHA cf2b1c2f7bd66f8b7037e51240b1f84f8ce95484.
