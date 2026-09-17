@@ -7,11 +7,13 @@ SERVICE_NAME="${SERVICE_NAME:-sikhadenge-email-automation-scheduler}"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 ON_CALENDAR="${ON_CALENDAR:-*:0/5}"
 ENV_FILE="${ENV_FILE:-$APP_DIR/.env}"
+PREFLIGHT_EXPECTED_MODE="${EMAIL_PREFLIGHT_EXPECTED_MODE:-DRY_RUN}"
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 info() { printf 'INFO: %s\n' "$*"; }
 
 [[ -n "$EXPECTED_RELEASE_SHA" ]] || fail "EXPECTED_RELEASE_SHA is required"
+[[ "$PREFLIGHT_EXPECTED_MODE" == "DRY_RUN" || "$PREFLIGHT_EXPECTED_MODE" == "LIMITED_COHORT" ]] || fail "EMAIL_PREFLIGHT_EXPECTED_MODE must be DRY_RUN or LIMITED_COHORT"
 [[ -f "$APP_DIR/package.json" && -f "$APP_DIR/scripts/email-automation-production-preflight.sh" ]] || fail "APP_DIR must be apps/whatsapp-agent-dashboard"
 cd "$APP_DIR"
 current_sha="$(git rev-parse HEAD 2>/dev/null || true)"
@@ -49,7 +51,7 @@ Unit=${SERVICE_NAME}.service
 WantedBy=timers.target"
 
 printf 'EMAIL_AUTOMATION_SCHEDULER_ACTIVATION_PLAN\n'
-printf 'APPLY=%s\nSERVICE=%s\nTIMER=%s\nSCHEDULE=%s\n' "$APPLY" "$unit_path" "$timer_path" "$ON_CALENDAR"
+printf 'APPLY=%s\nSERVICE=%s\nTIMER=%s\nSCHEDULE=%s\nPREFLIGHT_EXPECTED_MODE=%s\n' "$APPLY" "$unit_path" "$timer_path" "$ON_CALENDAR" "$PREFLIGHT_EXPECTED_MODE"
 printf '%s\n' "$service_body"
 printf '%s\n' "$timer_body"
 
@@ -59,7 +61,7 @@ if [[ "$APPLY" != "1" ]]; then
 fi
 [[ "$(id -u)" == "0" ]] || fail "APPLY=1 requires root"
 command -v systemctl >/dev/null 2>&1 || fail "systemctl is required"
-EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" ENV_FILE="$ENV_FILE" bash scripts/email-automation-production-preflight.sh
+EMAIL_PREFLIGHT_EXPECTED_MODE="$PREFLIGHT_EXPECTED_MODE" EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" ENV_FILE="$ENV_FILE" bash scripts/email-automation-production-preflight.sh
 [[ ! -e "$unit_path" && ! -e "$timer_path" ]] || fail "scheduler unit already exists; reconcile before activation"
 printf '%s\n' "$service_body" > "$unit_path"
 printf '%s\n' "$timer_body" > "$timer_path"
