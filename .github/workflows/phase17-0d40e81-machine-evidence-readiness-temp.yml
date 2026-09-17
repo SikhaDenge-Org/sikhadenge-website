@@ -1,0 +1,156 @@
+name: Phase17 0d40e81 Machine Evidence Readiness
+
+on:
+  push:
+    branches:
+      - ops/phase17-0d40e81-machine-evidence-readiness-20260917
+    paths:
+      - ".github/workflows/phase17-0d40e81-machine-evidence-readiness-temp.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  dry-run-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: whatsapp-agent-production
+    env:
+      EXPECTED_LIVE_SHA: 0d40e81f4190d547fc6cdff786b75b64f4fff10b
+      PRODUCTION_RUN_ID: "35241902671"
+      PRODUCTION_RUN_NUMBER: "160"
+      POLICY_RUN_ID: "35243424299"
+      DEPLOY_STATE_FILE: /root/sikhadenge-backups/engageos-github-35241902671-1/deploy-state.txt
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      WORKSPACE_ID: engagews_default
+    steps:
+      - name: Checkout exact live SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_LIVE_SHA }}
+          fetch-depth: 0
+
+      - name: Verify exact production and policy provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
+
+          prod_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PRODUCTION_RUN_ID")"
+          test "$(jq -r .head_sha <<<"$prod_json")" = "$EXPECTED_LIVE_SHA"
+          test "$(jq -r .status <<<"$prod_json")" = "completed"
+          test "$(jq -r .conclusion <<<"$prod_json")" = "success"
+          test "$(jq -r .run_number <<<"$prod_json")" = "$PRODUCTION_RUN_NUMBER"
+          test "$(jq -r .event <<<"$prod_json")" = "workflow_dispatch"
+          printf 'PRODUCTION_PROOF=run:%s number:%s event:workflow_dispatch sha:%s conclusion:success\n' "$PRODUCTION_RUN_ID" "$PRODUCTION_RUN_NUMBER" "$EXPECTED_LIVE_SHA"
+
+          policy_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$POLICY_RUN_ID")"
+          test "$(jq -r .status <<<"$policy_json")" = "completed"
+          test "$(jq -r .conclusion <<<"$policy_json")" = "success"
+          printf 'POLICY_PROOF=run:%s conclusion:success exact_sha:%s\n' "$POLICY_RUN_ID" "$EXPECTED_LIVE_SHA"
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then echo "SSH_PORT=22" >> "$GITHUB_ENV"; SSH_PORT=22; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Dry-run exact-SHA machine evidence readiness
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' PRODUCTION_RUN_ID='$PRODUCTION_RUN_ID' PRODUCTION_RUN_NUMBER='$PRODUCTION_RUN_NUMBER' POLICY_RUN_ID='$POLICY_RUN_ID' DEPLOY_STATE_FILE='$DEPLOY_STATE_FILE' WORKSPACE_ID='$WORKSPACE_ID' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          A=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          E="$A/.env"
+
+          envv() {
+            node - "$E" "$1" <<'NODE'
+          const fs=require('node:fs'); const [file,key]=process.argv.slice(2);
+          for(const raw of fs.readFileSync(file,'utf8').split(/\r?\n/)){
+            let line=raw.trim(); if(!line||line.startsWith('#')) continue;
+            if(line.startsWith('export ')) line=line.slice(7).trim();
+            const i=line.indexOf('='); if(i<1||line.slice(0,i).trim()!==key) continue;
+            let v=line.slice(i+1).trim();
+            if(v.length>=2&&((v.startsWith('"')&&v.endsWith('"'))||(v.startsWith("'")&&v.endsWith("'")))) v=v.slice(1,-1);
+            process.stdout.write(v); process.exit(0);
+          }
+          process.exit(1);
+          NODE
+          }
+
+          cd "$A"
+          live_sha="$(git rev-parse HEAD)"
+          dirty="$(git status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          printf 'LIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\n' "$live_sha" "$dirty"
+          test "$live_sha" = "$EXPECTED_LIVE_SHA"
+          test "$dirty" = "0"
+
+          outbound_mode="$(envv WHATSAPP_OUTBOUND_MODE 2>/dev/null || echo disabled)"
+          cutover="$(envv WHATSAPP_CUTOVER_APPROVED 2>/dev/null || echo false)"
+          live_ack="$(envv WHATSAPP_OUTBOUND_LIVE_ACK 2>/dev/null || true)"
+          kill_switch="$(envv WHATSAPP_OUTBOUND_KILL_SWITCH 2>/dev/null || echo on)"
+          printf 'OUTBOUND_MODE=%s\nCUTOVER_APPROVED=%s\nLIVE_ACK_SET=%s\nPROVIDER_KILL_SWITCH=%s\n' "$outbound_mode" "$cutover" "$([[ -n "$live_ack" ]] && echo true || echo false)" "$kill_switch"
+          test "$outbound_mode" = "disabled"
+          test "$cutover" = "false"
+          test -z "$live_ack"
+          test "$kill_switch" = "on"
+
+          pm2_state="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(String(p?.pm2_env?.status||"missing"))})')"
+          login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login || true)"
+          printf 'PM2_STATE=%s\nLOGIN_HTTP=%s\n' "$pm2_state" "$login_http"
+          test "$pm2_state" = "online"
+          test "$login_http" = "200"
+
+          test -f "$DEPLOY_STATE_FILE"
+          EXPECTED_RELEASE_SHA="$EXPECTED_LIVE_SHA" DEPLOY_STATE_FILE="$DEPLOY_STATE_FILE" bash scripts/engageos-phase17-runtime-identity-readonly.sh
+
+          database_url="$(envv DATABASE_URL)"
+          dburl="$(node scripts/prisma-postgres-cli-url.mjs "$database_url")"
+          queued="$(psql "$dburl" -X -Atqc "SELECT COUNT(*) FROM \"WhatsAppMessage\" WHERE direction='OUTBOUND' AND status='QUEUED';")"
+          approvals="$(psql "$dburl" -X -Atqc "SELECT COUNT(*) FROM \"EngageControlledLaunchOutboundApproval\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"consumedAt\" IS NULL AND \"revokedAt\" IS NULL AND \"expiresAt\">CURRENT_TIMESTAMP;")"
+          pre_machine="$(psql "$dburl" -X -Atqc "SELECT COUNT(*) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"entityId\"='${EXPECTED_LIVE_SHA}' AND \"reasonCode\"='MACHINE_VERIFIED_EXACT_SHA' AND outcome='VERIFIED';")"
+          printf 'QUEUED_OUTBOUND=%s\nACTIVE_EXACT_MESSAGE_APPROVALS=%s\nPRE_MACHINE_EVIDENCE=%s\n' "$queued" "$approvals" "$pre_machine"
+          test "$queued" = "0"
+          test "$approvals" = "0"
+
+          NODE_ENV=production \
+          DATABASE_URL="$database_url" \
+          PHASE17_WORKSPACE_ID="$WORKSPACE_ID" \
+          PHASE17_EXPECTED_LIVE_SHA="$EXPECTED_LIVE_SHA" \
+          PHASE17_PRODUCTION_RUN_ID="$PRODUCTION_RUN_ID" \
+          PHASE17_PRODUCTION_RUN_NUMBER="$PRODUCTION_RUN_NUMBER" \
+          PHASE17_POLICY_RUN_ID="$POLICY_RUN_ID" \
+          PHASE17_POLICY_COMMIT_SHA="$EXPECTED_LIVE_SHA" \
+          npx --no-install tsx scripts/engageos-phase17-stage2-record-machine-evidence.ts
+
+          echo 'PASS: PHASE17_0D40E81_MACHINE_EVIDENCE_READINESS_DRY_RUN'
+          echo 'DATABASE_MUTATED=false'
+          echo 'STATE_TRANSITIONED=false'
+          echo 'EXTERNAL_WHATSAPP_WRITE_SENT=false'
+          REMOTE
