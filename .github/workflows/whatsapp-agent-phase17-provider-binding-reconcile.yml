@@ -24,12 +24,13 @@ jobs:
   reconcile:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment: whatsapp-agent-production
     env:
-      SSH_HOST: ${{ secrets.WHATSAPP_PRODUCTION_SSH_HOST }}
-      SSH_USER: ${{ secrets.WHATSAPP_PRODUCTION_SSH_USER }}
-      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PRODUCTION_SSH_PRIVATE_KEY }}
-      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PRODUCTION_SSH_HOST_KEY }}
-      SSH_PORT: ${{ secrets.WHATSAPP_PRODUCTION_SSH_PORT }}
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       EXPECTED_RELEASE_SHA: ${{ inputs.expected_release_sha }}
       EXECUTE: ${{ inputs.execute }}
     steps:
@@ -109,20 +110,17 @@ jobs:
           printf 'OUTBOUND_MODE=%s\nCUTOVER_APPROVED=%s\nLIVE_ACK_SET=%s\nKILL_SWITCH=%s\n' \
             "${outbound_mode,,}" "${cutover,,}" "$live_ack_set" "${kill_switch,,}"
 
-          before_sent="$(node - <<'NODE'
+          before_outbound="$(node - <<'NODE'
           const {PrismaClient}=require('@prisma/client');
           const p=new PrismaClient();
-          (async()=>{const [q,s,d,r,f,meta]=await Promise.all([
+          (async()=>{const [total,queued,meta]=await Promise.all([
+            p.whatsAppMessage.count({where:{direction:'OUTBOUND'}}),
             p.whatsAppMessage.count({where:{direction:'OUTBOUND',status:'QUEUED'}}),
-            p.whatsAppMessage.count({where:{direction:'OUTBOUND',status:'SENT'}}),
-            p.whatsAppMessage.count({where:{direction:'OUTBOUND',status:'DELIVERED'}}),
-            p.whatsAppMessage.count({where:{direction:'OUTBOUND',status:'READ'}}),
-            p.whatsAppMessage.count({where:{direction:'OUTBOUND',status:'FAILED'}}),
             p.whatsAppMessage.count({where:{direction:'OUTBOUND',metaMessageId:{not:null}}}),
-          ]); console.log([q,s,d,r,f,meta].join('|'));})().finally(()=>p.$disconnect());
+          ]); console.log([total,queued,meta].join('|'));})().finally(()=>p.$disconnect());
           NODE
           )"
-          printf 'OUTBOUND_SNAPSHOT_BEFORE=%s\n' "$before_sent"
+          printf 'OUTBOUND_SNAPSHOT_BEFORE=%s\n' "$before_outbound"
 
           dry_output="$(npx tsx scripts/engageos-whatsapp-provider-binding-reconcile.ts)"
           printf '%s\n' "$dry_output"
@@ -143,21 +141,18 @@ jobs:
             printf 'PASS: DRY_RUN_ONLY\n'
           fi
 
-          after_sent="$(node - <<'NODE'
+          after_outbound="$(node - <<'NODE'
           const {PrismaClient}=require('@prisma/client');
           const p=new PrismaClient();
-          (async()=>{const [q,s,d,r,f,meta]=await Promise.all([
+          (async()=>{const [total,queued,meta]=await Promise.all([
+            p.whatsAppMessage.count({where:{direction:'OUTBOUND'}}),
             p.whatsAppMessage.count({where:{direction:'OUTBOUND',status:'QUEUED'}}),
-            p.whatsAppMessage.count({where:{direction:'OUTBOUND',status:'SENT'}}),
-            p.whatsAppMessage.count({where:{direction:'OUTBOUND',status:'DELIVERED'}}),
-            p.whatsAppMessage.count({where:{direction:'OUTBOUND',status:'READ'}}),
-            p.whatsAppMessage.count({where:{direction:'OUTBOUND',status:'FAILED'}}),
             p.whatsAppMessage.count({where:{direction:'OUTBOUND',metaMessageId:{not:null}}}),
-          ]); console.log([q,s,d,r,f,meta].join('|'));})().finally(()=>p.$disconnect());
+          ]); console.log([total,queued,meta].join('|'));})().finally(()=>p.$disconnect());
           NODE
           )"
-          printf 'OUTBOUND_SNAPSHOT_AFTER=%s\n' "$after_sent"
-          test "$before_sent" = "$after_sent"
+          printf 'OUTBOUND_SNAPSHOT_AFTER=%s\n' "$after_outbound"
+          test "$before_outbound" = "$after_outbound"
 
           state="$(node - <<'NODE'
           const {PrismaClient}=require('@prisma/client');
