@@ -1,0 +1,98 @@
+name: WhatsApp Agent Phase17 Approval-Only Readiness
+
+on:
+  push:
+    branches:
+      - ops/phase17-approval-only-readiness-20260917
+    paths:
+      - "apps/whatsapp-agent-dashboard/scripts/engageos-phase17-approval-only-readiness.ts"
+      - ".github/workflows/whatsapp-agent-phase17-approval-only-readiness.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-phase17-approval-only-readiness
+  cancel-in-progress: true
+
+jobs:
+  readonly-approval-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_RELEASE_SHA: bb203d95f6fbec3d5a5ebf8e6e0db6ca03a5bb02
+    steps:
+      - name: Checkout ops branch
+        uses: actions/checkout@v4
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then echo SSH_PORT=22 >> "$GITHUB_ENV"; SSH_PORT=22; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+          printf 'PASS: PINNED_SSH_READY\n'
+
+      - name: Run read-only approval-only readiness audit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SCRIPT_B64="$(base64 -w0 apps/whatsapp-agent-dashboard/scripts/engageos-phase17-approval-only-readiness.ts)"
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' SCRIPT_B64='$SCRIPT_B64' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ENV_FILE="$APP/.env"
+          test "$(git -C "$APP" rev-parse HEAD)" = "$EXPECTED_RELEASE_SHA"
+          test -z "$(git -C "$APP" status --porcelain --untracked-files=no)"
+          envv(){ node - "$ENV_FILE" "$1" <<'NODE'
+          const fs=require('node:fs'); const [file,key]=process.argv.slice(2);
+          for(const raw of fs.readFileSync(file,'utf8').split(/\r?\n/)){
+            let line=raw.trim(); if(!line||line.startsWith('#')) continue;
+            if(line.startsWith('export ')) line=line.slice(7).trim();
+            const i=line.indexOf('='); if(i<1||line.slice(0,i).trim()!==key) continue;
+            let value=line.slice(i+1).trim();
+            if(value.length>=2&&((value.startsWith('"')&&value.endsWith('"'))||(value.startsWith("'")&&value.endsWith("'")))) value=value.slice(1,-1);
+            process.stdout.write(value); process.exit(0);
+          }
+          process.exit(1);
+          NODE
+          }
+          test "$(envv WHATSAPP_OUTBOUND_MODE 2>/dev/null || echo disabled)" != live
+          test "$(envv WHATSAPP_CUTOVER_APPROVED 2>/dev/null || echo false)" != true
+          test -z "$(envv WHATSAPP_OUTBOUND_LIVE_ACK 2>/dev/null || true)"
+          test "$(envv WHATSAPP_OUTBOUND_KILL_SWITCH 2>/dev/null || echo on)" = on
+          export DATABASE_URL="$(envv DATABASE_URL)"
+          cd "$APP"
+          npx tsx tests/engageos-phase17-g2-outbound-approval.test.ts
+          tmp=/tmp/engageos-phase17-approval-only-readiness.ts
+          printf '%s' "$SCRIPT_B64" | base64 --decode > "$tmp"
+          PHASE17_EXPECTED_LIVE_SHA="$EXPECTED_RELEASE_SHA" \
+          PHASE17_APPROVAL_ENGINE_PROOF=G2_EXACT_MESSAGE_APPROVAL_FAIL_CLOSED_VERIFIED \
+            npx tsx "$tmp"
+          rm -f "$tmp"
+          test -z "$(git -C "$APP" status --porcelain --untracked-files=no)"
+          printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          printf 'PASS: PHASE17_APPROVAL_ONLY_READINESS_WORKFLOW\n'
+          REMOTE
