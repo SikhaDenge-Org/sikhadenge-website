@@ -1,0 +1,189 @@
+name: WhatsApp Agent Phase17 Canary Target Discovery
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-phase17-canary-target-discovery.yml"
+  workflow_dispatch:
+    inputs:
+      expected_release_sha:
+        description: Exact deployed release SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-phase17-canary-target-discovery
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_RELEASE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.expected_release_sha || github.event.before }}
+
+    steps:
+      - name: Checkout operator workflow
+        uses: actions/checkout@v4
+
+      - name: Validate exact operator inputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          for value in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            test -n "${!value:-}"
+          done
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            echo 'SSH_PORT=22' >> "$GITHUB_ENV"
+            SSH_PORT=22
+          fi
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          printf 'PASS: CANARY_TARGET_DISCOVERY_INPUT_GATE\n'
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+          printf 'PASS: PINNED_SSH_READY\n'
+
+      - name: Read-only production canary target discovery
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          cd "$APP"
+          live_sha="$(git rev-parse HEAD)"
+          dirty="$(git status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          pm2_state="$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s);process.stdout.write(a.find(x=>x.name==="sikhadenge-whatsapp-agent")?.pm2_env?.status||"")})')"
+          login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login)"
+          test "$live_sha" = "$EXPECTED_RELEASE_SHA"
+          test "$dirty" = "0"
+          test "$pm2_state" = "online"
+          test "$login_http" = "200"
+          set -a
+          source .env
+          set +a
+          test "${WHATSAPP_OUTBOUND_MODE:-disabled}" != "live"
+          test "${WHATSAPP_CUTOVER_APPROVED:-false}" != "true"
+          test -z "${WHATSAPP_OUTBOUND_LIVE_ACK:-}"
+          test "${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}" = "on"
+
+          DB="$(node scripts/prisma-postgres-cli-url.mjs "$DATABASE_URL")"
+          state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,COALESCE((\"scope\"->>'externalWritesRequested'),'false'),\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='engagews_default';")"
+          IFS='|' read -r stage mode policy external requested version <<< "$state"
+          test "$stage" = "ONE_CONNECTED_ACCOUNT"
+          test "$mode" = "SHADOW"
+          test "$policy" = "NO_EXTERNAL_WRITES"
+          test "$external" = "false"
+          test "$requested" = "false"
+
+          printf 'LIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\nPM2_STATE=%s\nLOGIN_HTTP=%s\n' "$live_sha" "$dirty" "$pm2_state" "$login_http"
+          printf 'CONTROLLED_LAUNCH_STATE=%s|%s|%s|%s|%s|%s\n' "$stage" "$mode" "$policy" "$external" "$requested" "$version"
+          printf 'BASE_PROVIDER_FAIL_CLOSED=true\n'
+
+          candidate_sql=$(cat <<'SQL'
+          WITH marked AS (
+            SELECT c.id, c."waId", c."consentStatus",
+              array_remove(ARRAY[
+                CASE WHEN lower(coalesce(c."displayName",'')) ~ '(^|[^a-z])(test|qa|sandbox|canary|internal)([^a-z]|$)' THEN 'display_name' END,
+                CASE WHEN lower(coalesce(c."profileName",'')) ~ '(^|[^a-z])(test|qa|sandbox|canary|internal)([^a-z]|$)' THEN 'profile_name' END,
+                CASE WHEN lower(coalesce(c."email",'')) ~ '(^|[^a-z])(test|qa|sandbox|canary|internal)([^a-z]|$)' THEN 'email' END,
+                CASE WHEN lower(coalesce(c."metadata"::text,'')) ~ '(^|[^a-z])(test|qa|sandbox|canary|internal)([^a-z]|$)' THEN 'metadata' END,                CASE WHEN EXISTS (
+                  SELECT 1
+                  FROM "WhatsAppConversation" wc
+                  JOIN "ConversationTagLink" ctl ON ctl."conversationId" = wc.id
+                  JOIN "ConversationTag" ct ON ct.id = ctl."tagId"
+                  WHERE wc."contactId" = c.id
+                    AND lower(ct.name) ~ '(^|[^a-z])(test|qa|sandbox|canary|internal)([^a-z]|$)'
+                ) THEN 'tag' END
+              ], NULL) AS markers
+            FROM "WhatsAppContact" c
+            WHERE c."metadata" #>> '{engageos,whatsappIdentity,workspaceId}' = 'engagews_default'
+          ), candidates AS (
+            SELECT m.*, cardinality(m.markers) AS marker_count,
+              m."metadataConnectionId"
+            FROM (
+              SELECT marked.*,
+                c."metadata" #>> '{engageos,whatsappIdentity,connectionId}' AS "metadataConnectionId"
+              FROM marked
+              JOIN "WhatsAppContact" c ON c.id = marked.id
+            ) m
+            WHERE cardinality(m.markers) > 0
+          )
+          SELECT
+            repeat('*', GREATEST(0, LEAST(8, length(c."waId") - 4))) || right(c."waId",4) AS recipient_masked,
+            c.marker_count,
+            array_to_string(c.markers, ',') AS marker_sources,
+            c."consentStatus",
+            ec.status AS connection_status,
+            conv.id AS conversation_id,
+            conv.status AS conversation_status,
+            conv."agentMode" AS agent_mode,
+            CASE WHEN conv."serviceWindowExpiresAt" > now() THEN 'true' ELSE 'false' END AS service_window_open,
+            COALESCE(to_char(conv."serviceWindowExpiresAt" AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"'),'') AS service_window_expires_utc,
+            CASE WHEN conv."assignedToId" IS NOT NULL THEN 'true' ELSE 'false' END AS assigned
+          FROM candidates c
+          JOIN "EngageChannelConnection" ec ON ec.id = c."metadataConnectionId"
+            AND ec."workspaceId" = 'engagews_default' AND ec.channel = 'WHATSAPP'
+            AND ec.status IN ('CONNECTED','DEGRADED')          JOIN LATERAL (
+            SELECT wc.id, wc.status, wc."agentMode", wc."serviceWindowExpiresAt", wc."assignedToId", wc."lastMessageAt"
+            FROM "WhatsAppConversation" wc
+            WHERE wc."contactId" = c.id
+              AND lower(coalesce(wc.source,'whatsapp')) = 'whatsapp'
+            ORDER BY wc."lastMessageAt" DESC NULLS LAST, wc."createdAt" DESC
+            LIMIT 1
+          ) conv ON true
+          ORDER BY c.marker_count DESC, (conv."serviceWindowExpiresAt" > now()) DESC, conv."lastMessageAt" DESC NULLS LAST
+          LIMIT 20;
+          SQL
+          )
+
+          printf 'CANDIDATE_DISCOVERY_BEGIN\n'
+          psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -c "$candidate_sql"
+          printf 'CANDIDATE_DISCOVERY_END\n'
+
+          printf 'ELIGIBLE_APPROVERS_BEGIN\n'
+          psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -c "
+            SELECT u.id,u.role,m.role AS workspace_role
+            FROM \"DashboardUser\" u
+            JOIN \"EngageWorkspaceMembership\" m ON m.\"userId\"=u.id
+            JOIN \"EngageWorkspace\" w ON w.id=m.\"workspaceId\"
+            WHERE m.\"workspaceId\"='engagews_default'
+              AND u.\"isActive\"=true AND m.\"isActive\"=true AND w.\"isActive\"=true
+              AND u.role IN ('ADMIN','MANAGER','COUNSELOR')
+            ORDER BY u.role,u.id;"
+          printf 'ELIGIBLE_APPROVERS_END\n'
+
+          printf 'MUTATION_PERFORMED=false\n'
+          printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          printf 'PASS: READ_ONLY_CANARY_TARGET_DISCOVERY\n'
+          REMOTE
