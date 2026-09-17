@@ -3,6 +3,7 @@ set -Eeuo pipefail
 ENV_FILE="${ENV_FILE:-.env}"
 PM2_PROCESS_NAME="${PM2_PROCESS_NAME:-sikhadenge-whatsapp-agent}"
 EXPECTED_RELEASE_SHA="${EXPECTED_RELEASE_SHA:-}"
+EXPECTED_MODE="${EMAIL_PREFLIGHT_EXPECTED_MODE:-DRY_RUN}"
 SCHEDULER_BASE_URL="${EMAIL_AUTOMATION_SCHEDULER_BASE_URL:-http://127.0.0.1:3100}"
 SCHEDULER_PATH="/api/internal/email/automation/process"
 failures=0
@@ -35,7 +36,8 @@ value_for() {
   printf '%s' "${!key:-$persisted}"
 }
 printf 'EMAIL_AUTOMATION_PRODUCTION_PREFLIGHT_BEGIN\n'
-printf 'UTC_TIMESTAMP=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+printf 'UTC_TIMESTAMP=%s\nEXPECTED_MODE=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$EXPECTED_MODE"
+[[ "$EXPECTED_MODE" == "DRY_RUN" || "$EXPECTED_MODE" == "LIMITED_COHORT" ]] || fail "EMAIL_PREFLIGHT_EXPECTED_MODE must be DRY_RUN or LIMITED_COHORT"
 for cmd in git node curl pm2; do
   if command -v "$cmd" >/dev/null 2>&1; then pass "command available: $cmd"; else fail "required command missing: $cmd"; fi
 done
@@ -66,21 +68,37 @@ runtime_enabled="$(value_for EMAIL_RUNTIME_ENABLED | tr '[:upper:]' '[:lower:]' 
 automation_enabled="$(value_for EMAIL_AUTOMATION_ENABLED | tr '[:upper:]' '[:lower:]' | xargs)"
 external_writes="$(value_for EMAIL_EXTERNAL_WRITES_ENABLED | tr '[:upper:]' '[:lower:]' | xargs)"
 runtime_mode="$(value_for EMAIL_RUNTIME_MODE | tr '[:lower:]' '[:upper:]' | xargs)"
+cohort_allowlist="$(value_for EMAIL_AUTOMATION_COHORT_ALLOWLIST)"
 if (( ${#scheduler_token} >= 32 )); then pass "scheduler token is present and meets minimum length"; else fail "scheduler token missing or shorter than 32 characters"; fi
-[[ "$runtime_enabled" == "true" || "$runtime_enabled" == "1" ]] && pass "email runtime enabled for DRY_RUN" || fail "EMAIL_RUNTIME_ENABLED must be true for scheduler DRY_RUN activation"
-[[ "$automation_enabled" == "true" || "$automation_enabled" == "1" ]] && pass "email automation enabled for DRY_RUN" || fail "EMAIL_AUTOMATION_ENABLED must be true for scheduler DRY_RUN activation"
-[[ "$external_writes" == "false" || "$external_writes" == "0" || -z "$external_writes" ]] && pass "external email writes remain disabled" || fail "EMAIL_EXTERNAL_WRITES_ENABLED must remain false"
-[[ "$runtime_mode" == "DRY_RUN" ]] && pass "email runtime mode is DRY_RUN" || fail "EMAIL_RUNTIME_MODE must equal DRY_RUN"
+[[ "$runtime_enabled" == "true" || "$runtime_enabled" == "1" ]] && pass "email runtime enabled" || fail "EMAIL_RUNTIME_ENABLED must be true"
+[[ "$automation_enabled" == "true" || "$automation_enabled" == "1" ]] && pass "email automation enabled" || fail "EMAIL_AUTOMATION_ENABLED must be true"
+if [[ "$EXPECTED_MODE" == "DRY_RUN" ]]; then
+  [[ "$external_writes" == "false" || "$external_writes" == "0" || -z "$external_writes" ]] && pass "external email writes remain disabled" || fail "EMAIL_EXTERNAL_WRITES_ENABLED must remain false for DRY_RUN"
+  [[ "$runtime_mode" == "DRY_RUN" ]] && pass "email runtime mode is DRY_RUN" || fail "EMAIL_RUNTIME_MODE must equal DRY_RUN"
+else
+  [[ "$external_writes" == "true" || "$external_writes" == "1" ]] && pass "external email writes enabled for bounded cohort" || fail "EMAIL_EXTERNAL_WRITES_ENABLED must be true for LIMITED_COHORT"
+  [[ "$runtime_mode" == "LIMITED_COHORT" ]] && pass "email runtime mode is LIMITED_COHORT" || fail "EMAIL_RUNTIME_MODE must equal LIMITED_COHORT"
+  if node - "$cohort_allowlist" <<'NODE'
+const raw=process.argv[2]||'';
+const list=[...new Set(raw.split(',').map(x=>x.trim().toLowerCase()).filter(Boolean))];
+if(list.length<1||list.length>10) process.exit(1);
+for(const item of list) if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item)) process.exit(1);
+NODE
+  then pass "limited cohort allowlist is present and bounded"; else fail "EMAIL_AUTOMATION_COHORT_ALLOWLIST must contain 1-10 valid recipients"; fi
+fi
 if (( ${#scheduler_token} >= 32 )); then
   health_file="$(mktemp)"
   http_code="$(curl -sS --max-time 10 -o "$health_file" -w '%{http_code}' -H "Authorization: Bearer $scheduler_token" "${SCHEDULER_BASE_URL%/}${SCHEDULER_PATH}" || true)"
   if [[ "$http_code" == "200" ]]; then
-    if node - "$health_file" <<'NODE'
+    if node - "$health_file" "$EXPECTED_MODE" <<'NODE'
 const fs = require('node:fs');
-const h = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-if (h.runtimeMode !== 'DRY_RUN' || h.externalWritesEnabled !== false || h.automationEnabled !== true || h.runtimeEnabled !== true) process.exit(1);
+const [file, expectedMode] = process.argv.slice(2);
+const h = JSON.parse(fs.readFileSync(file, 'utf8'));
+if (h.runtimeMode !== expectedMode || h.automationEnabled !== true || h.runtimeEnabled !== true) process.exit(1);
+if (expectedMode === 'DRY_RUN' && h.externalWritesEnabled !== false) process.exit(1);
+if (expectedMode === 'LIMITED_COHORT' && h.externalWritesEnabled !== true) process.exit(1);
 NODE
-    then pass "protected scheduler health agrees with safe DRY_RUN runtime"; else fail "scheduler health does not match required DRY_RUN safety state"; fi
+    then pass "protected scheduler health agrees with required $EXPECTED_MODE state"; else fail "scheduler health does not match required $EXPECTED_MODE safety state"; fi
   else
     fail "protected scheduler health endpoint returned HTTP ${http_code:-unreachable}"
   fi
