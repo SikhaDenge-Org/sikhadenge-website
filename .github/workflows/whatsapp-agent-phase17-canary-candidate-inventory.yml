@@ -1,0 +1,205 @@
+name: WhatsApp Agent Phase17 Canary Candidate Inventory
+
+on:
+  push:
+    branches:
+      - ops/phase17-canary-readiness-20260917
+    paths:
+      - ".github/workflows/whatsapp-agent-phase17-canary-candidate-inventory.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-phase17-canary-candidate-inventory
+  cancel-in-progress: true
+
+jobs:
+  readonly-candidate-inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_RELEASE_SHA: bb203d95f6fbec3d5a5ebf8e6e0db6ca03a5bb02
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+
+    steps:
+      - name: Checkout audit workflow branch
+        uses: actions/checkout@v4
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then echo SSH_PORT=22 >> "$GITHUB_ENV"; SSH_PORT=22; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+          printf 'PASS: PINNED_SSH_READY\n'
+
+      - name: Inventory queued canary candidates without external writes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' RELEASE_BRANCH='$RELEASE_BRANCH' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ENV_FILE="$APP/.env"
+          WORKSPACE_ID=engagews_default
+
+          envv() {
+            node - "$ENV_FILE" "$1" <<'NODE'
+          const fs=require('node:fs'); const [file,key]=process.argv.slice(2);
+          for(const raw of fs.readFileSync(file,'utf8').split(/\r?\n/)){
+            let line=raw.trim(); if(!line||line.startsWith('#')) continue;
+            if(line.startsWith('export ')) line=line.slice(7).trim();
+            const i=line.indexOf('='); if(i<1||line.slice(0,i).trim()!==key) continue;
+            let value=line.slice(i+1).trim();
+            if(value.length>=2&&((value.startsWith('"')&&value.endsWith('"'))||(value.startsWith("'")&&value.endsWith("'")))) value=value.slice(1,-1);
+            process.stdout.write(value); process.exit(0);
+          }
+          process.exit(1);
+          NODE
+          }
+
+          test "$(id -u)" = "0"
+          test -f "$ENV_FILE"
+          release_sha="$(git -C "$APP" ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')"
+          live_sha="$(git -C "$APP" rev-parse HEAD)"
+          dirty="$(git -C "$APP" status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          printf 'RELEASE_SHA=%s\nLIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\n' "$release_sha" "$live_sha" "$dirty"
+          test "$release_sha" = "$EXPECTED_RELEASE_SHA"
+          test "$live_sha" = "$EXPECTED_RELEASE_SHA"
+          test "$dirty" = "0"
+
+          pm2_state="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(String(p?.pm2_env?.status||"missing"))})')"
+          login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login || true)"
+          printf 'PM2_STATE=%s\nLOGIN_HTTP=%s\n' "$pm2_state" "$login_http"
+          test "$pm2_state" = "online"
+          test "$login_http" = "200"
+
+          provider_mode="$(envv WHATSAPP_OUTBOUND_MODE 2>/dev/null || true)"
+          cutover="$(envv WHATSAPP_CUTOVER_APPROVED 2>/dev/null || true)"
+          live_ack="$(envv WHATSAPP_OUTBOUND_LIVE_ACK 2>/dev/null || true)"
+          kill="$(envv WHATSAPP_OUTBOUND_KILL_SWITCH 2>/dev/null || true)"
+          printf 'WHATSAPP_OUTBOUND_MODE=%s\n' "${provider_mode:-disabled}"
+          printf 'WHATSAPP_CUTOVER_APPROVED=%s\n' "${cutover:-false}"
+          printf 'WHATSAPP_OUTBOUND_LIVE_ACK_SET=%s\n' "$([[ -n "$live_ack" ]] && echo true || echo false)"
+          printf 'WHATSAPP_OUTBOUND_KILL_SWITCH=%s\n' "${kill:-unset}"
+          test "${provider_mode:-disabled}" != "live"
+          test "${cutover:-false}" != "true"
+          test -z "$live_ack"
+          test "${kill:-on}" = "on"
+
+          export DATABASE_URL="$(envv DATABASE_URL)"
+          DB="$(node "$APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")"
+          state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,COALESCE((\"scope\"->>'externalWritesRequested'),'false'),\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
+          printf 'CONTROLLED_LAUNCH_STATE=%s\n' "$state"
+          test "$state" = "ONE_CONNECTED_ACCOUNT|SHADOW|NO_EXTERNAL_WRITES|false|false|2"
+
+          active_approvals="$(psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "SELECT COUNT(*) FROM \"EngageControlledLaunchOutboundApproval\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"consumedAt\" IS NULL AND \"revokedAt\" IS NULL AND \"expiresAt\">NOW();")"
+          printf 'ACTIVE_EXACT_MESSAGE_APPROVALS=%s\n' "$active_approvals"
+          test "$active_approvals" = "0"
+
+          cd "$APP"
+          export CANARY_ENV_FILE="$ENV_FILE"
+          npx tsx -e '
+            import fs from "node:fs";
+            import { MessageDirection, MessageStatus } from "@prisma/client";
+            import { prisma } from "./lib/db/prisma";
+            import { readLegacyWhatsAppMappingMetadata } from "./modules/channels/whatsapp/application/legacy-identity-mapping";
+            import { fingerprintQueuedOutboundMessage, getActiveControlledLaunchOutboundApproval } from "./modules/release/application/controlled-launch-outbound-approval";
+
+            const workspaceId="engagews_default";
+            const stateVersion=2;
+            const normalizeDigits=(v:string)=>v.replace(/\D/g,"");
+            const mask=(v:string)=>{const d=normalizeDigits(v);return d.length>4?`***${d.slice(-4)}`:"***";};
+            const truthy=(v:unknown)=>v===true||(typeof v==="string"&&v.trim().toLowerCase()==="true");
+            const markerKeys=new Set(["isTest","isInternal","internalTest","testIdentity","internalTestIdentity","isInternalTestIdentity"]);
+            const markerPaths=(value:unknown,path="metadata",out:string[]=[]):string[]=>{
+              if(!value||typeof value!=="object") return out;
+              if(Array.isArray(value)){value.forEach((x,i)=>markerPaths(x,`${path}[${i}]`,out));return out;}
+              for(const [key,val] of Object.entries(value as Record<string,unknown>)){
+                const p=`${path}.${key}`;
+                if(markerKeys.has(key)&&truthy(val)) out.push(p);
+                if(val&&typeof val==="object") markerPaths(val,p,out);
+              }
+              return out;
+            };
+            const envEntries=(()=>{
+              const file=process.env.CANARY_ENV_FILE||""; if(!file||!fs.existsSync(file)) return [] as Array<[string,string]>;
+              const rows:Array<[string,string]>=[];
+              for(const raw of fs.readFileSync(file,"utf8").split(/\r?\n/)){
+                let line=raw.trim(); if(!line||line.startsWith("#")) continue;
+                if(line.startsWith("export ")) line=line.slice(7).trim();
+                const i=line.indexOf("="); if(i<1) continue;
+                const key=line.slice(0,i).trim(); let value=line.slice(i+1).trim();
+                if(value.length>=2&&((value.startsWith("\"")&&value.endsWith("\""))||(value.startsWith("\'")&&value.endsWith("\'")))) value=value.slice(1,-1);
+                if(/^(WHATSAPP|META).*?(TEST|INTERNAL).*?(WA|PHONE|RECIPIENT|IDENTITY|NUMBER)/i.test(key)) rows.push([key,value]);
+              }
+              return rows;
+            })();
+
+            (async()=>{
+              const queued=await prisma.whatsAppMessage.findMany({
+                where:{direction:MessageDirection.OUTBOUND,status:MessageStatus.QUEUED},
+                orderBy:[{createdAt:"asc"},{id:"asc"}],
+                take:50,
+                select:{id:true,type:true,actor:true,text:true,mediaId:true,mediaUrl:true,mimeType:true,filename:true,replyToMetaMessageId:true,rawPayload:true,messageTimestamp:true,createdAt:true,conversation:{select:{contact:{select:{id:true,waId:true,metadata:true}}}}}
+              });
+              console.log(`QUEUED_CANDIDATE_COUNT=${queued.length}`);
+              let explicitCount=0;
+              for(const m of queued){
+                const c=m.conversation.contact;
+                const mapping=readLegacyWhatsAppMappingMetadata(c.metadata);
+                if(!mapping){console.log(`CANDIDATE messageId=${m.id} mapping=missing`);continue;}
+                const fingerprint=fingerprintQueuedOutboundMessage({...m,recipientWaId:c.waId});
+                const approval=await getActiveControlledLaunchOutboundApproval({workspaceId:mapping.workspaceId,connectionId:mapping.connectionId,messageId:m.id,contentFingerprint:fingerprint,controlledLaunchStateVersion:stateVersion});
+                const metadataMarkers=markerPaths(c.metadata);
+                const envMarkerKeys=envEntries.filter(([,value])=>normalizeDigits(value)===normalizeDigits(c.waId)&&normalizeDigits(value).length>=6).map(([key])=>key);
+                const explicitInternalTest=metadataMarkers.length>0||envMarkerKeys.length>0;
+                if(explicitInternalTest) explicitCount++;
+                const bodyLength=(m.text||m.filename||"").length;
+                console.log(JSON.stringify({
+                  messageId:m.id,
+                  queuedAt:m.messageTimestamp.toISOString(),
+                  type:m.type,
+                  actor:m.actor||null,
+                  recipientMasked:mask(c.waId),
+                  workspaceId:mapping.workspaceId,
+                  connectionId:mapping.connectionId,
+                  contentFingerprint:fingerprint,
+                  bodyLength,
+                  activeExactApproval:Boolean(approval),
+                  explicitInternalTestMarker:explicitInternalTest,
+                  metadataMarkerPaths:metadataMarkers,
+                  matchingTestEnvKeys:envMarkerKeys
+                }));
+              }
+              console.log(`EXPLICIT_INTERNAL_TEST_CANDIDATE_COUNT=${explicitCount}`);
+              console.log("EXTERNAL_WRITE_SENT=false");
+              console.log("PASS: PHASE17_CANARY_CANDIDATE_INVENTORY");
+            })().then(async()=>{await prisma.$disconnect()}).catch(async(error)=>{console.error(error instanceof Error?error.message:error);await prisma.$disconnect().catch(()=>undefined);process.exit(1)});
+          '
+
+          test -z "$(git -C "$APP" status --porcelain --untracked-files=no)"
+          REMOTE
