@@ -19,6 +19,7 @@
 // Deploy Email E4 limited-cohort preflight fix — 2026-09-17
 // Retry guarded Email limited-cohort window after preflight fix — 2026-09-17
 // Deploy Email E4 PM2 limited-cohort env sync fix — 2026-09-17
+// Verify guarded Email limited-cohort window after PM2 env sync — 2026-09-17
 const rawUrl = process.argv[2] ?? "";
 
 if (!rawUrl.trim()) {
