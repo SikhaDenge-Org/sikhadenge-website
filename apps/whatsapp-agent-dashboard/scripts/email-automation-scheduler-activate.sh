@@ -13,7 +13,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 info() { printf 'INFO: %s\n' "$*"; }
 
 [[ -n "$EXPECTED_RELEASE_SHA" ]] || fail "EXPECTED_RELEASE_SHA is required"
-[[ "$PREFLIGHT_EXPECTED_MODE" == "DRY_RUN" || "$PREFLIGHT_EXPECTED_MODE" == "LIMITED_COHORT" ]] || fail "EMAIL_PREFLIGHT_EXPECTED_MODE must be DRY_RUN or LIMITED_COHORT"
+[[ "$PREFLIGHT_EXPECTED_MODE" == "DRY_RUN" || "$PREFLIGHT_EXPECTED_MODE" == "LIMITED_COHORT" || "$PREFLIGHT_EXPECTED_MODE" == "LIVE" ]] || fail "EMAIL_PREFLIGHT_EXPECTED_MODE must be DRY_RUN, LIMITED_COHORT, or LIVE"
 [[ -f "$APP_DIR/package.json" && -f "$APP_DIR/scripts/email-automation-production-preflight.sh" ]] || fail "APP_DIR must be apps/whatsapp-agent-dashboard"
 cd "$APP_DIR"
 current_sha="$(git rev-parse HEAD 2>/dev/null || true)"
