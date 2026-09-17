@@ -37,7 +37,7 @@ value_for() {
 }
 printf 'EMAIL_AUTOMATION_PRODUCTION_PREFLIGHT_BEGIN\n'
 printf 'UTC_TIMESTAMP=%s\nEXPECTED_MODE=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$EXPECTED_MODE"
-[[ "$EXPECTED_MODE" == "DRY_RUN" || "$EXPECTED_MODE" == "LIMITED_COHORT" ]] || fail "EMAIL_PREFLIGHT_EXPECTED_MODE must be DRY_RUN or LIMITED_COHORT"
+[[ "$EXPECTED_MODE" == "DRY_RUN" || "$EXPECTED_MODE" == "LIMITED_COHORT" || "$EXPECTED_MODE" == "LIVE" ]] || fail "EMAIL_PREFLIGHT_EXPECTED_MODE must be DRY_RUN, LIMITED_COHORT, or LIVE"
 for cmd in git node curl pm2; do
   if command -v "$cmd" >/dev/null 2>&1; then pass "command available: $cmd"; else fail "required command missing: $cmd"; fi
 done
@@ -75,7 +75,7 @@ if (( ${#scheduler_token} >= 32 )); then pass "scheduler token is present and me
 if [[ "$EXPECTED_MODE" == "DRY_RUN" ]]; then
   [[ "$external_writes" == "false" || "$external_writes" == "0" || -z "$external_writes" ]] && pass "external email writes remain disabled" || fail "EMAIL_EXTERNAL_WRITES_ENABLED must remain false for DRY_RUN"
   [[ "$runtime_mode" == "DRY_RUN" ]] && pass "email runtime mode is DRY_RUN" || fail "EMAIL_RUNTIME_MODE must equal DRY_RUN"
-else
+elif [[ "$EXPECTED_MODE" == "LIMITED_COHORT" ]]; then
   [[ "$external_writes" == "true" || "$external_writes" == "1" ]] && pass "external email writes enabled for bounded cohort" || fail "EMAIL_EXTERNAL_WRITES_ENABLED must be true for LIMITED_COHORT"
   [[ "$runtime_mode" == "LIMITED_COHORT" ]] && pass "email runtime mode is LIMITED_COHORT" || fail "EMAIL_RUNTIME_MODE must equal LIMITED_COHORT"
   if node - "$cohort_allowlist" <<'NODE'
@@ -85,6 +85,9 @@ if(list.length<1||list.length>10) process.exit(1);
 for(const item of list) if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item)) process.exit(1);
 NODE
   then pass "limited cohort allowlist is present and bounded"; else fail "EMAIL_AUTOMATION_COHORT_ALLOWLIST must contain 1-10 valid recipients"; fi
+else
+  [[ "$external_writes" == "true" || "$external_writes" == "1" ]] && pass "external email writes enabled for LIVE" || fail "EMAIL_EXTERNAL_WRITES_ENABLED must be true for LIVE"
+  [[ "$runtime_mode" == "LIVE" ]] && pass "email runtime mode is LIVE" || fail "EMAIL_RUNTIME_MODE must equal LIVE"
 fi
 if (( ${#scheduler_token} >= 32 )); then
   health_file="$(mktemp)"
@@ -96,7 +99,7 @@ const [file, expectedMode] = process.argv.slice(2);
 const h = JSON.parse(fs.readFileSync(file, 'utf8'));
 if (h.runtimeMode !== expectedMode || h.automationEnabled !== true || h.runtimeEnabled !== true) process.exit(1);
 if (expectedMode === 'DRY_RUN' && h.externalWritesEnabled !== false) process.exit(1);
-if (expectedMode === 'LIMITED_COHORT' && h.externalWritesEnabled !== true) process.exit(1);
+if ((expectedMode === 'LIMITED_COHORT' || expectedMode === 'LIVE') && h.externalWritesEnabled !== true) process.exit(1);
 NODE
     then pass "protected scheduler health agrees with required $EXPECTED_MODE state"; else fail "scheduler health does not match required $EXPECTED_MODE safety state"; fi
   else

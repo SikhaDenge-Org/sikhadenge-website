@@ -39,7 +39,8 @@ function automationPolicyReady(): { ready: boolean; reason: string | null } {
   if (
     policy.mode !== "DRY_RUN" &&
     policy.mode !== "INTERNAL_RECIPIENTS" &&
-    policy.mode !== "LIMITED_COHORT"
+    policy.mode !== "LIMITED_COHORT" &&
+    policy.mode !== "LIVE"
   ) {
     return { ready: false, reason: `Email automation mode ${policy.mode} is not enabled for E4 execution.` };
   }

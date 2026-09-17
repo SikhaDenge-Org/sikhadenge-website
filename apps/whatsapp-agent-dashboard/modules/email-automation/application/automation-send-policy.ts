@@ -34,10 +34,10 @@ export function assertAutomationEmailDispatchPolicy(input: {
   if (input.policy.mode === "DRY_RUN") {
     return { mode: "DRY_RUN", externalRequestAllowed: false };
   }
-  if (input.policy.mode === "LIVE") {
-    throw new Error("Email runtime mode LIVE is not enabled for E4 automation rollout.");
-  }
   if (!input.policy.externalWritesEnabled) throw new Error("Email external writes are disabled.");
+  if (input.policy.mode === "LIVE") {
+    return { mode: "LIVE", externalRequestAllowed: true };
+  }
 
   const allowlist =
     input.policy.mode === "INTERNAL_RECIPIENTS"

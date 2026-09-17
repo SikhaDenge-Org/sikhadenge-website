@@ -131,22 +131,19 @@ assert.throws(
   /not in the email automation cohort allowlist/,
 );
 
-assert.throws(
-  () =>
-    assertAutomationEmailDispatchPolicy({
-      policy: {
-        runtimeEnabled: true,
-        externalWritesEnabled: true,
-        automationEnabled: true,
-        inboundSyncEnabled: false,
-        trackingEnabled: false,
-        mode: "LIVE",
-      },
-      recipients: [{ email: "pilot@example.com" }],
-      internalAllowlist: new Set(["pilot@example.com"]),
-      cohortAllowlist: new Set(["pilot@example.com"]),
-    }),
-  /LIVE is not enabled for E4 automation rollout/,
-);
+const live = assertAutomationEmailDispatchPolicy({
+  policy: {
+    runtimeEnabled: true,
+    externalWritesEnabled: true,
+    automationEnabled: true,
+    inboundSyncEnabled: false,
+    trackingEnabled: false,
+    mode: "LIVE",
+  },
+  recipients: [{ email: "customer@example.com" }],
+  internalAllowlist: new Set(),
+  cohortAllowlist: new Set(),
+});
+assert.deepEqual(live, { mode: "LIVE", externalRequestAllowed: true });
 
 console.log("Email automation E4 dispatcher contracts: PASS");
