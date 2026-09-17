@@ -1,0 +1,65 @@
+name: Phase17 Runtime Build Readonly Temp
+
+on:
+  push:
+    branches:
+      - ops/phase17-operator-readiness-readonly-20260917-v2
+    paths:
+      - ".github/workflows/phase17-runtime-build-readonly-temp.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+    steps:
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then SSH_PORT=22; echo "SSH_PORT=22" >> "$GITHUB_ENV"; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+      - name: Verify source runtime and deploy build identity read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          LIVE_APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          RUN_BACKUP=/root/sikhadenge-backups/engageos-github-35214932774-1
+          source_sha="$(git -C "$LIVE_APP" rev-parse HEAD)"
+          source_build="$(cat "$LIVE_APP/.next/BUILD_ID")"
+          pm2_cwd="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(String(p?.pm2_env?.pm_cwd||""))})')"
+          test -n "$pm2_cwd"
+          runtime_sha="$(git -C "$pm2_cwd" rev-parse HEAD)"
+          runtime_build="$(cat "$pm2_cwd/.next/BUILD_ID")"
+          printf 'SOURCE_SHA=%s\nRUNTIME_SHA=%s\nSOURCE_BUILD_ID=%s\nRUNTIME_BUILD_ID=%s\nBUILD_IDS_EQUAL=%s\n' "$source_sha" "$runtime_sha" "$source_build" "$runtime_build" "$([[ "$source_build" = "$runtime_build" ]] && echo true || echo false)"
+          if [[ -f "$RUN_BACKUP/deploy-state.txt" ]]; then
+            awk -F= '$1=="RELEASE_SHA"||$1=="NEW_BUILD_ID"||$1=="OLD_RUNTIME_BUILD_ID"||$1=="RUNTIME_APP" {print "DEPLOY_"$0}' "$RUN_BACKUP/deploy-state.txt"
+          else
+            echo 'DEPLOY_STATE_PRESENT=false'
+          fi
+          if [[ -f "$RUN_BACKUP/batch-result.txt" ]]; then
+            awk -F= '$1=="RELEASE_SHA"||$1=="STATUS" {print "BATCH_"$0}' "$RUN_BACKUP/batch-result.txt"
+          else
+            echo 'BATCH_RESULT_PRESENT=false'
+          fi
+          printf 'STATE_MUTATED=false\nEXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          REMOTE
