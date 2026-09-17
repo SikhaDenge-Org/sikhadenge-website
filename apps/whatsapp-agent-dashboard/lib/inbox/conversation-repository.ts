@@ -280,7 +280,10 @@ export async function listInboxConversations(
       lead: true,
       assignedTo: { select: { id: true, name: true } },
       messages: {
-        orderBy: { messageTimestamp: "desc" },
+        orderBy: [
+          { messageTimestamp: "desc" },
+          { createdAt: "desc" },
+        ],
         take: 1,
         select: {
           text: true,
@@ -350,7 +353,10 @@ export async function getInboxConversation(
       lead: true,
       assignedTo: { select: { id: true, name: true } },
       messages: {
-        orderBy: { messageTimestamp: "asc" },
+        orderBy: [
+          { messageTimestamp: "desc" },
+          { createdAt: "desc" },
+        ],
         take: 200,
         select: {
           id: true,
@@ -376,13 +382,17 @@ export async function getInboxConversation(
 
   if (!conversation) return null;
 
+
+  const chronologicalMessages =
+    [...conversation.messages].reverse();
+
   const templateBodies =
     await templateBodiesForMessages(
-      conversation.messages,
+      chronologicalMessages,
     );
 
   const resolvedMessages =
-    conversation.messages.map((message) => {
+    chronologicalMessages.map((message) => {
       const {
         rawPayload,
         ...rest

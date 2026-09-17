@@ -1,3 +1,9 @@
+import { prisma } from "../db/prisma";
+import { readLegacyWhatsAppMappingMetadata } from "@/modules/channels/whatsapp/application/legacy-identity-mapping";
+import {
+  assertControlledLaunchExternalWriteAllowed,
+  ControlledLaunchOutboundDeniedError,
+} from "@/modules/release/application/controlled-launch-outbound-guard";
 import { getOutboundMode } from "./outbound-client";
 
 const DEFAULT_TYPING_DELAY_MS = 2_000;
@@ -67,6 +73,7 @@ export function getWhatsAppTypingPolicy() {
 
 export async function showWhatsAppTypingIndicator(
   metaMessageId: string,
+  storedMessageId: string,
 ): Promise<{
   shown: boolean;
   requestedAt: number;
@@ -87,6 +94,16 @@ export async function showWhatsAppTypingIndicator(
   }
 
   const config = requiredLiveConfig();
+  const stored = await prisma.whatsAppMessage.findUnique({
+    where: { id: storedMessageId },
+    select: { conversation: { select: { contact: { select: { id: true, waId: true, metadata: true } } } } },
+  });
+  const contact = stored?.conversation.contact;
+  const mapping = contact ? readLegacyWhatsAppMappingMetadata(contact.metadata) : null;
+  if (!contact || !mapping || mapping.legacyContactId !== contact.id || mapping.externalUserId !== contact.waId || mapping.channel !== "WHATSAPP") {
+    throw new ControlledLaunchOutboundDeniedError("CONTROLLED_LAUNCH_GOVERNANCE_INVALID", "Persisted WhatsApp workspace/connection mapping is missing or invalid for the typing indicator.");
+  }
+  await assertControlledLaunchExternalWriteAllowed({ workspaceId: mapping.workspaceId, connectionId: mapping.connectionId, channel: "WHATSAPP", action: "OUTBOUND_QUEUED" }, config.phoneNumberId);
   const controller = new AbortController();
   const timeoutMs = numberEnvironment(
     "WHATSAPP_TYPING_TIMEOUT_MS",

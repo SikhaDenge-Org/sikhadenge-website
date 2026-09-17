@@ -31,12 +31,19 @@ export type OutboundContent =
   | OutboundTemplateRequest
   | OutboundMediaRequest;
 
+export type OutboundFlowProvenance = {
+  flowType: "AUTOMATION" | "CAMPAIGN";
+  flowId: string;
+  flowVersion: number;
+};
+
 export type QueueOutboundInput = {
   conversationId: string;
   actor: MessageActor;
   sentById?: string | null;
   content: OutboundContent;
   idempotencyKey: string;
+  flowProvenance?: OutboundFlowProvenance | null;
   now?: Date;
 };
 

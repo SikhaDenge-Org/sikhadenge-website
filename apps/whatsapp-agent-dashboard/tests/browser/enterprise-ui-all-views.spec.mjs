@@ -184,8 +184,9 @@ async function validateInbox(page, viewport) {
   const listTitleSize = await page.locator(".sx-list-title").evaluate(
     (node) => Number.parseFloat(getComputedStyle(node).fontSize),
   );
-  expect(listTitleSize).toBeGreaterThanOrEqual(23);
-  expect(listTitleSize).toBeLessThanOrEqual(25);
+  // V22 intentionally tightened the non-mobile Inbox heading to 22px.
+  expect(listTitleSize).toBeGreaterThanOrEqual(21.5);
+  expect(listTitleSize).toBeLessThanOrEqual(22.5);
 
   await expect(page.locator(".conversation-item.selected")).toHaveCount(1);
 }

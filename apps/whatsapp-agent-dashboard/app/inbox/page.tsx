@@ -223,7 +223,16 @@ export default async function InboxPage({
           }
 
           body .sx-inbox > .sx-side {
+            position: fixed !important;
+            inset: auto 0 0 0 !important;
+            top: auto !important;
+            width: 100vw !important;
+            height: 64px !important;
             z-index: 120 !important;
+          }
+
+          body .sx-inbox.sx-details-open > .sx-workspace-v22 {
+            z-index: 130 !important;
           }
         }
       `}</style>

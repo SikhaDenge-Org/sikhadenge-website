@@ -123,6 +123,7 @@ required_tables=(
   EngageAgencyWorkspaceLink EngageWorkspaceSaasState EngagePublicApiKey EngageWorkspaceUsageEvent
   EngageWhiteLabelConfig EngageCustomDomain EngageDeveloperRequestLog EngageOutboundWebhookEndpoint
   EngageControlledLaunchState EngageControlledLaunchTransition
+  EngageControlledLaunchOutboundApproval EngageControlledLaunchAutopilotRecipient EngageControlledLaunchApprovedFlow
 )
 for table_name in "${required_tables[@]}"; do
   test "$(psql_scalar "SELECT CASE WHEN to_regclass('public.\"${table_name}\"') IS NULL THEN '0' ELSE '1' END;")" = "1"

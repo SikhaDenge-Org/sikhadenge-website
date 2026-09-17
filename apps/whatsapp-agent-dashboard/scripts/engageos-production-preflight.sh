@@ -196,9 +196,14 @@ if [[ -n "$DATABASE_CLI_URL" ]] && command -v psql >/dev/null 2>&1; then
       baseline_count="$(psql_scalar "SELECT COUNT(*) FROM _prisma_migrations WHERE migration_name = '${PHASE2_BASELINE_MIGRATION}' AND finished_at IS NOT NULL AND rolled_back_at IS NULL;")"
       additive_count="$(psql_scalar "SELECT COUNT(*) FROM _prisma_migrations WHERE migration_name = '${PHASE2_ADDITIVE_MIGRATION}' AND finished_at IS NOT NULL AND rolled_back_at IS NULL;")"
       phase16a_count="$(psql_scalar "SELECT COUNT(*) FROM _prisma_migrations WHERE migration_name = '${PHASE16A_MIGRATION}' AND finished_at IS NOT NULL AND rolled_back_at IS NULL;")"
-      unknown_migration_count="$(psql_scalar "SELECT COUNT(*) FROM _prisma_migrations WHERE migration_name NOT IN ('${LEGACY_INIT_MIGRATION}','${PHASE2_BASELINE_MIGRATION}','${PHASE2_ADDITIVE_MIGRATION}','${PHASE16A_MIGRATION}');")"
+      repo_migrations="$(find prisma/migrations -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)"
+      applied_migrations="$(psql_scalar 'SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY migration_name;')"
+      recognized_migrations="$(printf '%s\n%s\n' "$LEGACY_INIT_MIGRATION" "$repo_migrations" | sed '/^$/d' | sort -u)"
+      unknown_migrations="$(comm -13 <(printf '%s\n' "$recognized_migrations") <(printf '%s\n' "$applied_migrations") || true)"
+      unknown_migration_count="$(printf '%s\n' "$unknown_migrations" | sed '/^$/d' | wc -l | tr -d ' ')"
 
       printf 'LEGACY_INIT_APPLIED_COUNT=%s\n' "$legacy_init_count"
+      printf 'COMMITTED_REPO_MIGRATION_COUNT=%s\n' "$(printf '%s\n' "$repo_migrations" | sed '/^$/d' | wc -l | tr -d ' ')"
       printf 'UNKNOWN_MIGRATION_COUNT=%s\n' "$unknown_migration_count"
 
       if [[ "$legacy_init_count" == "1" ]]; then
@@ -208,9 +213,10 @@ if [[ -n "$DATABASE_CLI_URL" ]] && command -v psql >/dev/null 2>&1; then
       fi
 
       if [[ "$unknown_migration_count" == "0" ]]; then
-        pass "Prisma history contains only recognized migration lineage"
+        pass "Prisma history contains only recognized migration lineage from the target release"
       else
-        fail "Prisma history contains unrecognized migrations"
+        fail "Prisma history contains unrecognized migrations absent from the target release"
+        printf '%s\n' "$unknown_migrations"
       fi
     else
       legacy_init_count=0

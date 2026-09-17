@@ -212,6 +212,7 @@ BACKUP_MANIFEST=$BACKUP_DIR/manifest.txt
 MIGRATION_EVIDENCE=$BACKUP_DIR/migration-evidence.txt
 POST_DEPLOY_EVIDENCE=$BACKUP_DIR/post-deploy-evidence.txt
 PHASE17_POSTDEPLOY_EVIDENCE=$BACKUP_DIR/phase17-postdeploy-evidence.txt
+PHASE17_GOVERNANCE_EXIT_EVIDENCE=$BACKUP_DIR/phase17-governance-release-exit-evidence.txt
 COMPLETED_UTC=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 EOF
 chmod 600 "$BACKUP_DIR/batch-result.txt"
