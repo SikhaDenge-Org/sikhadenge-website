@@ -129,8 +129,7 @@ jobs:
             FROM "WhatsAppContact" c
             WHERE c."metadata" #>> '{engageos,whatsappIdentity,workspaceId}' = 'engagews_default'
           ), candidates AS (
-            SELECT m.*, cardinality(m.markers) AS marker_count,
-              m."metadataConnectionId"
+            SELECT m.*, cardinality(m.markers) AS marker_count
             FROM (
               SELECT marked.*,
                 c."metadata" #>> '{engageos,whatsappIdentity,connectionId}' AS "metadataConnectionId"
