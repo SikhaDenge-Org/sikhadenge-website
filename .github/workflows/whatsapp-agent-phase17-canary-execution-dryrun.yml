@@ -25,11 +25,43 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
-      EXPECTED_RELEASE_SHA: bb203d95f6fbec3d5a5ebf8e6e0db6ca03a5bb02
+      EXPECTED_LIVE_SHA: bb203d95f6fbec3d5a5ebf8e6e0db6ca03a5bb02
+      EXPECTED_CODE_TREE: 44d0bd04139f276e2854016282787afd53b3d4ea
       RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Verify release marker is code-equivalent to approved WhatsApp release
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git fetch --quiet --no-tags --depth=100 origin \
+            "+refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH"
+          git fetch --quiet --no-tags --depth=100 origin "$EXPECTED_LIVE_SHA"
+
+          release_sha="$(git rev-parse "refs/remotes/origin/$RELEASE_BRANCH")"
+          release_tree="$(git show -s --format=%T "$release_sha")"
+          approved_tree="$(git show -s --format=%T "$EXPECTED_LIVE_SHA")"
+          changed_files="$(git diff --name-only "$EXPECTED_LIVE_SHA" "$release_sha" | sed '/^$/d' | wc -l | tr -d ' ')"
+          release_subject="$(git show -s --format=%s "$release_sha")"
+
+          printf 'APPROVED_WHATSAPP_SHA=%s\n' "$EXPECTED_LIVE_SHA"
+          printf 'CURRENT_RELEASE_SHA=%s\n' "$release_sha"
+          printf 'APPROVED_CODE_TREE=%s\n' "$approved_tree"
+          printf 'CURRENT_RELEASE_TREE=%s\n' "$release_tree"
+          printf 'RELEASE_MARKER_CHANGED_FILES=%s\n' "$changed_files"
+          printf 'RELEASE_MARKER_SUBJECT=%s\n' "$release_subject"
+
+          test "$approved_tree" = "$EXPECTED_CODE_TREE"
+          test "$release_tree" = "$EXPECTED_CODE_TREE"
+          git merge-base --is-ancestor "$EXPECTED_LIVE_SHA" "$release_sha"
+          test "$changed_files" = "0"
+
+          echo "CURRENT_RELEASE_SHA=$release_sha" >> "$GITHUB_ENV"
+          printf 'PASS: RELEASE_MARKER_CODE_EQUIVALENCE\n'
 
       - name: Configure pinned production SSH
         shell: bash
@@ -58,7 +90,7 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' RELEASE_BRANCH='$RELEASE_BRANCH' bash -s" <<'REMOTE'
+            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' CURRENT_RELEASE_SHA='$CURRENT_RELEASE_SHA' RELEASE_BRANCH='$RELEASE_BRANCH' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           ENV_FILE="$APP/.env"
@@ -85,9 +117,9 @@ jobs:
           dirty="$(git -C "$APP" status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
           pm2_state="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(String(p?.pm2_env?.status||"missing"))})')"
           login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login || true)"
-          printf 'RELEASE_SHA=%s\nLIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\nPM2_STATE=%s\nLOGIN_HTTP=%s\n' "$release_sha" "$live_sha" "$dirty" "$pm2_state" "$login_http"
-          test "$release_sha" = "$EXPECTED_RELEASE_SHA"
-          test "$live_sha" = "$EXPECTED_RELEASE_SHA"
+          printf 'RELEASE_MARKER_SHA=%s\nLIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\nPM2_STATE=%s\nLOGIN_HTTP=%s\n' "$release_sha" "$live_sha" "$dirty" "$pm2_state" "$login_http"
+          test "$release_sha" = "$CURRENT_RELEASE_SHA"
+          test "$live_sha" = "$EXPECTED_LIVE_SHA"
           test "$dirty" = "0"
           test "$pm2_state" = "online"
           test "$login_http" = "200"
@@ -144,6 +176,7 @@ jobs:
           test "$(envv WHATSAPP_OUTBOUND_KILL_SWITCH 2>/dev/null || echo on)" = "on"
           test -z "$(git -C "$APP" status --porcelain --untracked-files=no)"
 
+          printf 'RELEASE_MARKER_CODE_EQUIVALENT=true\n'
           printf 'CANARY_POLICY_PATH_VERIFIED=true\n'
           printf 'CANARY_PROVIDER_BINDING_VERIFIED=true\n'
           printf 'CANARY_EXECUTOR_READY=true\n'
