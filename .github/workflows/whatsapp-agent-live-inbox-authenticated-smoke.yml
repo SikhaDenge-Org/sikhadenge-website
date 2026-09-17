@@ -1,0 +1,201 @@
+name: WhatsApp Agent Live Inbox Authenticated Smoke
+
+on:
+  push:
+    branches: [ops/phase17-canary-readiness-20260917]
+    paths: [".github/workflows/whatsapp-agent-live-inbox-authenticated-smoke.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-live-inbox-authenticated-smoke
+  cancel-in-progress: true
+
+jobs:
+  live-inbox-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_RELEASE_SHA: bb203d95f6fbec3d5a5ebf8e6e0db6ca03a5bb02
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then echo SSH_PORT=22 >> "$GITHUB_ENV"; SSH_PORT=22; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Run authenticated production Inbox smoke with API mutations blocked
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' RELEASE_BRANCH='$RELEASE_BRANCH' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ENV_FILE="$APP/.env"
+          WORKSPACE_ID=engagews_default
+          TMP="$(mktemp -d /tmp/phase17-live-inbox-smoke.XXXXXX)"
+          trap 'rm -rf "$TMP"' EXIT
+
+          envv(){ node - "$ENV_FILE" "$1" <<'NODE'
+          const fs=require('node:fs'); const [f,k]=process.argv.slice(2); for(const raw of fs.readFileSync(f,'utf8').split(/\r?\n/)){let l=raw.trim();if(!l||l.startsWith('#'))continue;if(l.startsWith('export '))l=l.slice(7).trim();const i=l.indexOf('=');if(i<1||l.slice(0,i).trim()!==k)continue;let v=l.slice(i+1).trim();if(v.length>=2&&((v.startsWith('"')&&v.endsWith('"'))||(v.startsWith("'")&&v.endsWith("'"))))v=v.slice(1,-1);process.stdout.write(v);process.exit(0)}process.exit(1);
+          NODE
+          }
+
+          release_sha="$(git -C "$APP" ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')"
+          live_sha="$(git -C "$APP" rev-parse HEAD)"
+          dirty="$(git -C "$APP" status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          pm2_state="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(String(p?.pm2_env?.status||"missing"))})')"
+          printf 'RELEASE_SHA=%s\nLIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\nPM2_STATE=%s\n' "$release_sha" "$live_sha" "$dirty" "$pm2_state"
+          test "$release_sha" = "$EXPECTED_RELEASE_SHA"; test "$live_sha" = "$EXPECTED_RELEASE_SHA"; test "$dirty" = 0; test "$pm2_state" = online
+
+          provider_mode="$(envv WHATSAPP_OUTBOUND_MODE 2>/dev/null || true)"; cutover="$(envv WHATSAPP_CUTOVER_APPROVED 2>/dev/null || true)"; live_ack="$(envv WHATSAPP_OUTBOUND_LIVE_ACK 2>/dev/null || true)"; kill="$(envv WHATSAPP_OUTBOUND_KILL_SWITCH 2>/dev/null || true)"
+          printf 'WHATSAPP_OUTBOUND_MODE=%s\nWHATSAPP_CUTOVER_APPROVED=%s\nWHATSAPP_OUTBOUND_LIVE_ACK_SET=%s\nWHATSAPP_OUTBOUND_KILL_SWITCH=%s\n' "${provider_mode:-disabled}" "${cutover:-false}" "$([[ -n "$live_ack" ]] && echo true || echo false)" "${kill:-unset}"
+          test "${provider_mode:-disabled}" != live; test "${cutover:-false}" != true; test -z "$live_ack"; test "${kill:-on}" = on
+
+          export DATABASE_URL="$(envv DATABASE_URL)"; DB="$(node "$APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")"
+          state_before="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,COALESCE((\"scope\"->>'externalWritesRequested'),'false'),\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
+          outbound_before="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT COUNT(*),COALESCE(MAX(\"updatedAt\")::text,'') FROM \"WhatsAppMessage\" WHERE \"direction\"='OUTBOUND';")"
+          printf 'CONTROLLED_LAUNCH_BEFORE=%s\nOUTBOUND_SNAPSHOT_BEFORE=%s\n' "$state_before" "$outbound_before"
+          test "$state_before" = 'ONE_CONNECTED_ACCOUNT|SHADOW|NO_EXTERNAL_WRITES|false|false|2'
+
+          ADMIN_EMAIL="$(envv DASHBOARD_ADMIN_EMAIL)"
+          ADMIN_PASSWORD="$(envv DASHBOARD_ADMIN_PASSWORD)"
+          test -n "$ADMIN_EMAIL"; test -n "$ADMIN_PASSWORD"
+          CHROMIUM="$(command -v chromium || command -v chromium-browser || command -v google-chrome || command -v google-chrome-stable || true)"
+          test -n "$CHROMIUM"
+
+          cd "$TMP"
+          npm init -y >/dev/null 2>&1
+          npm install --silent --no-audit --no-fund playwright-core@1.54.2
+          cat > smoke.mjs <<'NODE'
+          import { chromium } from 'playwright-core';
+          const base='https://whatsapp.sikhadenge.in';
+          const email=process.env.SMOKE_ADMIN_EMAIL;
+          const password=process.env.SMOKE_ADMIN_PASSWORD;
+          const executablePath=process.env.SMOKE_CHROMIUM;
+          if(!email||!password||!executablePath) throw new Error('Smoke prerequisites missing');
+          const browser=await chromium.launch({headless:true,executablePath,args:['--no-sandbox','--disable-dev-shm-usage']});
+          const context=await browser.newContext({viewport:{width:1440,height:900}});
+          const page=await context.newPage();
+          let blockedMutations=0;
+          let response5xx=0;
+          page.on('response',r=>{ if(r.status()>=500) response5xx++; });
+          await page.route('**/api/**',async route=>{
+            const req=route.request();
+            const method=req.method().toUpperCase();
+            const path=new URL(req.url()).pathname;
+            if(method==='GET'||method==='HEAD'||(method==='POST'&&(path==='/api/auth/login'||path==='/api/auth/logout'))){ await route.continue(); return; }
+            blockedMutations++;
+            await route.fulfill({status:204,body:''});
+          });
+          try{
+            await page.goto(base+'/login',{waitUntil:'domcontentloaded',timeout:30000});
+            await page.getByLabel('Work Email').fill(email);
+            await page.getByLabel('Password',{exact:true}).fill(password);
+            await Promise.all([
+              page.waitForURL(/\/inbox(?:\?|$)/,{timeout:30000}),
+              page.getByRole('button',{name:'Sign In'}).click(),
+            ]);
+            await page.locator('.sx-inbox').waitFor({state:'visible',timeout:20000});
+            const initialCount=await page.locator('.sx-convo').count();
+            if(initialCount<1) throw new Error('No live conversations rendered');
+            const initialMessages=await page.locator('.sx-msgrow').count();
+            const initialDividers=await page.locator('.sx-daydivider').count();
+            const loadingInitial=await page.getByText('Loading conversation…',{exact:true}).count();
+            if(loadingInitial!==0) throw new Error('Inbox stuck loading on initial render');
+
+            const targets=Math.min(3,initialCount);
+            if(targets>=2){
+              const first=page.locator('.sx-convo').nth(0);
+              const second=page.locator('.sx-convo').nth(1);
+              const expectedFirst=(await first.locator('.sx-convo-top strong').textContent()||'').trim();
+              await first.click();
+              await second.click();
+              await first.click();
+              await page.waitForTimeout(1800);
+              const selected=page.locator('.sx-convo.is-selected');
+              if(await selected.count()!==1) throw new Error('Conversation selection is not singular');
+              const selectedName=(await selected.locator('.sx-convo-top strong').textContent()||'').trim();
+              const headerName=(await page.locator('.sx-chat-ident h2').textContent()||'').trim();
+              if(!expectedFirst||selectedName!==expectedFirst||headerName!==expectedFirst) throw new Error('Rapid-switch stale conversation mismatch');
+              if(await page.getByText('Loading conversation…',{exact:true}).count()) throw new Error('Inbox stuck loading after rapid switch');
+            }
+
+            await page.getByRole('button',{name:'History',exact:true}).click();
+            await page.waitForTimeout(1500);
+            const historyCount=await page.locator('.sx-convo').count();
+            if(historyCount<1) throw new Error('History scope rendered no conversations');
+            const last=page.locator('.sx-convo').nth(historyCount-1);
+            await last.click();
+            await page.waitForTimeout(1400);
+            if(await page.getByText('Loading conversation…',{exact:true}).count()) throw new Error('History conversation stuck loading');
+            const historyMessages=await page.locator('.sx-msgrow').count();
+            const dayDividers=await page.locator('.sx-daydivider span').allTextContents();
+            if(historyMessages>0&&dayDividers.length<1) throw new Error('Message date dividers missing');
+            if(dayDividers.some(v=>!v.trim())) throw new Error('Blank date divider rendered');
+
+            let statusLabels=0;
+            const inspect=Math.min(6,historyCount);
+            for(let i=0;i<inspect&&statusLabels===0;i++){
+              await page.locator('.sx-convo').nth(i).click();
+              await page.waitForTimeout(450);
+              statusLabels=await page.locator('.sx-msgrow.outbound time').evaluateAll(nodes=>nodes.filter(n=>/(Read|Delivered|Sent|Queued|Failed)/.test(n.textContent||'')).length);
+            }
+            await page.waitForTimeout(2200);
+            if(await page.locator('.sx-error').count()) throw new Error('Visible Inbox error after polling window');
+            if(response5xx>0) throw new Error('Production Inbox produced 5xx responses during smoke');
+            const unsupportedVisible=await page.locator('.sx-bubble p').evaluateAll(nodes=>nodes.filter(n=>/UNSUPPORTED/i.test(n.textContent||'')).length);
+            console.log('LIVE_INBOX_INITIAL_CONVERSATIONS='+initialCount);
+            console.log('LIVE_INBOX_INITIAL_MESSAGES='+initialMessages);
+            console.log('LIVE_INBOX_INITIAL_DAY_DIVIDERS='+initialDividers);
+            console.log('LIVE_INBOX_HISTORY_CONVERSATIONS='+historyCount);
+            console.log('LIVE_INBOX_HISTORY_SELECTED_MESSAGES='+historyMessages);
+            console.log('LIVE_INBOX_STATUS_LABEL_MATCHES='+statusLabels);
+            console.log('LIVE_INBOX_UNSUPPORTED_VISIBLE_COUNT='+unsupportedVisible);
+            console.log('BLOCKED_INTERNAL_MUTATION_REQUESTS='+blockedMutations);
+            console.log('HTTP_5XX_COUNT='+response5xx);
+            const logout=await page.evaluate(async()=>{const r=await fetch('/api/auth/logout',{method:'POST'});return r.ok;});
+            if(!logout) throw new Error('Smoke session logout failed');
+            console.log('AUTH_SESSION_REVOKED=true');
+            console.log('PASS: AUTHENTICATED_LIVE_INBOX_BROWSER_SMOKE');
+          } finally {
+            await context.close().catch(()=>{});
+            await browser.close().catch(()=>{});
+          }
+          NODE
+
+          SMOKE_ADMIN_EMAIL="$ADMIN_EMAIL" SMOKE_ADMIN_PASSWORD="$ADMIN_PASSWORD" SMOKE_CHROMIUM="$CHROMIUM" node smoke.mjs
+          unset ADMIN_EMAIL ADMIN_PASSWORD
+
+          state_after="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,COALESCE((\"scope\"->>'externalWritesRequested'),'false'),\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
+          outbound_after="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT COUNT(*),COALESCE(MAX(\"updatedAt\")::text,'') FROM \"WhatsAppMessage\" WHERE \"direction\"='OUTBOUND';")"
+          queued_after="$(psql "$DB" -X -Atqc "SELECT COUNT(*) FROM \"WhatsAppMessage\" WHERE \"direction\"='OUTBOUND' AND \"status\"='QUEUED';")"
+          printf 'CONTROLLED_LAUNCH_AFTER=%s\nOUTBOUND_SNAPSHOT_AFTER=%s\nQUEUED_OUTBOUND_AFTER=%s\n' "$state_after" "$outbound_after" "$queued_after"
+          test "$state_after" = "$state_before"
+          test "$outbound_after" = "$outbound_before"
+          test "$queued_after" = 0
+          test "$(envv WHATSAPP_OUTBOUND_MODE 2>/dev/null || true)" != live
+          test "$(envv WHATSAPP_OUTBOUND_KILL_SWITCH 2>/dev/null || echo on)" = on
+          test -z "$(git -C "$APP" status --porcelain --untracked-files=no)"
+          printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\nPASS: PRODUCTION_INBOX_SMOKE_NO_OUTBOUND_DRIFT\n'
+          REMOTE
