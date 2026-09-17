@@ -1,0 +1,44 @@
+name: Phase17 cf2b1c2 Readonly Validation Temp
+on:
+  push:
+    branches:
+      - ops/phase17-cf2b1c2-readonly-validation-20260917
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact production live SHA
+        uses: actions/checkout@v4
+        with:
+          ref: cf2b1c2f7bd66f8b7037e51240b1f84f8ce95484
+          fetch-depth: 0
+      - name: Verify exact source SHA
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "cf2b1c2f7bd66f8b7037e51240b1f84f8ce95484"
+          printf 'VALIDATED_SHA=%s\n' "$(git rev-parse HEAD)"
+      - name: Install app dependencies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd apps/whatsapp-agent-dashboard
+          npm install --include=dev --no-audit --no-fund --package-lock=false
+      - name: Run exact-SHA Phase17 policy and governance validations
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd apps/whatsapp-agent-dashboard
+          npx tsx tests/engageos-phase17-stage2-governance-evidence.test.ts
+          npx tsx tests/engageos-phase17-stage2-machine-evidence-policy.test.ts
+          npm run test:phase17-controlled-launch
+          npm run test:phase17-production-readiness
+          npm run typecheck
+          npx tsx tests/engageos-phase17-g2-outbound-approval.test.ts
+          npx tsx tests/engageos-phase17-g5-approved-flow-governance.test.ts
+          npx tsx tests/engageos-phase17-g6-governance-observability.test.ts
+          npx tsx scripts/observability-smoke.ts
+          printf 'STATE_MUTATED=false\nEXTERNAL_WHATSAPP_WRITE_SENT=false\n'
