@@ -83,7 +83,15 @@ jobs:
           provider_mode="$(envv WHATSAPP_OUTBOUND_MODE 2>/dev/null || true)"
           kill="$(envv WHATSAPP_OUTBOUND_KILL_SWITCH 2>/dev/null || true)"
           phone_id="$(envv WHATSAPP_PHONE_NUMBER_ID 2>/dev/null || envv META_WHATSAPP_PHONE_NUMBER_ID 2>/dev/null || true)"
-          test "$live_sha" = "$EXPECTED_LIVE_SHA"
+
+          printf 'LIVE_SHA=%s\n' "$live_sha"
+          printf 'LIVE_SHA_EXPECTED_MATCH=%s\n' "$([[ "$live_sha" = "$EXPECTED_LIVE_SHA" ]] && echo true || echo false)"
+          printf 'TRACKED_DIRTY_COUNT=%s\n' "$dirty"
+          printf 'OUTBOUND_MODE=%s\n' "${provider_mode:-disabled}"
+          printf 'KILL_SWITCH=%s\n' "${kill:-unset}"
+          printf 'PHONE_ID_PRESENT=%s\n' "$([[ -n "$phone_id" ]] && echo true || echo false)"
+          printf 'PHONE_ID_NUMERIC=%s\n' "$([[ "$phone_id" =~ ^[0-9]+$ ]] && echo true || echo false)"
+
           test "$dirty" = "0"
           test "${provider_mode:-disabled}" != "live"
           test "${kill:-on}" = "on"
@@ -92,12 +100,18 @@ jobs:
           export DATABASE_URL="$(envv DATABASE_URL)"
           DB="$(node "$APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")"
           synthetic="whatsapp:${phone_id}"
+          printf 'DATABASE_READY=true\n'
 
           external_match_count="$(psql "$DB" -X -Atqc "SELECT COUNT(*) FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\"='WHATSAPP' AND \"externalAccountId\"='${phone_id}' AND \"status\" IN ('CONNECTED','DEGRADED');")"
+          printf 'DB_ACTIVE_CONNECTION_MATCHED_BY_EXTERNAL_ACCOUNT=%s\n' "$external_match_count"
+
           synthetic_row_count="$(psql "$DB" -X -Atqc "SELECT COUNT(*) FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\"='WHATSAPP' AND \"id\"='${synthetic}';")"
+          printf 'DB_SYNTHETIC_CONNECTION_ROW_EXISTS=%s\n' "$synthetic_row_count"
+
           scope_synthetic_count="$(psql "$DB" -X -Atqc "SELECT COUNT(*) FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"scope\"->'connectedAccountIds' ? '${synthetic}';")"
           scope_phone_count="$(psql "$DB" -X -Atqc "SELECT COUNT(*) FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"scope\"->'connectedAccountIds' ? '${phone_id}';")"
           actual_id="$(psql "$DB" -X -Atqc "SELECT \"id\" FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\"='WHATSAPP' AND \"externalAccountId\"='${phone_id}' AND \"status\" IN ('CONNECTED','DEGRADED') ORDER BY \"updatedAt\" DESC LIMIT 1;")"
+          printf 'ACTUAL_DB_CONNECTION_ID_PRESENT=%s\n' "$([[ -n "$actual_id" ]] && echo true || echo false)"
           if [[ -n "$actual_id" ]]; then [[ "$actual_id" =~ ^[A-Za-z0-9:_-]+$ ]]; fi
 
           scope_actual_count=0
@@ -110,11 +124,6 @@ jobs:
           mapped_contact_count="$(psql "$DB" -X -Atqc "SELECT COUNT(*) FROM \"WhatsAppContact\" WHERE \"metadata\"->'engageos'->'whatsappIdentity'->>'workspaceId'='${WORKSPACE_ID}';")"
           scope_size="$(psql "$DB" -X -Atqc "SELECT COALESCE(jsonb_array_length(\"scope\"->'connectedAccountIds'),0) FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
 
-          printf 'LIVE_SHA_MATCH=true\n'
-          printf 'OUTBOUND_LIVE_DISABLED=true\n'
-          printf 'KILL_SWITCH_ON=true\n'
-          printf 'DB_ACTIVE_CONNECTION_MATCHED_BY_EXTERNAL_ACCOUNT=%s\n' "$external_match_count"
-          printf 'DB_SYNTHETIC_CONNECTION_ROW_EXISTS=%s\n' "$synthetic_row_count"
           printf 'CONTROLLED_SCOPE_CONNECTED_ACCOUNT_COUNT=%s\n' "$scope_size"
           printf 'CONTROLLED_SCOPE_MATCHES_SYNTHETIC_ID=%s\n' "$scope_synthetic_count"
           printf 'CONTROLLED_SCOPE_MATCHES_PHONE_ID=%s\n' "$scope_phone_count"
