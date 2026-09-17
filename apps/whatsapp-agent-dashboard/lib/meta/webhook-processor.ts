@@ -27,6 +27,7 @@ const MESSAGE_TYPE_MAP: Record<string, MessageType> = {
   document: MessageType.DOCUMENT,
   location: MessageType.LOCATION,
   interactive: MessageType.INTERACTIVE,
+  button: MessageType.INTERACTIVE,
   reaction: MessageType.REACTION,
 };
 

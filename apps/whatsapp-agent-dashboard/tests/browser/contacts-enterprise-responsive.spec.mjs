@@ -50,7 +50,13 @@ for (const viewport of VIEWPORTS) {
     await expect(page.locator(".contact-metrics > article")).toHaveCount(4);
     await expect(page.locator(".contact-toolbar")).toBeVisible();
     await expect(page.locator(".contact-directory")).toBeVisible();
-    await expect(page.locator(".contact-editor")).toBeVisible();
+    const editor = page.locator(".contact-editor");
+    if (viewport.width > 1180) {
+      await expect(editor).toBeVisible();
+    } else {
+      // Contacts V20 uses an explicit drawer below 1181px.
+      await expect(editor).toBeHidden();
+    }
 
     await expect(page.getByText("Loading customer intelligence…", { exact: true })).toHaveCount(0);
     await expect(page.getByLabel("Search contacts")).toBeVisible();
@@ -62,22 +68,27 @@ for (const viewport of VIEWPORTS) {
     const firstRow = page.locator(".contact-table tbody tr").first();
     await expect(firstRow).toBeVisible();
     await expect(page.locator(".contact-table tbody tr.selected")).toHaveCount(0);
-    await expect(page.locator(".contact-editor h3")).toHaveText("Select a contact");
-    await expect(
-      page.locator(".contact-editor").getByRole("button", { name: "Message" }),
-    ).toHaveCount(0);
+    if (viewport.width > 1180) {
+      await expect(page.locator(".contact-editor h3")).toHaveText("Select a contact");
+      await expect(editor.getByRole("button", { name: "Message" })).toHaveCount(0);
+    }
 
     await expectNoRootOverflow(page);
 
     const directoryBox = await page.locator(".contact-directory").boundingBox();
-    const editorBox = await page.locator(".contact-editor").boundingBox();
     expect(directoryBox).not.toBeNull();
-    expect(editorBox).not.toBeNull();
 
-    if (viewport.width >= 1180) {
+    if (viewport.width > 1180) {
+      const editorBox = await editor.boundingBox();
+      expect(editorBox).not.toBeNull();
       expect(editorBox.x).toBeGreaterThan(directoryBox.x + directoryBox.width - 2);
-    } else {
-      expect(editorBox.y).toBeGreaterThan(directoryBox.y + directoryBox.height - 2);
+    } else if (viewport.width > 767) {
+      await firstRow.click();
+      await expect(editor).toBeVisible();
+      await expect(page.locator(".contact-editor h3")).toHaveText("CI Browser Learner");
+      await page.getByRole("button", { name: "Close contact panel" }).click();
+      await expect(editor).toBeHidden();
+      await expect(page.locator(".contact-table tbody tr.selected")).toHaveCount(0);
     }
 
     if (viewport.width <= 767) {
@@ -143,9 +154,10 @@ for (const viewport of VIEWPORTS) {
         }),
       );
       expect(metricBoxes).toHaveLength(4);
-      expect(Math.abs(metricBoxes[0].top - metricBoxes[1].top)).toBeLessThanOrEqual(2);
-      expect(metricBoxes[2].top).toBeGreaterThan(metricBoxes[0].top);
-      expect(metricBoxes[0].width).toBeGreaterThan(140);
+      // Contacts V20 stacks KPI cards into a single column at <=520px.
+      expect(metricBoxes[1].top).toBeGreaterThan(metricBoxes[0].top);
+      expect(metricBoxes[2].top).toBeGreaterThan(metricBoxes[1].top);
+      expect(metricBoxes[0].width).toBeGreaterThan(300);
     }
 
     // Exercise the actual operator state transition on desktop where both the

@@ -62,43 +62,40 @@ grep -Fq 'FEATURE_FLAGS_ENABLED' "$verify"
 grep -Fq '/login' "$verify"
 
 # Orchestrator must reconcile legacy preflight through the dynamic read-only gate,
-# always execute the dynamic migration, and bootstrap only after post-deploy rollback evidence.
+# always execute migration/build verification, preserve rollback evidence, then delegate
+# controlled-launch bootstrap/readiness to the stage-aware post-deploy gate.
 grep -Fq 'engageos-production-dynamic-lineage-readonly.sh' "$batch"
 grep -Fq 'PREFLIGHT_DYNAMIC_LINEAGE_COMPATIBILITY_VERIFIED' "$batch"
 grep -Fq 'engageos-production-migrate-v2.sh' "$batch"
-grep -Fq 'engageos-production-phase17-stage1-bootstrap.sh' "$batch"
-grep -Fq 'engageos-phase17-production-readiness.sh' "$batch"
-grep -Fq 'engageos-production-phase17-stage1-verify.sh' "$batch"
+grep -Fq 'engageos-production-verify.sh' "$batch"
+grep -Fq 'PASS: ROLLBACK_ARTIFACTS_PRESERVED' "$batch"
+grep -Fq 'engageos-production-phase17-postdeploy-gate.sh' "$batch"
+
+# Stage-aware post-deploy gate owns conditional Stage1 bootstrap and exact persisted-state checks.
+postdeploy="$script_root/engageos-production-phase17-postdeploy-gate.sh"
+test -f "$postdeploy"
+bash -n "$postdeploy"
+grep -Fq 'engageos-production-phase17-stage1-bootstrap.sh' "$postdeploy"
+grep -Fq 'INTERNAL_TEST_IDENTITIES|SHADOW|NO_EXTERNAL_WRITES|false|1|0|false' "$postdeploy"
+grep -Fq 'ONE_CONNECTED_ACCOUNT|SHADOW|NO_EXTERNAL_WRITES|false|2|0|false' "$postdeploy"
+grep -Fq 'active emergency kill switch detected' "$postdeploy"
+grep -Fq 'high-risk EngageOS feature flags are enabled' "$postdeploy"
+grep -Fq 'PHASE17_POSTDEPLOY_CONTROLLED_LAUNCH_GATE' "$postdeploy"
 
 lineage_line="$(grep -nF 'engageos-production-dynamic-lineage-readonly.sh' "$batch" | head -n1 | cut -d: -f1)"
 migration_line="$(grep -nF 'engageos-production-migrate-v2.sh' "$batch" | head -n1 | cut -d: -f1)"
 verify_line="$(grep -nF 'engageos-production-verify.sh' "$batch" | head -n1 | cut -d: -f1)"
 rollback_evidence_line="$(grep -nF 'PASS: ROLLBACK_ARTIFACTS_PRESERVED' "$batch" | head -n1 | cut -d: -f1)"
-bootstrap_line="$(grep -nF 'engageos-production-phase17-stage1-bootstrap.sh' "$batch" | head -n1 | cut -d: -f1)"
-state_verify_line="$(grep -nF 'engageos-production-phase17-stage1-verify.sh' "$batch" | head -n1 | cut -d: -f1)"
+postdeploy_line="$(grep -nF 'engageos-production-phase17-postdeploy-gate.sh' "$batch" | head -n1 | cut -d: -f1)"
 
 test -n "$lineage_line"
 test -n "$migration_line"
 test -n "$verify_line"
 test -n "$rollback_evidence_line"
-test -n "$bootstrap_line"
-test -n "$state_verify_line"
+test -n "$postdeploy_line"
 test "$lineage_line" -lt "$migration_line"
 test "$migration_line" -lt "$verify_line"
 test "$verify_line" -lt "$rollback_evidence_line"
-test "$rollback_evidence_line" -lt "$bootstrap_line"
-test "$bootstrap_line" -lt "$state_verify_line"
-
-# Existing read-only readiness must run after bootstrap to reconfirm SHA/migrations/flags/PM2/login.
-# It must execute from LIVE_APP because STAGE_APP is intentionally mutated by isolated build tooling.
-readiness_line="$(grep -nF 'engageos-phase17-production-readiness.sh' "$batch" | tail -n1 | cut -d: -f1)"
-readiness_worktree_line="$(grep -nF 'PHASE17_STAGE1_READINESS_WORKTREE=%s' "$batch" | tail -n1 | cut -d: -f1)"
-live_cd_line="$(grep -nF 'cd "$LIVE_APP"' "$batch" | tail -n1 | cut -d: -f1)"
-test -n "$readiness_worktree_line"
-test -n "$live_cd_line"
-test "$bootstrap_line" -lt "$readiness_worktree_line"
-test "$readiness_worktree_line" -lt "$live_cd_line"
-test "$live_cd_line" -lt "$readiness_line"
-test "$readiness_line" -lt "$state_verify_line"
+test "$rollback_evidence_line" -lt "$postdeploy_line"
 
 printf 'EngageOS Phase17 Stage1 production activation policy: PASS\n'

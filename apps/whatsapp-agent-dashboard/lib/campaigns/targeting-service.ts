@@ -369,6 +369,7 @@ export async function launchTargetedCampaign(input: TargetedCampaignInput) {
           components: Array.isArray(input.components) ? input.components : [],
         },
         idempotencyKey: `campaign:${campaignId}:${recipient.id}`,
+        flowProvenance: { flowType: "CAMPAIGN", flowId: campaignId, flowVersion: 1 },
       });
       if (result.queued || result.duplicate) queued += 1;
     } catch (error) {

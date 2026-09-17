@@ -121,3 +121,12 @@ login_status="$(curl -L -sS -o /dev/null -w '%{http_code}' --max-time 20 "${PUBL
 chmod 600 "$BACKUP_DIR/phase17-postdeploy-evidence.txt"
 cat "$BACKUP_DIR/phase17-postdeploy-evidence.txt"
 printf 'PASS: PHASE17_POSTDEPLOY_CONTROLLED_LAUNCH_GATE\n'
+
+printf '===== PHASE17: GOVERNANCE RELEASE EXIT GATE =====\n'
+LIVE_APP="$LIVE_APP" \
+STAGE_APP="$STAGE_APP" \
+RELEASE_SHA="$RELEASE_SHA" \
+BACKUP_DIR="$BACKUP_DIR" \
+ENV_FILE="$ENV_FILE" \
+PHASE17_WORKSPACE_ID="$WORKSPACE_ID" \
+  bash "$STAGE_APP/scripts/engageos-phase17-governance-release-exit-gate.sh"

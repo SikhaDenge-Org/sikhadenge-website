@@ -399,7 +399,7 @@ export default function ContactManager({ userRole }: { userRole: string }) {
   }
 
   return (
-    <div className="contact-manager contact-manager-v2">
+    <div className={`contact-manager contact-manager-v2 ${editorOpen ? "is-editor-open" : ""}`}>
       <section className="contact-intelligence-head">
         <div className="contact-intelligence-copy">
           <div className="contact-intelligence-kicker"><span className="contact-ai-orb" /> Customer intelligence</div>

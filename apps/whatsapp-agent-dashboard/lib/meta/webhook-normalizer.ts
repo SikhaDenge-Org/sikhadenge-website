@@ -58,6 +58,10 @@ function textFromMessage(message: JsonRecord, type: string): string | null {
     return asString(asRecord(message.text)?.body);
   }
 
+  if (type === "button") {
+    return asString(asRecord(message.button)?.text);
+  }
+
   if (type === "interactive") {
     const interactive = asRecord(message.interactive);
     return (
@@ -82,6 +86,15 @@ function textFromMessage(message: JsonRecord, type: string): string | null {
 
   if (type === "reaction") {
     return asString(asRecord(message.reaction)?.emoji);
+  }
+
+  if (type === "unknown" || type === "unsupported") {
+    const error = asRecord(asArray(message.errors)[0]);
+    return (
+      asString(error?.details) ||
+      asString(error?.title) ||
+      asString(error?.message)
+    );
   }
 
   const typedPayload = asRecord(message[type]);

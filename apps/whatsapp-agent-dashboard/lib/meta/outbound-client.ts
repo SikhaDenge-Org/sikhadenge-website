@@ -1,3 +1,13 @@
+import { consumeCurrentControlledLaunchOutboundApproval } from "@/modules/release/application/controlled-launch-outbound-approval";
+import { ControlledLaunchBoundedAutopilotError, reserveBoundedAutopilotRecipient } from "@/modules/release/application/controlled-launch-bounded-autopilot";
+import {
+  assertControlledLaunchOutboundAllowed,
+  assertWhatsAppProviderConnectionBinding,
+  assertWhatsAppProviderRecipientBinding,
+  ControlledLaunchOutboundDeniedError,
+  type ControlledLaunchOutboundAuthorization,
+  type ControlledLaunchOutboundContext,
+} from "@/modules/release/application/controlled-launch-outbound-guard";
 import type {
   OutboundMode,
   PreparedMetaMessage,
@@ -64,15 +74,28 @@ function metaError(body: MetaSendResponse, status: number, fallback: string): Er
   return new Error(`${body.error?.message || `${fallback} with HTTP ${status}`}${code}`);
 }
 
-export async function uploadMetaWhatsAppMedia(input: {
-  data: Buffer;
-  mimeType: string;
-  filename: string;
-}): Promise<{ mediaId: string; statusCode: number }> {
+async function assertProviderWriteAllowed(
+  governance: ControlledLaunchOutboundContext,
+  phoneNumberId: string,
+): Promise<ControlledLaunchOutboundAuthorization> {
+  assertWhatsAppProviderConnectionBinding(governance, phoneNumberId);
+  return assertControlledLaunchOutboundAllowed(governance);
+}
+
+export async function uploadMetaWhatsAppMedia(
+  input: {
+    data: Buffer;
+    mimeType: string;
+    filename: string;
+  },
+  governance: ControlledLaunchOutboundContext,
+): Promise<{ mediaId: string; statusCode: number }> {
   const mode = getOutboundMode();
   if (mode !== "live") throw new Error(`WhatsApp live sending is ${mode}.`);
 
   const config = requiredLiveConfig();
+  await assertProviderWriteAllowed(governance, config.phoneNumberId);
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs());
 
@@ -107,6 +130,7 @@ export async function uploadMetaWhatsAppMedia(input: {
 
 export async function sendMetaWhatsAppMessage(
   payload: PreparedMetaMessage,
+  governance: ControlledLaunchOutboundContext,
 ): Promise<{
   metaMessageId: string;
   statusCode: number;
@@ -117,6 +141,21 @@ export async function sendMetaWhatsAppMessage(
   }
 
   const config = requiredLiveConfig();
+  const authorization = await assertProviderWriteAllowed(governance, config.phoneNumberId);
+  assertWhatsAppProviderRecipientBinding(governance, payload.to);
+  if (authorization.writePolicy === "HUMAN_APPROVAL_REQUIRED") {
+    await consumeCurrentControlledLaunchOutboundApproval({ workspaceId: governance.workspaceId, connectionId: governance.connectionId, messageId: governance.messageId });
+  } else if (authorization.writePolicy === "BOUNDED_AUTOPILOT") {
+    try {
+      await reserveBoundedAutopilotRecipient({ workspaceId: governance.workspaceId, connectionId: governance.connectionId, messageId: governance.messageId, recipientKey: governance.recipientKey });
+    } catch (error) {
+      if (error instanceof ControlledLaunchBoundedAutopilotError) {
+        throw new ControlledLaunchOutboundDeniedError("CONTROLLED_LAUNCH_BOUNDED_CAP_DENIED", error.message);
+      }
+      throw error;
+    }
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs());
 
