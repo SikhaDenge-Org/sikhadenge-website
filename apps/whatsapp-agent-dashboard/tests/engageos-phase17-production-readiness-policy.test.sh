@@ -3,9 +3,11 @@ set -Eeuo pipefail
 
 script_path="scripts/engageos-phase17-production-readiness.sh"
 normalizer_path="scripts/prisma-postgres-cli-url.mjs"
+runtime_identity_test="tests/engageos-phase17-runtime-identity-policy.test.sh"
 
 test -f "$script_path"
 test -f "$normalizer_path"
+test -f "$runtime_identity_test"
 bash -n "$script_path"
 node --check "$normalizer_path"
 
@@ -51,5 +53,7 @@ grep -Fq 'pm2 describe' "$script_path"
 grep -Fq '/login' "$script_path"
 grep -Fq 'PHASE17_STAGE1_READINESS=PASS' "$script_path"
 grep -Fq 'PHASE17_STAGE1_READINESS=FAIL' "$script_path"
+
+bash "$runtime_identity_test"
 
 printf 'EngageOS Phase17 production readiness policy test passed.\n'
