@@ -48,7 +48,7 @@ restore(){
     cp -a "$BACKUP_DIR/.env.before" "$ENV_FILE" || true
     pm2 restart "$PM2_PROCESS_NAME" --update-env >/dev/null 2>&1 || true
     sleep 3
-    APPLY=1 EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" APP_DIR="$LIVE_APP" ENV_FILE="$ENV_FILE" \
+    APPLY=1 EMAIL_PREFLIGHT_EXPECTED_MODE=DRY_RUN EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" APP_DIR="$LIVE_APP" ENV_FILE="$ENV_FILE" \
       bash scripts/email-automation-scheduler-activate.sh >/dev/null 2>&1 || true
     restored=1
   fi
@@ -79,7 +79,7 @@ NODE
 
 pm2 restart "$PM2_PROCESS_NAME" --update-env >/dev/null
 sleep 3
-APPLY=1 EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" APP_DIR="$LIVE_APP" ENV_FILE="$ENV_FILE" \
+APPLY=1 EMAIL_PREFLIGHT_EXPECTED_MODE=LIMITED_COHORT EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" APP_DIR="$LIVE_APP" ENV_FILE="$ENV_FILE" \
   bash scripts/email-automation-scheduler-activate.sh >/dev/null
 sleep 8
 
