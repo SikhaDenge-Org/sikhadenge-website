@@ -41,6 +41,7 @@ export default function EmailSenderManager(){
   const primarySenders=primaryConnection?state?.senders.filter(s=>s.connectionId===primaryConnection.id)??[]:[];
 
   async function connectGoogle(){try{setAction({key:"connect",message:"Preparing secure Google connection…",kind:"working"});const result=await apiJson<{authorizationUrl:string}>("/api/email/google/connect",{method:"POST"});window.location.assign(result.authorizationUrl);}catch(e){setAction({key:"connect",message:e instanceof Error?e.message:"Google connection could not start.",kind:"error"});}}
+  async function enableInboxAccess(){try{setAction({key:"inbox-access",message:"Preparing Google read-only Inbox authorization…",kind:"working"});const result=await apiJson<{authorizationUrl:string}>("/api/email/google/connect",{method:"POST",body:JSON.stringify({enableInbound:true})});window.location.assign(result.authorizationUrl);}catch(e){setAction({key:"inbox-access",message:e instanceof Error?e.message:"Inbox access authorization could not start.",kind:"error"});}}
   async function refreshConnection(id:string){try{setAction({key:`refresh:${id}`,message:"Refreshing sender identities…",kind:"working"});await apiJson(`/api/email/connections/${encodeURIComponent(id)}/refresh`,{method:"POST"});await load();setAction({key:`refresh:${id}`,message:"Sender identities refreshed.",kind:"success"});}catch(e){setAction({key:`refresh:${id}`,message:e instanceof Error?e.message:"Sender refresh failed.",kind:"error"});}}
   async function chooseDefault(id:string){try{setAction({key:`default:${id}`,message:"Updating workspace default…",kind:"working"});await apiJson("/api/email/senders/default",{method:"POST",body:JSON.stringify({senderIdentityId:id})});await load();setAction({key:`default:${id}`,message:"Workspace default sender updated.",kind:"success"});}catch(e){setAction({key:`default:${id}`,message:e instanceof Error?e.message:"Default sender update failed.",kind:"error"});}}
   async function disconnect(connection:Connection){if(!window.confirm(`Disconnect ${connection.displayName}? Stored OAuth credentials will be revoked.`))return;try{setAction({key:`revoke:${connection.id}`,message:"Revoking Google access…",kind:"working"});await apiJson(`/api/email/connections/${encodeURIComponent(connection.id)}`,{method:"DELETE"});await load();setAction({key:`revoke:${connection.id}`,message:"Email account disconnected.",kind:"success"});}catch(e){setAction({key:`revoke:${connection.id}`,message:e instanceof Error?e.message:"Email account could not be disconnected.",kind:"error"});}}
@@ -51,6 +52,7 @@ export default function EmailSenderManager(){
     <div className={styles.statusRail}>
       <span className={activeConnections.length?styles.connectedPill:styles.neutralPill}>● {activeConnections.length?"Connected":"Not connected"}</span>
       <span className={styles.protectedPill}>🛡 Protected OAuth</span>
+      {primaryConnection?.provider==="GOOGLE_GMAIL"?<button type="button" onClick={()=>void enableInboxAccess()} disabled={action?.kind==="working"}>Enable Inbox Access</button>:null}
       <button className={styles.primaryButton} type="button" onClick={()=>void connectGoogle()}><span className={styles.googleMark}>G</span>{activeConnections.length?"Add another account":"Connect Google account"}</button>
     </div>
 
@@ -100,13 +102,13 @@ export default function EmailSenderManager(){
           <div><dt>Last verified</dt><dd>{compactDate(primaryConnection.lastVerifiedAt)}</dd></div>
           <div><dt>External account ID</dt><dd>{primaryConnection.externalAccountId??"Provider-managed"}</dd></div>
         </dl>:<p className={styles.panelEmpty}>Connect an account to view provider details.</p>}
-        {primaryConnection?<div className={styles.detailActions}><button onClick={()=>void refreshConnection(primaryConnection.id)} disabled={action?.kind==="working"}>↻ Refresh aliases</button><button className={styles.dangerButton} onClick={()=>void disconnect(primaryConnection)} disabled={action?.kind==="working"}>Disconnect</button></div>:null}
+        {primaryConnection?<div className={styles.detailActions}>{primaryConnection.provider==="GOOGLE_GMAIL"?<button onClick={()=>void enableInboxAccess()} disabled={action?.kind==="working"}>Enable Inbox Access</button>:null}<button onClick={()=>void refreshConnection(primaryConnection.id)} disabled={action?.kind==="working"}>↻ Refresh aliases</button><button className={styles.dangerButton} onClick={()=>void disconnect(primaryConnection)} disabled={action?.kind==="working"}>Disconnect</button></div>:null}
       </section>
     </div>
 
     <div className={styles.securityGrid}>
       <section className={styles.securityCard}><div className={styles.cardHead}><div><h3>Authentication & connection health</h3><p>Only states exposed by the current provider integration are shown.</p></div></div><div className={styles.securityItems}><span><i>🛡</i><b>OAuth connection</b><strong>{primaryConnection?.status??"Not connected"}</strong><small>Credentials stored server-side</small></span><span><i>✓</i><b>Verified identities</b><strong>{verifiedSenders.length}</strong><small>Active provider send-as identities</small></span><span><i>↻</i><b>Last verification</b><strong>{relativeDate(primaryConnection?.lastVerifiedAt??null)}</strong><small>{compactDate(primaryConnection?.lastVerifiedAt??null)}</small></span></div></section>
-      <section className={styles.permissionsCard}><div className={styles.cardHead}><div><h3>OAuth protection</h3><p>Security properties supported by the current implementation.</p></div></div><ul><li>✓ OAuth tokens remain server-side</li><li>✓ Stored credentials are encrypted before persistence</li><li>✓ Connection can be revoked from this workspace</li><li>✓ Sender identities are refreshed from the provider</li></ul></section>
+      <section className={styles.permissionsCard}><div className={styles.cardHead}><div><h3>OAuth protection</h3><p>Security properties supported by the current implementation.</p></div></div><ul><li>✓ OAuth tokens remain server-side</li><li>✓ Stored credentials are encrypted before persistence</li><li>✓ Connection can be revoked from this workspace</li><li>✓ Inbox access uses explicit Google read-only consent</li></ul></section>
     </div>
 
     <div className={styles.bottomGrid}>
