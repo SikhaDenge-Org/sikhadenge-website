@@ -73,6 +73,9 @@ jobs:
       - name: Run email E5 inbound inbox contracts
         run: npx tsx modules/email-automation/tests/inbound-inbox.test.ts
 
+      - name: Run email E6 campaign and sequence contracts
+        run: npx tsx modules/email-automation/tests/campaign-sequence.test.ts
+
       - name: Run email E5 production inbound safety policy
         run: bash tests/email-inbound-production-policy.test.sh
 
