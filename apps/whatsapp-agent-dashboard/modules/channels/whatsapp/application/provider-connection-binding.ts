@@ -78,7 +78,10 @@ export async function syncLegacyWhatsAppIdentityMappingForInbound(
   await transaction.whatsAppContact.update({
     where: { id: input.contactId },
     data: {
-      metadata: mergeLegacyWhatsAppMappingMetadata(input.metadata, mapping) as Prisma.InputJsonValue,
+      metadata: mergeLegacyWhatsAppMappingMetadata(
+        input.metadata,
+        mapping,
+      ) as unknown as Prisma.InputJsonValue,
     },
   });
   return { updated: true, connectionId };
