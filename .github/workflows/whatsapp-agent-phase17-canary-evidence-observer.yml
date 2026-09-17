@@ -1,0 +1,218 @@
+name: WhatsApp Agent Phase17 Canary Evidence Observer
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_release_sha:
+        description: Exact deployed release SHA
+        required: true
+        type: string
+      action:
+        description: DRY_RUN inventories controlled-canary evidence; VERIFY validates one exact sent canary
+        required: true
+        default: DRY_RUN
+        type: choice
+        options:
+          - DRY_RUN
+          - VERIFY
+      message_id:
+        description: Exact canary message ID; required only for VERIFY
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-phase17-canary-evidence-observer
+  cancel-in-progress: false
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_RELEASE_SHA: ${{ inputs.expected_release_sha }}
+      ACTION: ${{ inputs.action }}
+      MESSAGE_ID: ${{ inputs.message_id }}
+
+    steps:
+      - name: Checkout operator workflow
+        uses: actions/checkout@v4
+
+      - name: Validate exact operator inputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          for value in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            test -n "${!value:-}"
+          done
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            echo 'SSH_PORT=22' >> "$GITHUB_ENV"
+            SSH_PORT=22
+          fi
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          case "$ACTION" in
+            DRY_RUN)
+              test -z "$MESSAGE_ID"
+              ;;
+            VERIFY)
+              [[ "$MESSAGE_ID" =~ ^[A-Za-z0-9_-]{1,200}$ ]]
+              ;;
+            *)
+              printf 'Unsupported action: %s\n' "$ACTION" >&2
+              exit 2
+              ;;
+          esac
+          printf 'PASS: CANARY_EVIDENCE_OPERATOR_INPUT_GATE action=%s\n' "$ACTION"
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          test -n "$key_material"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+          printf 'PASS: PINNED_SSH_READY\n'
+
+      - name: Production read-only preflight
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          cd "$APP"
+
+          live_sha="$(git rev-parse HEAD)"
+          dirty="$(git status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          pm2_state="$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s);process.stdout.write(a.find(x=>x.name==="sikhadenge-whatsapp-agent")?.pm2_env?.status||"")})')"
+          login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login)"
+          test "$live_sha" = "$EXPECTED_RELEASE_SHA"
+          test "$dirty" = "0"
+          test "$pm2_state" = "online"
+          test "$login_http" = "200"
+
+          set -a
+          source .env
+          set +a
+          test "${WHATSAPP_OUTBOUND_MODE:-disabled}" != "live"
+          test "${WHATSAPP_CUTOVER_APPROVED:-false}" != "true"
+          test -z "${WHATSAPP_OUTBOUND_LIVE_ACK:-}"
+          test "${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}" = "on"
+
+          DB="$(node scripts/prisma-postgres-cli-url.mjs "$DATABASE_URL")"
+          state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,COALESCE((\"scope\"->>'externalWritesRequested'),'false'),\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='engagews_default';")"
+          printf 'CONTROLLED_LAUNCH_STATE=%s\n' "$state"
+          IFS='|' read -r stage mode policy external requested version <<< "$state"
+          test "$stage" = "ONE_CONNECTED_ACCOUNT"
+          test "$mode" = "SHADOW"
+          test "$policy" = "NO_EXTERNAL_WRITES"
+          test "$external" = "false"
+          test "$requested" = "false"
+
+          parity="$(npx tsx scripts/engageos-whatsapp-provider-binding-reconcile.ts)"
+          printf '%s\n' "$parity"
+          printf '%s' "$parity" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const o=JSON.parse(s);if(o.mode!=="DRY_RUN"||o.mappingsNeedingRepairBefore!==0||o.mappingsNeedingRepairAfter!==0||o.externalWhatsAppWriteSent!==false||o.parityPassed!==true)process.exit(2);console.log("PASS: PROVIDER_BINDING_PARITY");})'
+          bash tests/engageos-phase17-canary-evidence-observer-policy.test.sh
+
+          printf 'LIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\nPM2_STATE=%s\nLOGIN_HTTP=%s\n' "$live_sha" "$dirty" "$pm2_state" "$login_http"
+          printf 'BASE_OUTBOUND_MODE=%s\nBASE_CUTOVER_APPROVED=%s\nBASE_LIVE_ACK_SET=false\nBASE_KILL_SWITCH=%s\n' \
+            "${WHATSAPP_OUTBOUND_MODE:-disabled}" "${WHATSAPP_CUTOVER_APPROVED:-false}" "${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}"
+          printf 'PASS: CANARY_EVIDENCE_PRODUCTION_PREFLIGHT\n'
+          REMOTE
+
+      - name: Run read-only canary evidence observer
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          message_b64="$(printf '%s' "$MESSAGE_ID" | base64 -w0)"
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' ACTION='$ACTION' MESSAGE_B64='$message_b64' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          cd "$APP"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_RELEASE_SHA"
+          set -a
+          source .env
+          set +a
+          test "${WHATSAPP_OUTBOUND_MODE:-disabled}" != "live"
+          test "${WHATSAPP_CUTOVER_APPROVED:-false}" != "true"
+          test -z "${WHATSAPP_OUTBOUND_LIVE_ACK:-}"
+          test "${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}" = "on"
+
+          message_id="$(printf '%s' "$MESSAGE_B64" | base64 --decode)"
+          PHASE17_CANARY_EVIDENCE_MODE="$ACTION" \
+          PHASE17_CANARY_WORKSPACE_ID=engagews_default \
+          PHASE17_CANARY_EVIDENCE_MESSAGE_ID="$message_id" \
+          npx tsx scripts/engageos-phase17-canary-evidence-observer.ts
+
+          printf 'MUTATION_PERFORMED=false\n'
+          printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          REMOTE
+
+      - name: Final fail-closed production verification
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          cd "$APP"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_RELEASE_SHA"
+          test "$(git status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')" = "0"
+          test "$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s);process.stdout.write(a.find(x=>x.name==="sikhadenge-whatsapp-agent")?.pm2_env?.status||"")})')" = "online"
+          test "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login)" = "200"
+
+          set -a
+          source .env
+          set +a
+          test "${WHATSAPP_OUTBOUND_MODE:-disabled}" != "live"
+          test "${WHATSAPP_CUTOVER_APPROVED:-false}" != "true"
+          test -z "${WHATSAPP_OUTBOUND_LIVE_ACK:-}"
+          test "${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}" = "on"
+
+          DB="$(node scripts/prisma-postgres-cli-url.mjs "$DATABASE_URL")"
+          state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,COALESCE((\"scope\"->>'externalWritesRequested'),'false'),\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='engagews_default';")"
+          printf 'FINAL_CONTROLLED_LAUNCH_STATE=%s\n' "$state"
+          IFS='|' read -r stage mode policy external requested version <<< "$state"
+          test "$stage" = "ONE_CONNECTED_ACCOUNT"
+          test "$mode" = "SHADOW"
+          test "$policy" = "NO_EXTERNAL_WRITES"
+          test "$external" = "false"
+          test "$requested" = "false"
+
+          parity="$(npx tsx scripts/engageos-whatsapp-provider-binding-reconcile.ts)"
+          printf '%s' "$parity" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const o=JSON.parse(s);if(o.mappingsNeedingRepairBefore!==0||o.mappingsNeedingRepairAfter!==0||o.externalWhatsAppWriteSent!==false||o.parityPassed!==true)process.exit(2);console.log("PASS: FINAL_PROVIDER_BINDING_PARITY");})'
+          printf 'BASE_PROVIDER_RESTORED_FAIL_CLOSED=true\n'
+          printf 'MUTATION_PERFORMED=false\n'
+          printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          printf 'PASS: PHASE17_CANARY_EVIDENCE_FINAL_SAFETY\n'
+          REMOTE
