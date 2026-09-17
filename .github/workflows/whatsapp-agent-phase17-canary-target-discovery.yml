@@ -31,7 +31,7 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
-      EXPECTED_RELEASE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.expected_release_sha || github.sha }}
+      EXPECTED_RELEASE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.expected_release_sha || github.event.before }}
 
     steps:
       - name: Checkout operator workflow
