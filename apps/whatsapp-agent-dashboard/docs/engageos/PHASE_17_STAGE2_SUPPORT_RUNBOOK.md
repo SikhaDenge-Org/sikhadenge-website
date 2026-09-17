@@ -18,7 +18,7 @@ The default safe state remains:
 2. Never enable external writes as part of incident recovery or smoke testing.
 3. Never fabricate or backfill operator evidence.
 4. Evidence is valid only for the exact verified live SHA.
-5. Stop if the canonical source has tracked drift. For a separate PM2 build mirror, also stop on tracked runtime drift, build-ID mismatch, missing deploy-state provenance, or deploy-state/runtime-path mismatch.
+5. Stop on canonical-source tracked drift, PM2 runtime tracked drift, build-ID mismatch, missing/invalid deploy-state provenance, or deploy-state/runtime-path mismatch.
 6. Stop if the PM2 process is not `online` or `/login` does not return HTTP 200.
 7. Treat duplicate-send or critical-incident uncertainty as fail-closed.
 8. Use the production rollback script only with an approved, verified rollback target and backup state.
@@ -37,7 +37,17 @@ Do not hard-code an old release SHA into an operational decision. Resolve and co
 
 The PM2 runtime may be either the canonical source app itself or a separate build mirror under `/var/www/sikhadenge-whatsapp-agent/`. The production deploy path intentionally supports a separate runtime mirror whose Git checkout can remain on an older repository SHA while the exact current release `.next` build is atomically copied into that runtime. Therefore, runtime identity is not defined by PM2 runtime Git SHA alone.
 
-For a canonical-source runtime, the runtime Git SHA must equal the exact expected release SHA and both source/runtime tracked worktrees must be clean.
+Verified deploy-state provenance is mandatory for both runtime modes. The deploy-state file must belong to the verified production deployment that activated the exact expected release SHA, remain under `/root/sikhadenge-backups/engageos-*/deploy-state.txt`, and bind `RELEASE_SHA`, `NEW_BUILD_ID`, and `RUNTIME_APP` to the observed production state.
+
+For a canonical-source runtime, PASS requires all of the following:
+
+- canonical source/runtime Git SHA equals the exact expected release SHA
+- canonical source/runtime tracked worktree is clean
+- source/runtime `.next/BUILD_ID` exists and matches verified deploy-state `NEW_BUILD_ID`
+- verified deploy-state `RELEASE_SHA` equals the exact expected release SHA
+- verified deploy-state `RUNTIME_APP` resolves to the PM2 `pm_cwd`
+- PM2 is `online`
+- `/login` returns HTTP 200
 
 For a separate build mirror, PASS requires all of the following:
 
@@ -92,7 +102,7 @@ PASS requires:
 - PM2 process is `online`
 - `/login` returns HTTP 200
 
-Then resolve the PM2 runtime `pm_cwd` and verify runtime identity with the canonical read-only verifier. For a separate build mirror, supply the verified deploy-state file from the production deployment that activated the exact current source SHA:
+Then resolve the PM2 runtime `pm_cwd` and run the canonical read-only identity verifier. Always supply the verified deploy-state file from the production deployment that activated the exact current source SHA:
 
 ```bash
 EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" \
@@ -103,7 +113,7 @@ EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" \
   bash scripts/engageos-phase17-runtime-identity-readonly.sh
 ```
 
-Do not infer the deploy-state path from recency alone. Bind it to the verified production run for the exact current source SHA. If the runtime is the canonical source app itself, the verifier enforces direct runtime Git SHA equality. If it is a separate build mirror, the verifier enforces build-ID and deploy-state provenance instead of blindly requiring the mirror's Git SHA to equal the release SHA.
+Do not infer the deploy-state path from recency alone. Bind it to the verified production run for the exact current source SHA. The verifier requires deploy-state provenance in both runtime modes. If the runtime is the canonical source app itself, it additionally enforces direct runtime Git SHA equality. If it is a separate build mirror, it permits a different mirror Git SHA only when clean-state, exact build-ID equality, deploy-state release/build/runtime-path provenance, PM2 health, and login health all pass.
 
 ## Phase 17 production readiness
 
@@ -127,7 +137,7 @@ During the controlled observation period, monitor at minimum:
 - HTTP availability of `/login`
 - tracked canonical-source drift
 - tracked PM2 runtime drift
-- source/runtime build-ID equality for a separate build mirror
+- source/runtime build-ID equality
 - exact deploy-state release/build/runtime-path provenance
 - outbound send failures
 - duplicate message groups / idempotency anomalies
@@ -264,7 +274,7 @@ For every operational proof, preserve:
 - source tracked-clean result
 - PM2 runtime path and tracked-clean result
 - source and runtime build IDs
-- verified deploy-state `RELEASE_SHA`, `NEW_BUILD_ID`, and `RUNTIME_APP` when a separate runtime mirror is used
+- verified deploy-state file path, `RELEASE_SHA`, `NEW_BUILD_ID`, and `RUNTIME_APP`
 - verified timestamp in UTC
 - operator/actor identity
 - request/correlation ID when applicable
@@ -294,7 +304,7 @@ This runbook may be declared ACTIVE only when all items below are true:
 
 - [ ] document exists in the release candidate under version control
 - [ ] production identity and exact-SHA procedure verified
-- [ ] separate PM2 build-mirror identity, when present, is verified with build ID plus exact deploy-state provenance
+- [ ] PM2 runtime identity is verified with exact build ID plus deploy-state provenance; canonical-source runtime also matches the exact release Git SHA
 - [ ] Stage 1 safe baseline is documented
 - [ ] health/readiness commands are valid
 - [ ] monitoring checklist is actionable
