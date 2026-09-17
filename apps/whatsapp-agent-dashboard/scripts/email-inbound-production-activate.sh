@@ -74,6 +74,10 @@ set +a
 [[ ${#EMAIL_AUTOMATION_SCHEDULER_TOKEN} -ge 32 ]] || fail "scheduler token missing"
 if [[ "$INBOUND_MODE" == "WATCH" && -z "${GOOGLE_GMAIL_PUBSUB_TOPIC:-}" ]]; then fail "GOOGLE_GMAIL_PUBSUB_TOPIC is required in WATCH mode"; fi
 
+stage="verify-inbound-oauth-access"
+EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" EMAIL_INBOUND_ACTIVATION_ACCOUNT="$ACTIVATION_ACCOUNT" EMAIL_GMAIL_INBOUND_MODE="$INBOUND_MODE" \
+  npx tsx scripts/email-inbound-production-readiness.ts | tee "$BACKUP_DIR/pre-activation-readiness.json"
+
 stage="enable-inbound-flag"
 node - "$ENV_FILE" "$INBOUND_MODE" <<'NODE'
 const fs=require('node:fs'),path=require('node:path');const [file,mode]=process.argv.slice(2),original=fs.readFileSync(file,'utf8'),stat=fs.statSync(file);const values={EMAIL_INBOUND_SYNC_ENABLED:'true',EMAIL_GMAIL_INBOUND_MODE:mode};const keys=new Set(Object.keys(values));const kept=original.split(/\r?\n/).filter(raw=>{const line=raw.trim();if(!line||line.startsWith('#'))return true;const n=line.startsWith('export ')?line.slice(7).trim():line;const i=n.indexOf('=');return i<1||!keys.has(n.slice(0,i).trim());});while(kept.length&&kept.at(-1)==='')kept.pop();for(const [key,value] of Object.entries(values))kept.push(`${key}=${value}`);kept.push('');const tmp=path.join(path.dirname(file),`.${path.basename(file)}.${process.pid}.tmp`);fs.writeFileSync(tmp,kept.join('\n'),{mode:stat.mode});fs.chmodSync(tmp,stat.mode);try{fs.chownSync(tmp,stat.uid,stat.gid)}catch{}fs.renameSync(tmp,file);
