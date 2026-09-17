@@ -176,7 +176,7 @@ async function duplicateIntentCount(intentHash: string): Promise<number> {
     FROM "WhatsAppMessage"
     WHERE "rawPayload" #>> '{outbound,controlledCanary,intentHash}' = ${intentHash}
   `;
-  return Number(rows[0]?.count ?? 0n);
+  return Number(rows[0]?.count ?? 0);
 }
 
 async function verify(workspaceId: string) {
@@ -290,11 +290,10 @@ async function verify(workspaceId: string) {
   const sentEventPresent = eventStatuses.includes(MessageStatus.SENT);
   const failureEventCount = eventStatuses.filter((status) => status === MessageStatus.FAILED).length;
   const duplicateCount = await duplicateIntentCount(intentHash);
-  const canonicalStatusAccepted = [
-    MessageStatus.SENT,
-    MessageStatus.DELIVERED,
-    MessageStatus.READ,
-  ].includes(message.status);
+  const canonicalStatusAccepted =
+    message.status === MessageStatus.SENT ||
+    message.status === MessageStatus.DELIVERED ||
+    message.status === MessageStatus.READ;
   const providerAccepted =
     metaAcceptedStatus !== null && metaAcceptedStatus >= 200 && metaAcceptedStatus < 300;
 
