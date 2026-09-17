@@ -22,6 +22,7 @@
 // Verify guarded Email limited-cohort window after PM2 env sync — 2026-09-17
 // Deploy Email E5 unified inbox and guarded Gmail inbound — 2026-09-17
 // Audit Email E5 production inbound readiness after exact-SHA deploy — 2026-09-17
+// Deploy Email E5 polling bootstrap for production inbound — 2026-09-17
 const rawUrl = process.argv[2] ?? "";
 
 if (!rawUrl.trim()) {
