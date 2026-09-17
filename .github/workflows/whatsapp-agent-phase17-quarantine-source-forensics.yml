@@ -1,0 +1,95 @@
+name: WhatsApp Agent Phase17 Quarantine Source Forensics
+
+on:
+  push:
+    branches:
+      - ops/phase17-canary-readiness-20260917
+    paths:
+      - ".github/workflows/whatsapp-agent-phase17-quarantine-source-forensics.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-phase17-quarantine-source-forensics
+  cancel-in-progress: true
+
+jobs:
+  readonly-quarantine-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_RELEASE_SHA: bb203d95f6fbec3d5a5ebf8e6e0db6ca03a5bb02
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+      WINDOW_START: 2026-09-17T07:18:00Z
+      WINDOW_END: 2026-09-17T07:21:00Z
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then echo SSH_PORT=22 >> "$GITHUB_ENV"; SSH_PORT=22; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Correlate DB and runtime evidence without writes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' RELEASE_BRANCH='$RELEASE_BRANCH' WINDOW_START='$WINDOW_START' WINDOW_END='$WINDOW_END' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ENV_FILE="$APP/.env"
+          IDS=(cmtx2u3cp0016kw10oijg4cth cmty5xltz0004kwduveubp0tb cmty5xvbn0002kw7vzu5blkjz)
+          envv(){ node - "$ENV_FILE" "$1" <<'NODE'
+          const fs=require('node:fs'); const [f,k]=process.argv.slice(2); for(const raw of fs.readFileSync(f,'utf8').split(/\r?\n/)){let l=raw.trim();if(!l||l.startsWith('#'))continue;if(l.startsWith('export '))l=l.slice(7).trim();const i=l.indexOf('=');if(i<1||l.slice(0,i).trim()!==k)continue;let v=l.slice(i+1).trim();if(v.length>=2&&((v.startsWith('"')&&v.endsWith('"'))||(v.startsWith("'")&&v.endsWith("'"))))v=v.slice(1,-1);process.stdout.write(v);process.exit(0)}process.exit(1);
+          NODE
+          }
+          release_sha="$(git -C "$APP" ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')"; live_sha="$(git -C "$APP" rev-parse HEAD)"; dirty="$(git -C "$APP" status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          printf 'RELEASE_SHA=%s\nLIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\n' "$release_sha" "$live_sha" "$dirty"
+          test "$release_sha" = "$EXPECTED_RELEASE_SHA"; test "$live_sha" = "$EXPECTED_RELEASE_SHA"; test "$dirty" = "0"
+          export DATABASE_URL="$(envv DATABASE_URL)"; DB="$(node "$APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")"
+          printf '%s\n' '--- TABLE PRESENCE ---'
+          psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('AuditLog','EngageSecurityAuditEvent','WebhookEvent','EngageControlledLaunchTransition') ORDER BY table_name;"
+          printf '%s\n' '--- AUDIT LOG WINDOW (no JSON bodies) ---'
+          psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"createdAt\",COALESCE(\"actorId\",''),\"action\",\"entityType\",COALESCE(\"entityId\",''),CASE WHEN \"before\" IS NULL THEN '0' ELSE '1' END,CASE WHEN \"after\" IS NULL THEN '0' ELSE '1' END FROM \"AuditLog\" WHERE \"createdAt\">='${WINDOW_START}'::timestamptz AND \"createdAt\"<='${WINDOW_END}'::timestamptz ORDER BY \"createdAt\";" || true
+          printf '%s\n' '--- AUDIT LOG MESSAGE-ID MATCHES ---'
+          for id in "${IDS[@]}"; do psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"createdAt\",COALESCE(\"actorId\",''),\"action\",\"entityType\",COALESCE(\"entityId\",'') FROM \"AuditLog\" WHERE COALESCE(\"entityId\",'')='${id}' OR COALESCE(\"before\"::text,'') LIKE '%${id}%' OR COALESCE(\"after\"::text,'') LIKE '%${id}%' ORDER BY \"createdAt\" DESC LIMIT 10;" || true; done
+          printf '%s\n' '--- WEBHOOK EVENT WINDOW ---'
+          psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"receivedAt\",\"updatedAt\",\"eventType\",LEFT(\"eventKey\",120),CASE WHEN \"processingError\" IS NULL THEN '0' ELSE '1' END,\"attemptCount\" FROM \"WebhookEvent\" WHERE \"updatedAt\">='${WINDOW_START}'::timestamptz AND \"updatedAt\"<='${WINDOW_END}'::timestamptz ORDER BY \"updatedAt\";" || true
+          printf '%s\n' '--- WEBHOOK MESSAGE-ID MATCHES ---'
+          for id in "${IDS[@]}"; do psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"receivedAt\",\"updatedAt\",\"eventType\",LEFT(\"eventKey\",120),\"attemptCount\" FROM \"WebhookEvent\" WHERE \"payload\"::text LIKE '%${id}%' ORDER BY \"updatedAt\" DESC LIMIT 10;" || true; done
+          printf '%s\n' '--- CONTROLLED LAUNCH TRANSITIONS WINDOW ---'
+          psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT * FROM \"EngageControlledLaunchTransition\" WHERE \"createdAt\">='${WINDOW_START}'::timestamptz AND \"createdAt\"<='${WINDOW_END}'::timestamptz ORDER BY \"createdAt\";" 2>/dev/null | sed -E 's/(token|secret|password|authorization)[^|]*/REDACTED/Ig' || true
+          printf '%s\n' '--- SECURITY AUDIT WINDOW (schema-adaptive, JSON values suppressed) ---'
+          if psql "$DB" -X -Atqc "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='EngageSecurityAuditEvent'" | grep -q 1; then
+            cols="$(psql "$DB" -X -Atqc "SELECT string_agg(quote_ident(column_name),',') FROM information_schema.columns WHERE table_schema='public' AND table_name='EngageSecurityAuditEvent' AND data_type NOT IN ('json','jsonb','bytea')")"
+            printf 'SECURITY_AUDIT_NONJSON_COLUMNS=%s\n' "$cols"
+            created_col="$(psql "$DB" -X -Atqc "SELECT quote_ident(column_name) FROM information_schema.columns WHERE table_schema='public' AND table_name='EngageSecurityAuditEvent' AND column_name IN ('createdAt','created_at','occurredAt','occurred_at') ORDER BY CASE column_name WHEN 'createdAt' THEN 1 WHEN 'created_at' THEN 2 ELSE 3 END LIMIT 1")"
+            if [[ -n "$created_col" && -n "$cols" ]]; then psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT ${cols} FROM \"EngageSecurityAuditEvent\" WHERE ${created_col}>='${WINDOW_START}'::timestamptz AND ${created_col}<='${WINDOW_END}'::timestamptz ORDER BY ${created_col};" | sed -E 's/(token|secret|password|authorization)[^|]*/REDACTED/Ig' || true; fi
+          fi
+          printf '%s\n' '--- SANITIZED PM2 LOG MATCHES ---'
+          pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");console.log(p?.pm2_env?.pm_out_log_path||"");console.log(p?.pm2_env?.pm_err_log_path||"")})' | while read -r log; do
+            [[ -f "$log" ]] || continue
+            grep -E 'STALE_PRE_PHASE17_QUEUE_QUARANTINED|cmtx2u3cp0016kw10oijg4cth|cmty5xltz0004kwduveubp0tb|cmty5xvbn0002kw7vzu5blkjz|quarantin' "$log" 2>/dev/null | tail -n 80 | sed -E 's/(Bearer |access[_-]?token[=: ]+|secret[=: ]+)[^ ]+/\1REDACTED/Ig' || true
+          done
+          printf 'EXTERNAL_WRITE_SENT=false\nPASS: PHASE17_QUARANTINE_SOURCE_FORENSICS\n'
+          test -z "$(git -C "$APP" status --porcelain --untracked-files=no)"
+          REMOTE
