@@ -1,0 +1,75 @@
+name: WhatsApp Agent Live Inbox Browser Readiness V2
+
+on:
+  push:
+    branches: [ops/phase17-canary-readiness-20260917]
+    paths: [".github/workflows/whatsapp-agent-live-inbox-browser-readiness-v2.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_RELEASE_SHA: bb203d95f6fbec3d5a5ebf8e6e0db6ca03a5bb02
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then echo SSH_PORT=22 >> "$GITHUB_ENV"; SSH_PORT=22; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+      - name: Verify production browser prerequisites without writes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' RELEASE_BRANCH='$RELEASE_BRANCH' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ENV_FILE="$APP/.env"
+          envv(){ node - "$ENV_FILE" "$1" <<'NODE'
+          const fs=require('node:fs'); const [f,k]=process.argv.slice(2); for(const raw of fs.readFileSync(f,'utf8').split(/\r?\n/)){let l=raw.trim();if(!l||l.startsWith('#'))continue;if(l.startsWith('export '))l=l.slice(7).trim();const i=l.indexOf('=');if(i<1||l.slice(0,i).trim()!==k)continue;let v=l.slice(i+1).trim();if(v.length>=2&&((v.startsWith('"')&&v.endsWith('"'))||(v.startsWith("'")&&v.endsWith("'"))))v=v.slice(1,-1);process.stdout.write(v);process.exit(0)}process.exit(1);
+          NODE
+          }
+          release_sha="$(git -C "$APP" ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')"
+          live_sha="$(git -C "$APP" rev-parse HEAD)"
+          dirty="$(git -C "$APP" status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          pm2_state="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(String(p?.pm2_env?.status||"missing"))})')"
+          login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login || true)"
+          printf 'RELEASE_SHA=%s\nLIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\nPM2_STATE=%s\nLOGIN_HTTP=%s\n' "$release_sha" "$live_sha" "$dirty" "$pm2_state" "$login_http"
+          test "$release_sha" = "$EXPECTED_RELEASE_SHA"; test "$live_sha" = "$EXPECTED_RELEASE_SHA"; test "$dirty" = 0; test "$pm2_state" = online; test "$login_http" = 200
+          provider_mode="$(envv WHATSAPP_OUTBOUND_MODE 2>/dev/null || true)"; cutover="$(envv WHATSAPP_CUTOVER_APPROVED 2>/dev/null || true)"; live_ack="$(envv WHATSAPP_OUTBOUND_LIVE_ACK 2>/dev/null || true)"; kill="$(envv WHATSAPP_OUTBOUND_KILL_SWITCH 2>/dev/null || true)"
+          printf 'WHATSAPP_OUTBOUND_MODE=%s\nWHATSAPP_CUTOVER_APPROVED=%s\nWHATSAPP_OUTBOUND_LIVE_ACK_SET=%s\nWHATSAPP_OUTBOUND_KILL_SWITCH=%s\n' "${provider_mode:-disabled}" "${cutover:-false}" "$([[ -n "$live_ack" ]] && echo true || echo false)" "${kill:-unset}"
+          test "${provider_mode:-disabled}" != live; test "${cutover:-false}" != true; test -z "$live_ack"; test "${kill:-on}" = on
+          export DATABASE_URL="$(envv DATABASE_URL)"; DB="$(node "$APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")"
+          state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,COALESCE((\"scope\"->>'externalWritesRequested'),'false'),\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='engagews_default';")"
+          printf 'CONTROLLED_LAUNCH_STATE=%s\n' "$state"; test "$state" = 'ONE_CONNECTED_ACCOUNT|SHADOW|NO_EXTERNAL_WRITES|false|false|2'
+          for key in DASHBOARD_ADMIN_EMAIL DASHBOARD_ADMIN_PASSWORD; do envv "$key" >/dev/null 2>&1 && printf '%s_PRESENT=true\n' "$key" || { printf '%s_PRESENT=false\n' "$key"; exit 1; }; done
+          playwright_pkg=false; [[ -f "$APP/node_modules/@playwright/test/package.json" ]] && playwright_pkg=true
+          chromium_cmd="$(command -v chromium || command -v chromium-browser || command -v google-chrome || command -v google-chrome-stable || true)"
+          browser_cache_count=0
+          for d in /root/.cache/ms-playwright "$HOME/.cache/ms-playwright"; do if [[ -d "$d" ]]; then c="$(find "$d" -maxdepth 1 -type d -name 'chromium-*' 2>/dev/null | wc -l | tr -d ' ')"; browser_cache_count=$((browser_cache_count+c)); fi; done
+          printf 'PLAYWRIGHT_PACKAGE_PRESENT=%s\nCHROMIUM_COMMAND_PRESENT=%s\nPLAYWRIGHT_CHROMIUM_CACHE_COUNT=%s\n' "$playwright_pkg" "$([[ -n "$chromium_cmd" ]] && echo true || echo false)" "$browser_cache_count"
+          cd "$APP"; npm run test:inbox-integrity
+          printf 'EXTERNAL_WRITE_SENT=false\nPASS: LIVE_INBOX_BROWSER_READINESS_AUDIT_V2\n'
+          test -z "$(git -C "$APP" status --porcelain --untracked-files=no)"
+          REMOTE
