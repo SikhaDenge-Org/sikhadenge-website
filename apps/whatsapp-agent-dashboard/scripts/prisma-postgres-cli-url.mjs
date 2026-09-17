@@ -25,6 +25,7 @@
 // Deploy Email E5 polling bootstrap for production inbound — 2026-09-17
 // Align production SHA for guarded Email E5 inbound activation — 2026-09-17
 // Activate guarded Email E5 Gmail inbound POLLING for support@sikhadenge.in — 2026-09-17
+// Deploy Email E5 Gmail inbox scope-upgrade gate — 2026-09-17
 const rawUrl = process.argv[2] ?? "";
 
 if (!rawUrl.trim()) {
