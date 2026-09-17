@@ -11,8 +11,14 @@ import {
   mergeLegacyWhatsAppMappingMetadata,
   readLegacyWhatsAppMappingMetadata,
 } from "../modules/channels/whatsapp/application/legacy-identity-mapping";
+import { syncLegacyWhatsAppIdentityMappingForInbound } from "../modules/channels/whatsapp/application/provider-connection-binding";
+import {
+  assertWhatsAppProviderConnectionBinding,
+  ControlledLaunchOutboundDeniedError,
+  type ControlledLaunchOutboundContext,
+} from "../modules/release/application/controlled-launch-outbound-guard";
 
-function main() {
+async function main() {
   assert.equal(whatsAppCoreMode({}), "legacy");
   assert.equal(whatsAppCoreMode({ ENGAGEOS_WHATSAPP_CORE_MODE: "SHADOW" }), "shadow");
   assert.equal(whatsAppCoreMode({ ENGAGEOS_WHATSAPP_CORE_MODE: "normalized" }), "normalized");
@@ -55,6 +61,88 @@ function main() {
   assert.equal((merged.engageos as Record<string, unknown>).other, "preserved");
   assert.deepEqual(readLegacyWhatsAppMappingMetadata(merged), first);
 
+  const updates: Array<Record<string, unknown>> = [];
+  const transaction = {
+    engageChannelConnection: {
+      findFirst: async () => ({ id: "conn_real_123" }),
+    },
+    whatsAppContact: {
+      update: async (args: Record<string, unknown>) => {
+        updates.push(args);
+        return { id: "contact-1" };
+      },
+    },
+  };
+
+  const refreshed = await syncLegacyWhatsAppIdentityMappingForInbound(
+    transaction as never,
+    {
+      contactId: "contact-1",
+      waId: "919999999999",
+      phoneNumberId: "12345",
+      metadata: merged as never,
+    },
+  );
+  assert.equal(refreshed.updated, true);
+  assert.equal(refreshed.connectionId, "conn_real_123");
+  assert.equal(updates.length, 1);
+
+  const updatedArgs = updates[0] as {
+    data: { metadata: unknown };
+  };
+  const refreshedMapping = readLegacyWhatsAppMappingMetadata(updatedArgs.data.metadata);
+  assert.equal(refreshedMapping?.connectionId, "conn_real_123");
+  assert.equal(refreshedMapping?.workspaceId, "engagews_default");
+  assert.equal(refreshedMapping?.legacyContactId, "contact-1");
+  assert.equal(refreshedMapping?.externalUserId, "919999999999");
+
+  const noProviderId = await syncLegacyWhatsAppIdentityMappingForInbound(
+    transaction as never,
+    {
+      contactId: "contact-1",
+      waId: "919999999999",
+      phoneNumberId: null,
+      metadata: updatedArgs.data.metadata as never,
+    },
+  );
+  assert.deepEqual(noProviderId, { updated: false, connectionId: null });
+  assert.equal(updates.length, 1);
+
+  const providerContext: ControlledLaunchOutboundContext = {
+    workspaceId: "engagews_default",
+    connectionId: "conn_real_123",
+    channel: "WHATSAPP",
+    action: "OUTBOUND_QUEUED",
+    messageId: "message-1",
+    recipientKey: "919999999999",
+  };
+  assert.doesNotThrow(() =>
+    assertWhatsAppProviderConnectionBinding(providerContext, "12345", {
+      id: "conn_real_123",
+      externalAccountId: "12345",
+    }),
+  );
+  assert.throws(
+    () =>
+      assertWhatsAppProviderConnectionBinding(providerContext, "99999", {
+        id: "conn_real_123",
+        externalAccountId: "12345",
+      }),
+    (error: unknown) =>
+      error instanceof ControlledLaunchOutboundDeniedError &&
+      error.code === "CONTROLLED_LAUNCH_PROVIDER_CONNECTION_MISMATCH",
+  );
+  assert.throws(
+    () =>
+      assertWhatsAppProviderConnectionBinding(providerContext, "12345", {
+        id: "conn_other",
+        externalAccountId: "12345",
+      }),
+    (error: unknown) =>
+      error instanceof ControlledLaunchOutboundDeniedError &&
+      error.code === "CONTROLLED_LAUNCH_PROVIDER_CONNECTION_MISMATCH",
+  );
+
   assert.equal(normalizedWhatsAppConversationRef("conv-123"), "conv-123");
   assert.throws(() => normalizedWhatsAppConversationRef("  "), /required/);
   assert.equal(mapWhatsAppDeliveryStatus("sent"), "SENT");
@@ -66,4 +154,7 @@ function main() {
   console.log("EngageOS WhatsApp core migration tests passed.");
 }
 
-main();
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

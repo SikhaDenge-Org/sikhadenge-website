@@ -9,6 +9,7 @@ import {
   Prisma,
 } from "@prisma/client";
 
+import { syncLegacyWhatsAppIdentityMappingForInbound } from "@/modules/channels/whatsapp/application/provider-connection-binding";
 import { prisma } from "../db/prisma";
 import { sha256Hex } from "./signature";
 import {
@@ -180,7 +181,14 @@ async function processInboundMessage(
       profileName: event.profileName,
     },
     update: event.profileName ? { profileName: event.profileName } : {},
-    select: { id: true },
+    select: { id: true, metadata: true },
+  });
+
+  await syncLegacyWhatsAppIdentityMappingForInbound(transaction, {
+    contactId: contact.id,
+    waId: event.waId,
+    phoneNumberId: event.phoneNumberId,
+    metadata: contact.metadata,
   });
 
   const inboundAt = unixTimestamp(event.message.timestamp);

@@ -15,7 +15,7 @@ import type { ControlledLaunchStateRecord } from "../modules/release/application
 
 const context: ControlledLaunchOutboundContext = {
   workspaceId: "workspace-a",
-  connectionId: "whatsapp:12345",
+  connectionId: "conn_real_123",
   channel: "WHATSAPP",
   action: "OUTBOUND_QUEUED",
   messageId: "message-1",
@@ -34,7 +34,7 @@ function state(
     externalWritesAllowed: true,
     scope: {
       workspaceId: "workspace-a",
-      connectedAccountIds: ["whatsapp:12345"],
+      connectedAccountIds: ["conn_real_123"],
       instagramAssetIds: [],
       automationIds: [],
       counselorGroupIds: [],
@@ -129,7 +129,7 @@ function testConnectionMustBeExplicitlyScoped() {
     evaluateControlledLaunchOutbound({
       context,
       state: state({
-        scope: { ...state().scope, connectedAccountIds: ["whatsapp:other"] },
+        scope: { ...state().scope, connectedAccountIds: ["conn_other"] },
       }),
     }),
     "CONTROLLED_LAUNCH_CONNECTION_NOT_SCOPED",
@@ -147,7 +147,7 @@ function testPersistedKillSwitchWins() {
           workspaceId: "workspace-a",
           scopeType: "CONNECTION",
           channel: "WHATSAPP",
-          connectionId: "whatsapp:12345",
+          connectionId: "conn_real_123",
           blockedActions: ["OUTBOUND_QUEUED"],
           reason: "emergency stop",
         },
@@ -182,7 +182,6 @@ function testBoundedAutopilotRequiresEnforcedRuntimeCap() {
   );
 }
 
-
 function testBoundedAutopilotAllowsWhenRuntimeCapIsVerified() {
   const decision = evaluateControlledLaunchOutbound({
     context,
@@ -196,6 +195,7 @@ function testBoundedAutopilotAllowsWhenRuntimeCapIsVerified() {
   });
   assert.equal(decision.allowed, true);
 }
+
 function testApprovedFlowsRequireAuthoritativeFlowProof() {
   expectDenied(
     evaluateControlledLaunchOutbound({
@@ -225,16 +225,32 @@ function testApprovedFlowsAllowWhenAuthoritativeProofIsVerified() {
 
 function testProviderConnectionBinding() {
   assert.doesNotThrow(() =>
-    assertWhatsAppProviderConnectionBinding(context, "12345"),
+    assertWhatsAppProviderConnectionBinding(context, "12345", {
+      id: "conn_real_123",
+      externalAccountId: "12345",
+    }),
   );
   assert.throws(
-    () => assertWhatsAppProviderConnectionBinding(context, "99999"),
+    () =>
+      assertWhatsAppProviderConnectionBinding(context, "99999", {
+        id: "conn_real_123",
+        externalAccountId: "12345",
+      }),
+    (error: unknown) =>
+      error instanceof ControlledLaunchOutboundDeniedError &&
+      error.code === "CONTROLLED_LAUNCH_PROVIDER_CONNECTION_MISMATCH",
+  );
+  assert.throws(
+    () =>
+      assertWhatsAppProviderConnectionBinding(context, "12345", {
+        id: "conn_other",
+        externalAccountId: "12345",
+      }),
     (error: unknown) =>
       error instanceof ControlledLaunchOutboundDeniedError &&
       error.code === "CONTROLLED_LAUNCH_PROVIDER_CONNECTION_MISMATCH",
   );
 }
-
 
 function testProviderRecipientBinding() {
   assert.doesNotThrow(() => assertWhatsAppProviderRecipientBinding(context, "+91 99999 99999"));
@@ -243,6 +259,7 @@ function testProviderRecipientBinding() {
     (error: unknown) => error instanceof ControlledLaunchOutboundDeniedError,
   );
 }
+
 async function testProviderBoundaryRejectsBeforeNetworkIo() {
   const keys = [
     "WHATSAPP_OUTBOUND_MODE",
@@ -262,7 +279,7 @@ async function testProviderBoundaryRejectsBeforeNetworkIo() {
   process.env.WHATSAPP_OUTBOUND_LIVE_ACK = "I_UNDERSTAND_LIVE_WHATSAPP_SENDS";
   process.env.WHATSAPP_OUTBOUND_KILL_SWITCH = "off";
   process.env.WHATSAPP_ACCESS_TOKEN = "test-token-never-used";
-  process.env.WHATSAPP_PHONE_NUMBER_ID = "99999";
+  process.env.WHATSAPP_PHONE_NUMBER_ID = "12345";
   process.env.WHATSAPP_GRAPH_VERSION = "v99.0";
   globalThis.fetch = (async () => {
     fetchCalls += 1;
@@ -279,10 +296,10 @@ async function testProviderBoundaryRejectsBeforeNetworkIo() {
 
   try {
     await assert.rejects(
-      () => sendMetaWhatsAppMessage(payload, context),
+      () => sendMetaWhatsAppMessage(payload, { ...context, connectionId: "" }),
       (error: unknown) =>
         error instanceof ControlledLaunchOutboundDeniedError &&
-        error.code === "CONTROLLED_LAUNCH_PROVIDER_CONNECTION_MISMATCH",
+        error.code === "CONTROLLED_LAUNCH_GOVERNANCE_INVALID",
     );
     assert.equal(fetchCalls, 0, "provider guard must deny before any Meta network call");
   } finally {
