@@ -1,0 +1,1 @@
+Provider-binding diagnosis is complete. Production remains fail-closed with WhatsApp outbound disabled and kill switch on. The repair will be developed on a separate branch from the current release head.
