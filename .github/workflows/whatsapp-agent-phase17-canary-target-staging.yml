@@ -1,0 +1,264 @@
+name: WhatsApp Agent Phase17 Canary Target Staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_release_sha:
+        description: Exact deployed release SHA
+        required: true
+        type: string
+      action:
+        description: DRY_RUN resolves only; STAGE queues exactly one controlled target; CANCEL fail-closes a staged target
+        required: true
+        default: DRY_RUN
+        type: choice
+        options:
+          - DRY_RUN
+          - STAGE
+          - CANCEL
+      target_wa_id:
+        description: Exact test recipient WhatsApp waId; required for STAGE, optional for DRY_RUN resolution
+        required: false
+        type: string
+      conversation_id:
+        description: Exact conversation ID; required for STAGE and for intent-hash DRY_RUN
+        required: false
+        type: string
+      message_text:
+        description: Exact canary text; required for STAGE and for intent-hash DRY_RUN
+        required: false
+        type: string
+      confirmed_intent_hash:
+        description: Exact SHA-256 intent hash emitted by a prior DRY_RUN; required for STAGE
+        required: false
+        type: string
+      approved_by_user_id:
+        description: Exact active workspace ADMIN/MANAGER/COUNSELOR user ID; required for STAGE/CANCEL
+        required: false
+        type: string
+      message_id:
+        description: Exact staged canary message ID; required only for CANCEL
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-phase17-canary-target-staging
+  cancel-in-progress: false
+
+jobs:
+  staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_RELEASE_SHA: ${{ inputs.expected_release_sha }}
+      ACTION: ${{ inputs.action }}
+      TARGET_WA_ID: ${{ inputs.target_wa_id }}
+      CONVERSATION_ID: ${{ inputs.conversation_id }}
+      MESSAGE_TEXT: ${{ inputs.message_text }}
+      CONFIRMED_INTENT_HASH: ${{ inputs.confirmed_intent_hash }}
+      APPROVER_USER_ID: ${{ inputs.approved_by_user_id }}
+      MESSAGE_ID: ${{ inputs.message_id }}
+
+    steps:
+      - name: Checkout operator workflow
+        uses: actions/checkout@v4
+
+      - name: Validate exact operator inputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          for value in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            test -n "${!value:-}"
+          done
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            echo 'SSH_PORT=22' >> "$GITHUB_ENV"
+            SSH_PORT=22
+          fi
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+
+          case "$ACTION" in
+            DRY_RUN)
+              if [[ -n "$CONVERSATION_ID" || -n "$MESSAGE_TEXT" || -n "$CONFIRMED_INTENT_HASH" ]]; then
+                test -n "$TARGET_WA_ID"
+              fi
+              ;;
+            STAGE)
+              test -n "$TARGET_WA_ID"
+              [[ "$CONVERSATION_ID" =~ ^[A-Za-z0-9_-]{1,200}$ ]]
+              test -n "$MESSAGE_TEXT"
+              test "${#MESSAGE_TEXT}" -le 4096
+              [[ "$CONFIRMED_INTENT_HASH" =~ ^[a-fA-F0-9]{64}$ ]]
+              [[ "$APPROVER_USER_ID" =~ ^[A-Za-z0-9_-]{1,200}$ ]]
+              test -z "$MESSAGE_ID"
+              ;;
+            CANCEL)
+              [[ "$MESSAGE_ID" =~ ^[A-Za-z0-9_-]{1,200}$ ]]
+              [[ "$APPROVER_USER_ID" =~ ^[A-Za-z0-9_-]{1,200}$ ]]
+              ;;
+            *)
+              printf 'Unsupported action: %s\n' "$ACTION" >&2
+              exit 2
+              ;;
+          esac
+          printf 'PASS: CANARY_TARGET_OPERATOR_INPUT_GATE action=%s\n' "$ACTION"
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+          printf 'PASS: PINNED_SSH_READY\n'
+
+      - name: Production fail-closed preflight
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          cd "$APP"
+
+          live_sha="$(git rev-parse HEAD)"
+          dirty="$(git status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          pm2_state="$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s);process.stdout.write(a.find(x=>x.name==="sikhadenge-whatsapp-agent")?.pm2_env?.status||"")})')"
+          login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login)"
+          test "$live_sha" = "$EXPECTED_RELEASE_SHA"
+          test "$dirty" = "0"
+          test "$pm2_state" = "online"
+          test "$login_http" = "200"
+
+          set -a
+          source .env
+          set +a
+          test "${WHATSAPP_OUTBOUND_MODE:-disabled}" != "live"
+          test "${WHATSAPP_CUTOVER_APPROVED:-false}" != "true"
+          test -z "${WHATSAPP_OUTBOUND_LIVE_ACK:-}"
+          test "${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}" = "on"
+
+          parity="$(npx tsx scripts/engageos-whatsapp-provider-binding-reconcile.ts)"
+          printf '%s\n' "$parity"
+          printf '%s' "$parity" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const o=JSON.parse(s);if(o.mode!=="DRY_RUN"||o.mappingsNeedingRepairBefore!==0||o.mappingsNeedingRepairAfter!==0||o.externalWhatsAppWriteSent!==false||o.parityPassed!==true)process.exit(2);console.log("PASS: PROVIDER_BINDING_PARITY");})'
+          npx tsx tests/engageos-phase17-g1-outbound-guard.test.ts
+          bash tests/engageos-phase17-canary-target-staging-policy.test.sh
+
+          printf 'LIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\nPM2_STATE=%s\nLOGIN_HTTP=%s\n' "$live_sha" "$dirty" "$pm2_state" "$login_http"
+          printf 'BASE_OUTBOUND_MODE=%s\nBASE_CUTOVER_APPROVED=%s\nBASE_LIVE_ACK_SET=false\nBASE_KILL_SWITCH=%s\n' \
+            "${WHATSAPP_OUTBOUND_MODE:-disabled}" "${WHATSAPP_CUTOVER_APPROVED:-false}" "${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}"
+          printf 'PASS: CANARY_TARGET_PRODUCTION_PREFLIGHT\n'
+          REMOTE
+
+      - name: Run exact canary target action
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          target_b64="$(printf '%s' "$TARGET_WA_ID" | base64 -w0)"
+          conversation_b64="$(printf '%s' "$CONVERSATION_ID" | base64 -w0)"
+          text_b64="$(printf '%s' "$MESSAGE_TEXT" | base64 -w0)"
+          hash_b64="$(printf '%s' "$CONFIRMED_INTENT_HASH" | base64 -w0)"
+          approver_b64="$(printf '%s' "$APPROVER_USER_ID" | base64 -w0)"
+          message_b64="$(printf '%s' "$MESSAGE_ID" | base64 -w0)"
+          operator_run_id="github-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' ACTION='$ACTION' TARGET_B64='$target_b64' CONVERSATION_B64='$conversation_b64' TEXT_B64='$text_b64' HASH_B64='$hash_b64' APPROVER_B64='$approver_b64' MESSAGE_B64='$message_b64' OPERATOR_RUN_ID='$operator_run_id' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          cd "$APP"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_RELEASE_SHA"
+          set -a
+          source .env
+          set +a
+          test "${WHATSAPP_OUTBOUND_MODE:-disabled}" != "live"
+          test "${WHATSAPP_CUTOVER_APPROVED:-false}" != "true"
+          test -z "${WHATSAPP_OUTBOUND_LIVE_ACK:-}"
+          test "${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}" = "on"
+
+          target="$(printf '%s' "$TARGET_B64" | base64 --decode)"
+          conversation="$(printf '%s' "$CONVERSATION_B64" | base64 --decode)"
+          text="$(printf '%s' "$TEXT_B64" | base64 --decode)"
+          confirmed_hash="$(printf '%s' "$HASH_B64" | base64 --decode)"
+          approver="$(printf '%s' "$APPROVER_B64" | base64 --decode)"
+          message_id="$(printf '%s' "$MESSAGE_B64" | base64 --decode)"
+
+          PHASE17_CANARY_STAGE_MODE="$ACTION" \
+          PHASE17_CANARY_WORKSPACE_ID=engagews_default \
+          PHASE17_CANARY_TARGET_WA_ID="$target" \
+          PHASE17_CANARY_CONVERSATION_ID="$conversation" \
+          PHASE17_CANARY_TEXT="$text" \
+          PHASE17_CANARY_CONFIRMED_INTENT_HASH="$confirmed_hash" \
+          PHASE17_CANARY_APPROVER_USER_ID="$approver" \
+          PHASE17_CANARY_OPERATOR_RUN_ID="$OPERATOR_RUN_ID" \
+          PHASE17_CANARY_MESSAGE_ID="$message_id" \
+          npx tsx scripts/engageos-phase17-canary-target-staging.ts
+
+          printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          REMOTE
+
+      - name: Final fail-closed production verification
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          cd "$APP"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_RELEASE_SHA"
+          test "$(git status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')" = "0"
+          test "$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s);process.stdout.write(a.find(x=>x.name==="sikhadenge-whatsapp-agent")?.pm2_env?.status||"")})')" = "online"
+          test "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login)" = "200"
+
+          set -a
+          source .env
+          set +a
+          test "${WHATSAPP_OUTBOUND_MODE:-disabled}" != "live"
+          test "${WHATSAPP_CUTOVER_APPROVED:-false}" != "true"
+          test -z "${WHATSAPP_OUTBOUND_LIVE_ACK:-}"
+          test "${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}" = "on"
+
+          DB="$(node scripts/prisma-postgres-cli-url.mjs "$DATABASE_URL")"
+          state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,COALESCE((\"scope\"->>'externalWritesRequested'),'false'),\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='engagews_default';")"
+          printf 'FINAL_CONTROLLED_LAUNCH_STATE=%s\n' "$state"
+          IFS='|' read -r stage mode policy external requested version <<< "$state"
+          test "$stage" = "ONE_CONNECTED_ACCOUNT"
+          test "$mode" = "SHADOW"
+          test "$policy" = "NO_EXTERNAL_WRITES"
+          test "$external" = "false"
+          test "$requested" = "false"
+
+          parity="$(npx tsx scripts/engageos-whatsapp-provider-binding-reconcile.ts)"
+          printf '%s' "$parity" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const o=JSON.parse(s);if(o.mappingsNeedingRepairBefore!==0||o.mappingsNeedingRepairAfter!==0||o.externalWhatsAppWriteSent!==false||o.parityPassed!==true)process.exit(2);console.log("PASS: FINAL_PROVIDER_BINDING_PARITY");})'
+          printf 'BASE_PROVIDER_RESTORED_FAIL_CLOSED=true\n'
+          printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          printf 'PASS: PHASE17_CANARY_TARGET_FINAL_SAFETY\n'
+          REMOTE
