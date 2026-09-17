@@ -1,0 +1,205 @@
+name: WhatsApp Agent Phase17 Current Readonly Preflight
+
+on:
+  push:
+    branches:
+      - ops/phase17-current-readonly-preflight-20260917
+    paths:
+      - ".github/workflows/whatsapp-agent-phase17-current-readonly-preflight.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-phase17-current-readonly-preflight
+  cancel-in-progress: false
+
+jobs:
+  current-readonly-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+      CANDIDATE_BRANCH: integrate/phase17-current-release-candidate-20260917
+      EXPECTED_RELEASE_SHA: 0cdb6f9c63cfc2a112de6f70403684a52b418057
+      TARGET_CANDIDATE_SHA: 56b0ce8834f630d55a086899253f5f990dd78b92
+      WORKSPACE_ID: engagews_default
+
+    steps:
+      - name: Checkout ops preflight branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove candidate and release lineage
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git fetch origin "+refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH" "+refs/heads/$CANDIDATE_BRANCH:refs/remotes/origin/$CANDIDATE_BRANCH"
+          release_sha="$(git rev-parse "refs/remotes/origin/$RELEASE_BRANCH")"
+          candidate_sha="$(git rev-parse "refs/remotes/origin/$CANDIDATE_BRANCH")"
+          printf 'RELEASE_SHA=%s\nCANDIDATE_SHA=%s\n' "$release_sha" "$candidate_sha"
+          test "$release_sha" = "$EXPECTED_RELEASE_SHA"
+          test "$candidate_sha" = "$TARGET_CANDIDATE_SHA"
+          git merge-base --is-ancestor "$release_sha" "$candidate_sha"
+          delta="$(git diff --name-only "$TARGET_CANDIDATE_SHA..$GITHUB_SHA")"
+          test "$delta" = ".github/workflows/whatsapp-agent-phase17-current-readonly-preflight.yml"
+          printf 'PASS: EXACT_RELEASE_AND_CANDIDATE_LINEAGE\n'
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"; SSH_PORT=22; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+          printf 'PASS: PINNED_PRODUCTION_SSH_READY\n'
+
+      - name: Run zero-write production preflight
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' WORKSPACE_ID='$WORKSPACE_ID' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          A=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          E="$A/.env"
+          hard_fail=0
+          fail(){ printf 'FAIL_%s=true\n' "$1"; hard_fail=$((hard_fail+1)); }
+          pass(){ printf 'GATE_%s=PROVEN\n' "$1"; }
+
+          test "$(id -u)" = "0" || fail ROOT_USER
+          test -d "$A" || fail LIVE_APP_EXISTS
+          test -f "$E" || fail ENV_FILE_EXISTS
+
+          live_sha="$(git -C "$A" rev-parse HEAD 2>/dev/null || true)"
+          server_release_sha="$(git -C "$A" ls-remote origin 'refs/heads/release/whatsapp-instagram-agent-flow-20260731' 2>/dev/null | awk '{print $1}')"
+          dirty="$(git -C "$A" status --porcelain --untracked-files=no 2>/dev/null | sed '/^$/d' | wc -l | tr -d ' ')"
+          printf 'LIVE_SHA=%s\nSERVER_RELEASE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\n' "$live_sha" "$server_release_sha" "$dirty"
+          [[ "$live_sha" == "$EXPECTED_RELEASE_SHA" ]] && pass EXACT_LIVE_SHA || fail EXACT_LIVE_SHA
+          [[ "$server_release_sha" == "$EXPECTED_RELEASE_SHA" ]] && pass RELEASE_HEAD_STABLE || fail RELEASE_HEAD_STABLE
+          [[ "$dirty" == "0" ]] && pass CLEAN_WORKTREE || fail CLEAN_WORKTREE
+
+          pm2_state="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(String(p?.pm2_env?.status||"missing"))})')"
+          printf 'PM2_STATE=%s\n' "$pm2_state"
+          [[ "$pm2_state" == online ]] && pass PROCESS_HEALTH || fail PROCESS_HEALTH
+
+          login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login || true)"
+          inbox_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/inbox || true)"
+          printf 'LOGIN_HTTP=%s\nINBOX_HTTP=%s\n' "$login_http" "$inbox_http"
+          [[ "$login_http" == 200 ]] && pass LOGIN_SMOKE || fail LOGIN_SMOKE
+          [[ "$inbox_http" == 307 ]] && pass INBOX_AUTH_GUARD || fail INBOX_AUTH_GUARD
+
+          eval "$(node - "$E" <<'NODE'
+          const fs=require('node:fs');
+          const file=process.argv[2];
+          const env={};
+          for(const raw of fs.readFileSync(file,'utf8').split(/\r?\n/)){
+            let line=raw.trim(); if(!line||line.startsWith('#')) continue;
+            if(line.startsWith('export ')) line=line.slice(7).trim();
+            const i=line.indexOf('='); if(i<1) continue;
+            const k=line.slice(0,i).trim(); let v=line.slice(i+1).trim();
+            if(v.length>=2&&((v.startsWith('"')&&v.endsWith('"'))||(v.startsWith("'")&&v.endsWith("'")))) v=v.slice(1,-1);
+            env[k]=v;
+          }
+          const requested=(env.WHATSAPP_OUTBOUND_MODE||'').trim().toLowerCase();
+          const approved=env.WHATSAPP_CUTOVER_APPROVED==='true';
+          const ack=env.WHATSAPP_OUTBOUND_LIVE_ACK==='I_UNDERSTAND_LIVE_WHATSAPP_SENDS';
+          const killed=env.WHATSAPP_OUTBOUND_KILL_SWITCH==='on';
+          const mode=requested==='dry_run'?'dry_run':(requested==='live'&&approved&&ack&&!killed?'live':'disabled');
+          console.log(`PROVIDER_MODE=${mode}`);
+          console.log(`PROVIDER_WRITE_KILL_SWITCH_ACTIVE=${mode==='live'?'false':'true'}`);
+          NODE
+          )"
+          printf 'PROVIDER_MODE=%s\nPROVIDER_WRITE_KILL_SWITCH_ACTIVE=%s\n' "$PROVIDER_MODE" "$PROVIDER_WRITE_KILL_SWITCH_ACTIVE"
+          [[ "$PROVIDER_MODE" != live ]] && pass PROVIDER_EXTERNAL_WRITES_BLOCKED || fail PROVIDER_EXTERNAL_WRITES_BLOCKED
+
+          database_url="$(node - "$E" <<'NODE'
+          const fs=require('node:fs'); const file=process.argv[2];
+          for(const raw of fs.readFileSync(file,'utf8').split(/\r?\n/)){
+            let line=raw.trim(); if(!line||line.startsWith('#')) continue;
+            if(line.startsWith('export ')) line=line.slice(7).trim();
+            const i=line.indexOf('='); if(i<1||line.slice(0,i).trim()!=='DATABASE_URL') continue;
+            let v=line.slice(i+1).trim(); if(v.length>=2&&((v.startsWith('"')&&v.endsWith('"'))||(v.startsWith("'")&&v.endsWith("'")))) v=v.slice(1,-1);
+            process.stdout.write(v); process.exit(0);
+          }
+          process.exit(1);
+          NODE
+          )"
+          DB="$(node "$A/scripts/prisma-postgres-cli-url.mjs" "$database_url")"
+          q(){ psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "$1"; }
+
+          unfinished="$(q "SELECT COUNT(*) FROM _prisma_migrations WHERE finished_at IS NULL OR rolled_back_at IS NOT NULL;")"
+          printf 'UNFINISHED_OR_ROLLEDBACK_MIGRATIONS=%s\n' "$unfinished"
+          [[ "$unfinished" == 0 ]] && pass MIGRATION_HISTORY_CLEAN || fail MIGRATION_HISTORY_CLEAN
+
+          migrations=(
+            20260913113000_add_phase17_controlled_launch_state
+            20260916173000_add_phase17_outbound_approval_engine
+            20260916190000_add_phase17_g3_bounded_autopilot_recipient_ledger
+            20260916210000_add_phase17_g4_approved_flow_registry
+            20260916223000_add_phase17_g5_approved_flow_revocation_audit
+          )
+          applied=0
+          pending=0
+          for m in "${migrations[@]}"; do
+            c="$(q "SELECT COUNT(*) FROM _prisma_migrations WHERE migration_name='${m}' AND finished_at IS NOT NULL AND rolled_back_at IS NULL;")"
+            printf 'MIGRATION_%s=%s\n' "$m" "$c"
+            [[ "$c" == 0 || "$c" == 1 ]] || fail MIGRATION_DUPLICATE
+            if [[ "$c" == 1 ]]; then applied=$((applied+1)); else pending=$((pending+1)); fi
+          done
+          printf 'PHASE17_MIGRATIONS_APPLIED=%s\nPHASE17_MIGRATIONS_PENDING=%s\n' "$applied" "$pending"
+
+          state_count="$(q "SELECT COUNT(*) FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
+          printf 'CONTROLLED_STATE_COUNT=%s\n' "$state_count"
+          [[ "$state_count" == 1 ]] && pass CONTROLLED_STATE_PRESENT || fail CONTROLLED_STATE_PRESENT
+
+          state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",\"externalWritesAllowed\",COALESCE(\"scope\"->>'externalWritesRequested',''),\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
+          printf 'CONTROLLED_LAUNCH_STATE=%s\n' "$state"
+          IFS='|' read -r stage mode policy writes requested version <<< "$state"
+          if [[ "$mode" == SHADOW && "$policy" == NO_EXTERNAL_WRITES && "$writes" == f && "$requested" == false ]]; then pass SHADOW_NO_EXTERNAL_WRITES; else fail SHADOW_NO_EXTERNAL_WRITES; fi
+          printf 'CONTROLLED_STAGE=%s\nCONTROLLED_VERSION=%s\n' "$stage" "$version"
+
+          transitions="$(q "SELECT COUNT(*) FROM \"EngageControlledLaunchTransition\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
+          active_connections="$(q "SELECT COUNT(*) FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\"='WHATSAPP' AND \"status\" IN ('CONNECTED','DEGRADED');")"
+          active_kill_switches="$(q "SELECT COUNT(*) FROM \"EngageKillSwitch\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"active\"=true;")"
+          enabled_flags="$(q "SELECT COUNT(*) FROM \"EngageFeatureFlag\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"enabled\"=true;")"
+          printf 'TRANSITION_COUNT=%s\nACTIVE_WHATSAPP_CONNECTIONS=%s\nACTIVE_KILL_SWITCH_COUNT=%s\nENABLED_FEATURE_FLAG_COUNT=%s\n' "$transitions" "$active_connections" "$active_kill_switches" "$enabled_flags"
+          [[ "$transitions" -ge 1 ]] && pass TRANSITION_HISTORY || fail TRANSITION_HISTORY
+          [[ "$active_connections" -ge 1 ]] && pass ACTIVE_WHATSAPP_CONNECTION || fail ACTIVE_WHATSAPP_CONNECTION
+          [[ "$enabled_flags" == 0 ]] && pass HIGH_RISK_FLAGS_DISABLED || fail HIGH_RISK_FLAGS_DISABLED
+
+          approval_table="$(q "SELECT CASE WHEN to_regclass('public.\"EngageControlledLaunchOutboundApproval\"') IS NULL THEN '0' ELSE '1' END;")"
+          autopilot_table="$(q "SELECT CASE WHEN to_regclass('public.\"EngageControlledLaunchAutopilotRecipient\"') IS NULL THEN '0' ELSE '1' END;")"
+          flow_table="$(q "SELECT CASE WHEN to_regclass('public.\"EngageControlledLaunchApprovedFlow\"') IS NULL THEN '0' ELSE '1' END;")"
+          revoke_cols="$(q "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='EngageControlledLaunchApprovedFlow' AND column_name IN ('revokedByUserId','revokeReason');")"
+          printf 'TABLE_HUMAN_APPROVAL=%s\nTABLE_AUTOPILOT_LEDGER=%s\nTABLE_APPROVED_FLOW=%s\nAPPROVED_FLOW_REVOCATION_COLUMNS=%s\n' "$approval_table" "$autopilot_table" "$flow_table" "$revoke_cols"
+
+          if [[ "$hard_fail" -gt 0 ]]; then
+            printf 'READONLY_PREFLIGHT=FAIL\nHARD_FAIL_COUNT=%s\n' "$hard_fail"
+            exit 1
+          fi
+          printf 'DEPLOY_REQUIRES_PHASE17_MIGRATIONS=%s\n' "$([[ "$pending" -gt 0 ]] && echo true || echo false)"
+          printf 'READONLY_PREFLIGHT=PASS\nHARD_FAIL_COUNT=0\n'
+          printf 'PASS: PHASE17_CURRENT_ZERO_WRITE_PRODUCTION_PREFLIGHT\n'
+          REMOTE
