@@ -110,6 +110,47 @@ fi
 source_app_real="$(realpath -m "$LIVE_APP")"
 runtime_app_real="$(realpath -m "${runtime_app:-/nonexistent}")"
 
+if [[ -z "$DEPLOY_STATE_FILE" || ! -f "$DEPLOY_STATE_FILE" ]]; then
+  fail "verified deploy-state file is required for runtime identity"
+  deploy_state_real=""
+  deploy_release_sha=""
+  deploy_new_build_id=""
+  deploy_runtime_app=""
+else
+  deploy_state_real="$(realpath -e "$DEPLOY_STATE_FILE" 2>/dev/null || true)"
+  case "$deploy_state_real" in
+    /root/sikhadenge-backups/engageos-*/deploy-state.txt) pass "deploy-state file is inside the approved production backup root" ;;
+    *) fail "deploy-state file is outside the approved production backup root" ;;
+  esac
+
+  deploy_release_sha="$(awk -F= '$1 == "RELEASE_SHA" {print substr($0, index($0,"=")+1); exit}' "$DEPLOY_STATE_FILE")"
+  deploy_new_build_id="$(awk -F= '$1 == "NEW_BUILD_ID" {print substr($0, index($0,"=")+1); exit}' "$DEPLOY_STATE_FILE")"
+  deploy_runtime_app="$(awk -F= '$1 == "RUNTIME_APP" {print substr($0, index($0,"=")+1); exit}' "$DEPLOY_STATE_FILE")"
+fi
+
+printf 'DEPLOY_STATE_FILE=%s\n' "${deploy_state_real:-missing}"
+printf 'DEPLOY_RELEASE_SHA=%s\n' "${deploy_release_sha:-missing}"
+printf 'DEPLOY_NEW_BUILD_ID=%s\n' "${deploy_new_build_id:-missing}"
+printf 'DEPLOY_RUNTIME_APP=%s\n' "${deploy_runtime_app:-missing}"
+
+if [[ "$deploy_release_sha" == "$EXPECTED_RELEASE_SHA" ]]; then
+  pass "deploy-state release SHA matches expected release SHA"
+else
+  fail "deploy-state release SHA does not match expected release SHA"
+fi
+
+if [[ -n "$deploy_new_build_id" && "$deploy_new_build_id" == "$source_build" && "$deploy_new_build_id" == "$runtime_build" ]]; then
+  pass "deploy-state build ID matches canonical source and PM2 runtime build IDs"
+else
+  fail "deploy-state build ID does not match canonical source and PM2 runtime build IDs"
+fi
+
+if [[ "$(realpath -m "${deploy_runtime_app:-/nonexistent}")" == "$runtime_app_real" ]]; then
+  pass "deploy-state runtime path matches PM2 runtime path"
+else
+  fail "deploy-state runtime path does not match PM2 runtime path"
+fi
+
 if [[ "$runtime_app_real" == "$source_app_real" ]]; then
   printf 'RUNTIME_IDENTITY_MODE=canonical-source\n'
   if [[ "$runtime_sha" == "$EXPECTED_RELEASE_SHA" ]]; then
@@ -119,36 +160,7 @@ if [[ "$runtime_app_real" == "$source_app_real" ]]; then
   fi
 else
   printf 'RUNTIME_IDENTITY_MODE=separate-build-mirror\n'
-
-  if [[ -z "$DEPLOY_STATE_FILE" || ! -f "$DEPLOY_STATE_FILE" ]]; then
-    fail "separate-build-mirror requires a verified deploy-state file"
-  else
-    deploy_release_sha="$(awk -F= '$1 == "RELEASE_SHA" {print substr($0, index($0,"=")+1); exit}' "$DEPLOY_STATE_FILE")"
-    deploy_new_build_id="$(awk -F= '$1 == "NEW_BUILD_ID" {print substr($0, index($0,"=")+1); exit}' "$DEPLOY_STATE_FILE")"
-    deploy_runtime_app="$(awk -F= '$1 == "RUNTIME_APP" {print substr($0, index($0,"=")+1); exit}' "$DEPLOY_STATE_FILE")"
-
-    printf 'DEPLOY_RELEASE_SHA=%s\n' "${deploy_release_sha:-missing}"
-    printf 'DEPLOY_NEW_BUILD_ID=%s\n' "${deploy_new_build_id:-missing}"
-    printf 'DEPLOY_RUNTIME_APP=%s\n' "${deploy_runtime_app:-missing}"
-
-    if [[ "$deploy_release_sha" == "$EXPECTED_RELEASE_SHA" ]]; then
-      pass "deploy-state release SHA matches expected release SHA"
-    else
-      fail "deploy-state release SHA does not match expected release SHA"
-    fi
-
-    if [[ -n "$deploy_new_build_id" && "$deploy_new_build_id" == "$source_build" && "$deploy_new_build_id" == "$runtime_build" ]]; then
-      pass "deploy-state build ID matches canonical source and PM2 runtime build IDs"
-    else
-      fail "deploy-state build ID does not match canonical source and PM2 runtime build IDs"
-    fi
-
-    if [[ "$(realpath -m "${deploy_runtime_app:-/nonexistent}")" == "$runtime_app_real" ]]; then
-      pass "deploy-state runtime path matches PM2 runtime path"
-    else
-      fail "deploy-state runtime path does not match PM2 runtime path"
-    fi
-  fi
+  pass "separate build mirror identity is bound by build ID plus deploy-state provenance"
 fi
 
 login_status="$(curl -L -sS -o /dev/null -w '%{http_code}' --max-time 20 "${CHECK_HTTP_URL%/}/login" || true)"
