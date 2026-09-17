@@ -57,6 +57,7 @@ jobs:
     environment: whatsapp-agent-production
     env:
       TARGET_RELEASE_SHA: 0d40e81f4190d547fc6cdff786b75b64f4fff10b
+      DEPLOY_STATE_FILE: /root/sikhadenge-backups/engageos-github-35241902671-1/deploy-state.txt
       SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
       SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
       SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
@@ -91,7 +92,7 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            "TARGET_RELEASE_SHA='$TARGET_RELEASE_SHA' WORKSPACE_ID='$WORKSPACE_ID' bash -s" <<'REMOTE'
+            "TARGET_RELEASE_SHA='$TARGET_RELEASE_SHA' DEPLOY_STATE_FILE='$DEPLOY_STATE_FILE' WORKSPACE_ID='$WORKSPACE_ID' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           A=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           E="$A/.env"
@@ -115,6 +116,7 @@ jobs:
           live_sha="$(git rev-parse HEAD)"
           dirty="$(git status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
           printf 'TARGET_RELEASE_SHA=%s\nLIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\n' "$TARGET_RELEASE_SHA" "$live_sha" "$dirty"
+          test "$live_sha" = "$TARGET_RELEASE_SHA"
           test "$dirty" = "0"
 
           outbound_mode="$(envv WHATSAPP_OUTBOUND_MODE 2>/dev/null || echo disabled)"
@@ -145,12 +147,8 @@ jobs:
           test "$queued" = "0"
           test "$approvals" = "0"
 
-          if [[ -x scripts/engageos-phase17-runtime-identity-readonly.sh ]]; then
-            EXPECTED_RELEASE_SHA="$live_sha" bash scripts/engageos-phase17-runtime-identity-readonly.sh
-          else
-            echo 'FAIL: RUNTIME_IDENTITY_VERIFIER_MISSING' >&2
-            exit 41
-          fi
+          test -f "$DEPLOY_STATE_FILE"
+          EXPECTED_RELEASE_SHA="$live_sha" DEPLOY_STATE_FILE="$DEPLOY_STATE_FILE" bash scripts/engageos-phase17-runtime-identity-readonly.sh
 
           echo 'PASS: PHASE17_PRODUCTION_READONLY_PREFLIGHT'
           echo 'PRODUCTION_MUTATED=false'
