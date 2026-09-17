@@ -1,8 +1,8 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { buildEmailE1Runtime } from "../infrastructure/runtime";
-import { ingestInboundEmail } from "../finalization/platform-service";
 import { GmailEmailProviderAdapter } from "../providers/gmail/gmail-adapter";
+import { ingestWorkspaceSafeInboundEmail as ingestInboundEmail } from "./workspace-safe-ingest";
 
 function header(headers: Array<{ name?: string; value?: string }> | undefined, name: string): string {
   return headers?.find((item) => item.name?.toLowerCase() === name.toLowerCase())?.value?.trim() || "";
