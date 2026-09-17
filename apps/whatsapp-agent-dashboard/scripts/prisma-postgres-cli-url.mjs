@@ -16,6 +16,7 @@
 // Guarded Email internal-recipient delivery verification — 2026-09-17
 // Deploy Email E4 guarded limited-cohort gate — 2026-09-17
 // Guarded Email limited-cohort automation window verification — 2026-09-17
+// Deploy Email E4 limited-cohort preflight fix — 2026-09-17
 const rawUrl = process.argv[2] ?? "";
 
 if (!rawUrl.trim()) {
