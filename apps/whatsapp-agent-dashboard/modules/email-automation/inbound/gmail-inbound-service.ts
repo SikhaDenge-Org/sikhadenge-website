@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { buildEmailE1Runtime } from "../infrastructure/runtime";
 import { ingestInboundEmail } from "../finalization/platform-service";
@@ -40,9 +41,9 @@ async function persistGmailInboundState(input:{workspaceId:string;connectionId:s
   const current = watchStateFromCapabilities(row.capabilities);
   const gmailInbound = {
     historyId: input.historyId,
-    expiration: input.expiration ?? current.expiration || null,
-    watchStartedAt: input.watchStartedAt ?? current.watchStartedAt || null,
-    lastSyncedAt: input.lastSyncedAt ?? current.lastSyncedAt || null,
+    expiration: (input.expiration ?? current.expiration) || null,
+    watchStartedAt: (input.watchStartedAt ?? current.watchStartedAt) || null,
+    lastSyncedAt: (input.lastSyncedAt ?? current.lastSyncedAt) || null,
   };
   await prisma.engageChannelConnection.update({
     where: { id: row.id },
@@ -104,8 +105,13 @@ export async function syncGmailHistory(input: { workspaceId: string; connectionI
     const fromMatch = /<([^>]+)>/.exec(fromRaw);
     const from = (fromMatch?.[1] || fromRaw).trim();
     if (!from.includes("@")) continue;
-    const result = await ingestInboundEmail({ workspaceId: input.workspaceId, connectionId: input.connectionId, provider: "GOOGLE_GMAIL", providerMessageId: message.id, providerThreadId: message.threadId, from, to: [header(headers,"To")], cc: header(headers,"Cc") ? [header(headers,"Cc")] : [], replyTo: header(headers,"Reply-To") || null, subject: header(headers,"Subject"), snippet: message.snippet || "", bodyText: bodies.text, bodyHtml: bodies.html, attachments: attachmentMetadata(message.payload), classification: "INBOUND", receivedAt: message.internalDate ? new Date(Number(message.internalDate)).toISOString() : new Date().toISOString() });
-    if (result.replayed) replayed += 1; else imported += 1;
+    try {
+      const result = await ingestInboundEmail({ workspaceId: input.workspaceId, connectionId: input.connectionId, provider: "GOOGLE_GMAIL", providerMessageId: message.id, providerThreadId: message.threadId, from, to: [header(headers,"To")], cc: header(headers,"Cc") ? [header(headers,"Cc")] : [], replyTo: header(headers,"Reply-To") || null, subject: header(headers,"Subject"), snippet: message.snippet || "", bodyText: bodies.text, bodyHtml: bodies.html, attachments: attachmentMetadata(message.payload), classification: "INBOUND", receivedAt: message.internalDate ? new Date(Number(message.internalDate)).toISOString() : new Date().toISOString() });
+      if (result.replayed) replayed += 1; else imported += 1;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") replayed += 1;
+      else throw error;
+    }
   }
   await persistGmailInboundState({ workspaceId: input.workspaceId, connectionId: input.connectionId, historyId: latestHistoryId, lastSyncedAt: new Date().toISOString() });
   return { discovered: ids.size, imported, replayed, startHistoryId, nextHistoryId: latestHistoryId };
