@@ -24,7 +24,7 @@ function when(value:string){const d=new Date(value);return Number.isNaN(d.getTim
 function who(thread:Thread){return thread.contact?.displayName||thread.contact?.profileName||thread.fromAddress;}
 function initials(value:string){return value.split(/\s+/).filter(Boolean).slice(0,2).map(x=>x[0]?.toUpperCase()).join("")||"E";}
 function newKey(){return `inbox:${Date.now()}:${Math.random().toString(36).slice(2,9)}`;}
-function escapeHtml(value:string){return value.replace(/[&<>"']/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]||c));}
+function escapeHtml(value:string){return value.replace(/[&<>"']/g,(character)=>{switch(character){case "&":return "&amp;";case "<":return "&lt;";case ">":return "&gt;";case '"':return "&quot;";case "'":return "&#39;";default:return character;}});}
 
 export default function EmailInboxWorkspace(){
   const [threads,setThreads]=useState<Thread[]>([]),[selected,setSelected]=useState<string>(""),[detail,setDetail]=useState<ThreadDetail|null>(null);
