@@ -1,0 +1,190 @@
+name: WhatsApp Agent Phase17 Outbound Status Forensics
+
+on:
+  push:
+    branches:
+      - ops/phase17-canary-readiness-20260917
+    paths:
+      - ".github/workflows/whatsapp-agent-phase17-outbound-status-forensics.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-phase17-outbound-status-forensics
+  cancel-in-progress: true
+
+jobs:
+  readonly-status-forensics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_RELEASE_SHA: bb203d95f6fbec3d5a5ebf8e6e0db6ca03a5bb02
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+      DRIFT_WINDOW_START: 2026-09-17T07:06:00.000Z
+
+    steps:
+      - name: Checkout forensic workflow branch
+        uses: actions/checkout@v4
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then echo SSH_PORT=22 >> "$GITHUB_ENV"; SSH_PORT=22; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+          printf 'PASS: PINNED_SSH_READY\n'
+
+      - name: Read outbound status drift without writes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' RELEASE_BRANCH='$RELEASE_BRANCH' DRIFT_WINDOW_START='$DRIFT_WINDOW_START' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ENV_FILE="$APP/.env"
+          WORKSPACE_ID=engagews_default
+
+          envv() {
+            node - "$ENV_FILE" "$1" <<'NODE'
+          const fs=require('node:fs'); const [file,key]=process.argv.slice(2);
+          for(const raw of fs.readFileSync(file,'utf8').split(/\r?\n/)){
+            let line=raw.trim(); if(!line||line.startsWith('#')) continue;
+            if(line.startsWith('export ')) line=line.slice(7).trim();
+            const i=line.indexOf('='); if(i<1||line.slice(0,i).trim()!==key) continue;
+            let value=line.slice(i+1).trim();
+            if(value.length>=2&&((value.startsWith('"')&&value.endsWith('"'))||(value.startsWith("'")&&value.endsWith("'")))) value=value.slice(1,-1);
+            process.stdout.write(value); process.exit(0);
+          }
+          process.exit(1);
+          NODE
+          }
+
+          release_sha="$(git -C "$APP" ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')"
+          live_sha="$(git -C "$APP" rev-parse HEAD)"
+          dirty="$(git -C "$APP" status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          printf 'RELEASE_SHA=%s\nLIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\n' "$release_sha" "$live_sha" "$dirty"
+          test "$release_sha" = "$EXPECTED_RELEASE_SHA"
+          test "$live_sha" = "$EXPECTED_RELEASE_SHA"
+          test "$dirty" = "0"
+
+          provider_mode="$(envv WHATSAPP_OUTBOUND_MODE 2>/dev/null || true)"
+          cutover="$(envv WHATSAPP_CUTOVER_APPROVED 2>/dev/null || true)"
+          live_ack="$(envv WHATSAPP_OUTBOUND_LIVE_ACK 2>/dev/null || true)"
+          kill="$(envv WHATSAPP_OUTBOUND_KILL_SWITCH 2>/dev/null || true)"
+          printf 'WHATSAPP_OUTBOUND_MODE=%s\n' "${provider_mode:-disabled}"
+          printf 'WHATSAPP_CUTOVER_APPROVED=%s\n' "${cutover:-false}"
+          printf 'WHATSAPP_OUTBOUND_LIVE_ACK_SET=%s\n' "$([[ -n "$live_ack" ]] && echo true || echo false)"
+          printf 'WHATSAPP_OUTBOUND_KILL_SWITCH=%s\n' "${kill:-unset}"
+          test "${provider_mode:-disabled}" != "live"
+          test "${cutover:-false}" != "true"
+          test -z "$live_ack"
+          test "${kill:-on}" = "on"
+
+          export DATABASE_URL="$(envv DATABASE_URL)"
+          DB="$(node "$APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")"
+          state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,COALESCE((\"scope\"->>'externalWritesRequested'),'false'),\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}';")"
+          printf 'CONTROLLED_LAUNCH_STATE=%s\n' "$state"
+          test "$state" = "ONE_CONNECTED_ACCOUNT|SHADOW|NO_EXTERNAL_WRITES|false|false|2"
+
+          cd "$APP"
+          export DRIFT_WINDOW_START
+          npx tsx -e "$(cat <<'TS'
+          import { createHash } from "node:crypto";
+          import { MessageDirection } from "@prisma/client";
+          import { prisma } from "./lib/db/prisma";
+          import { readLegacyWhatsAppMappingMetadata } from "./modules/channels/whatsapp/application/legacy-identity-mapping";
+
+          const normalizeDigits=(v:string)=>v.replace(/\D/g,"");
+          const mask=(v:string)=>{const d=normalizeDigits(v);return d.length>4?`***${d.slice(-4)}`:"***";};
+          const reasonDigest=(v:string|null)=>v?createHash("sha256").update(v).digest("hex").slice(0,16):null;
+          const outboundMeta=(v:unknown)=>{
+            if(!v||typeof v!=="object"||Array.isArray(v)) return {} as Record<string,unknown>;
+            const o=(v as Record<string,unknown>).outbound;
+            return o&&typeof o==="object"&&!Array.isArray(o)?o as Record<string,unknown>:{};
+          };
+
+          (async()=>{
+            const grouped=await prisma.whatsAppMessage.groupBy({
+              by:["status"],
+              where:{direction:MessageDirection.OUTBOUND},
+              _count:{_all:true},
+              orderBy:{status:"asc"}
+            });
+            console.log("OUTBOUND_STATUS_COUNTS="+JSON.stringify(grouped.map(x=>({status:x.status,count:x._count._all}))));
+
+            const start=new Date(process.env.DRIFT_WINDOW_START||"2026-09-17T07:06:00.000Z");
+            const changed=await prisma.whatsAppMessage.findMany({
+              where:{direction:MessageDirection.OUTBOUND,updatedAt:{gte:start}},
+              orderBy:[{updatedAt:"asc"},{id:"asc"}],
+              take:50,
+              select:{
+                id:true,status:true,type:true,actor:true,messageTimestamp:true,createdAt:true,updatedAt:true,
+                text:true,filename:true,metaMessageId:true,failureCode:true,failureReason:true,rawPayload:true,
+                conversation:{select:{contact:{select:{id:true,waId:true,metadata:true}}}},
+                statusEvents:{orderBy:{createdAt:"asc"},select:{status:true,metaTimestamp:true,createdAt:true}}
+              }
+            });
+            console.log(`OUTBOUND_CHANGED_SINCE_WINDOW=${changed.length}`);
+            for(const m of changed){
+              const c=m.conversation.contact;
+              const mapping=readLegacyWhatsAppMappingMetadata(c.metadata);
+              const om=outboundMeta(m.rawPayload);
+              console.log(JSON.stringify({
+                messageId:m.id,
+                status:m.status,
+                type:m.type,
+                actor:m.actor,
+                recipientMasked:mask(c.waId),
+                workspaceId:mapping?.workspaceId||null,
+                connectionId:mapping?.connectionId||null,
+                messageTimestamp:m.messageTimestamp.toISOString(),
+                createdAt:m.createdAt.toISOString(),
+                updatedAt:m.updatedAt.toISOString(),
+                bodyLength:(m.text||m.filename||"").length,
+                metaMessageIdPresent:Boolean(m.metaMessageId),
+                failureCode:m.failureCode||null,
+                failureReasonHash:reasonDigest(m.failureReason),
+                attemptCount:typeof om.attemptCount==="number"?om.attemptCount:null,
+                queuedAt:typeof om.queuedAt==="string"?om.queuedAt:null,
+                statusEvents:m.statusEvents.map(e=>({status:e.status,metaTimestamp:e.metaTimestamp?.toISOString()||null,createdAt:e.createdAt.toISOString()}))
+              }));
+            }
+
+            const recent=await prisma.whatsAppMessage.findMany({
+              where:{direction:MessageDirection.OUTBOUND},
+              orderBy:[{updatedAt:"desc"},{id:"desc"}],
+              take:10,
+              select:{id:true,status:true,type:true,actor:true,updatedAt:true,metaMessageId:true,failureCode:true,conversation:{select:{contact:{select:{waId:true}}}}}
+            });
+            console.log("RECENT_OUTBOUND_SUMMARY="+JSON.stringify(recent.map(m=>({messageId:m.id,status:m.status,type:m.type,actor:m.actor,recipientMasked:mask(m.conversation.contact.waId),updatedAt:m.updatedAt.toISOString(),metaMessageIdPresent:Boolean(m.metaMessageId),failureCode:m.failureCode||null}))));
+            console.log("EXTERNAL_WRITE_SENT=false");
+            console.log("PASS: PHASE17_OUTBOUND_STATUS_FORENSICS");
+          })().then(async()=>{await prisma.$disconnect()}).catch(async(error)=>{console.error(error instanceof Error?error.message:error);await prisma.$disconnect().catch(()=>undefined);process.exit(1)});
+          TS
+          )"
+
+          test -z "$(git -C "$APP" status --porcelain --untracked-files=no)"
+          REMOTE
