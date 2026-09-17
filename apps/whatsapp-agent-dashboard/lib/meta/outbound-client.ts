@@ -2,7 +2,6 @@ import { consumeCurrentControlledLaunchOutboundApproval } from "@/modules/releas
 import { ControlledLaunchBoundedAutopilotError, reserveBoundedAutopilotRecipient } from "@/modules/release/application/controlled-launch-bounded-autopilot";
 import {
   assertControlledLaunchOutboundAllowed,
-  assertWhatsAppProviderConnectionBinding,
   assertWhatsAppProviderRecipientBinding,
   ControlledLaunchOutboundDeniedError,
   type ControlledLaunchOutboundAuthorization,
@@ -78,8 +77,7 @@ async function assertProviderWriteAllowed(
   governance: ControlledLaunchOutboundContext,
   phoneNumberId: string,
 ): Promise<ControlledLaunchOutboundAuthorization> {
-  assertWhatsAppProviderConnectionBinding(governance, phoneNumberId);
-  return assertControlledLaunchOutboundAllowed(governance);
+  return assertControlledLaunchOutboundAllowed(governance, phoneNumberId);
 }
 
 export async function uploadMetaWhatsAppMedia(
