@@ -12,12 +12,15 @@ jobs:
     steps:
       - name: Checkout exact live base
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Verify ancestry target
         shell: bash
         run: |
           set -Eeuo pipefail
           git cat-file -e 766ec78f80e4324057844eac92b3872f670e377d^{commit}
           git merge-base --is-ancestor 766ec78f80e4324057844eac92b3872f670e377d HEAD
+          test "$(git rev-parse HEAD^)" = "766ec78f80e4324057844eac92b3872f670e377d"
           printf 'LIVE_BASE_SHA=766ec78f80e4324057844eac92b3872f670e377d\n'
       - name: Install app dependencies
         shell: bash
