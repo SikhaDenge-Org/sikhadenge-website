@@ -107,7 +107,12 @@ async function currentPlan(connectionId: string) {
 
   return contacts.map((contact) => ({
     id: contact.id,
-    ...needsRefresh({ ...contact, connectionId }),
+    ...needsRefresh({
+      contactId: contact.id,
+      waId: contact.waId,
+      metadata: contact.metadata,
+      connectionId,
+    }),
   }));
 }
 
