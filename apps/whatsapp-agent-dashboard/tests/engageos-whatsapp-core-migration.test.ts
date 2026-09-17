@@ -12,6 +12,11 @@ import {
   readLegacyWhatsAppMappingMetadata,
 } from "../modules/channels/whatsapp/application/legacy-identity-mapping";
 import { syncLegacyWhatsAppIdentityMappingForInbound } from "../modules/channels/whatsapp/application/provider-connection-binding";
+import {
+  assertWhatsAppProviderConnectionBinding,
+  ControlledLaunchOutboundDeniedError,
+  type ControlledLaunchOutboundContext,
+} from "../modules/release/application/controlled-launch-outbound-guard";
 
 async function main() {
   assert.equal(whatsAppCoreMode({}), "legacy");
@@ -102,6 +107,41 @@ async function main() {
   );
   assert.deepEqual(noProviderId, { updated: false, connectionId: null });
   assert.equal(updates.length, 1);
+
+  const providerContext: ControlledLaunchOutboundContext = {
+    workspaceId: "engagews_default",
+    connectionId: "conn_real_123",
+    channel: "WHATSAPP",
+    action: "OUTBOUND_QUEUED",
+    messageId: "message-1",
+    recipientKey: "919999999999",
+  };
+  assert.doesNotThrow(() =>
+    assertWhatsAppProviderConnectionBinding(providerContext, "12345", {
+      id: "conn_real_123",
+      externalAccountId: "12345",
+    }),
+  );
+  assert.throws(
+    () =>
+      assertWhatsAppProviderConnectionBinding(providerContext, "99999", {
+        id: "conn_real_123",
+        externalAccountId: "12345",
+      }),
+    (error: unknown) =>
+      error instanceof ControlledLaunchOutboundDeniedError &&
+      error.code === "CONTROLLED_LAUNCH_PROVIDER_CONNECTION_MISMATCH",
+  );
+  assert.throws(
+    () =>
+      assertWhatsAppProviderConnectionBinding(providerContext, "12345", {
+        id: "conn_other",
+        externalAccountId: "12345",
+      }),
+    (error: unknown) =>
+      error instanceof ControlledLaunchOutboundDeniedError &&
+      error.code === "CONTROLLED_LAUNCH_PROVIDER_CONNECTION_MISMATCH",
+  );
 
   assert.equal(normalizedWhatsAppConversationRef("conv-123"), "conv-123");
   assert.throws(() => normalizedWhatsAppConversationRef("  "), /required/);
