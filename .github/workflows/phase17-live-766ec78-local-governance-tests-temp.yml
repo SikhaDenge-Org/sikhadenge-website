@@ -1,0 +1,37 @@
+name: Phase17 Live 766ec78 Local Governance Tests Temp
+on:
+  push:
+    branches:
+      - ops/phase17-live-766ec78-local-governance-tests-20260917
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact live base
+        uses: actions/checkout@v4
+      - name: Verify ancestry target
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git cat-file -e 766ec78f80e4324057844eac92b3872f670e377d^{commit}
+          git merge-base --is-ancestor 766ec78f80e4324057844eac92b3872f670e377d HEAD
+          printf 'LIVE_BASE_SHA=766ec78f80e4324057844eac92b3872f670e377d\n'
+      - name: Install app dependencies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd apps/whatsapp-agent-dashboard
+          npm install --include=dev --no-audit --no-fund --package-lock=false
+      - name: Run Phase17 governance validations
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd apps/whatsapp-agent-dashboard
+          npx tsx tests/engageos-phase17-g5-approved-flow-governance.test.ts
+          npx tsx tests/engageos-phase17-g6-governance-observability.test.ts
+          npx tsx scripts/observability-smoke.ts
+          npx tsx tests/engageos-phase17-stage2-governance-evidence.test.ts
+          printf 'STATE_MUTATED=false\nEXTERNAL_WHATSAPP_WRITE_SENT=false\n'
