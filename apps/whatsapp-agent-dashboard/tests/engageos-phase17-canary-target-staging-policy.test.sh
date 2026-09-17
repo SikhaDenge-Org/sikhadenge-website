@@ -20,6 +20,7 @@ grep -q 'NO_EXTERNAL_WRITES' "$SCRIPT"
 grep -q 'getOutboundMode() === "live"' "$SCRIPT"
 grep -q 'queueOutboundMessage' "$SCRIPT"
 grep -q 'PHASE17_CANARY_STAGE_CANCELLED' "$SCRIPT"
+grep -q 'Initial Phase17 TEXT canary requires an open WhatsApp service window.' "$SCRIPT"
 grep -q 'externalWhatsAppWriteSent: false' "$SCRIPT"
 
 if grep -q 'dispatchOutboundMessage' "$SCRIPT"; then
