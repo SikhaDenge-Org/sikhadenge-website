@@ -9,6 +9,7 @@
 // Atomic exact-SHA companion trigger for final Page02 V19 machine evidence — 2026-09-14
 // Clean atomic retry after production concurrency drain — 2026-09-14
 // Production Batch trigger for Page02 mobile Lead Intelligence drawer width fix — 2026-09-14
+// Email DRY_RUN PM2 environment synchronization deployment marker — 2026-09-17
 const rawUrl = process.argv[2] ?? "";
 
 if (!rawUrl.trim()) {
