@@ -10,6 +10,8 @@ import {
 } from "@prisma/client";
 
 import { prisma } from "../db/prisma";
+import { projectCustomer360 } from "../../modules/customers/application/customer-merge-runtime";
+import { readLegacyWhatsAppMappingMetadata } from "../../modules/channels/whatsapp/application/legacy-identity-mapping";
 import { enqueueEmailAutomationEvent, findActorEmailWorkspaceId } from "../../modules/email-automation/automation/event-outbox";
 
 type ContactInput = {
@@ -380,7 +382,63 @@ export async function getContactById(contactId: string) {
     include: contactInclude,
   });
   if (!contact) throw new Error("Contact not found.");
-  return mapContact(contact);
+
+  const [messages, notes] = await prisma.$transaction([
+    prisma.whatsAppMessage.findMany({
+      where: { conversation: { contactId } },
+      orderBy: [{ messageTimestamp: "desc" }, { createdAt: "desc" }],
+      take: 50,
+      select: {
+        id: true, direction: true, type: true, status: true, text: true,
+        filename: true, messageTimestamp: true, conversation: { select: { source: true } },
+      },
+    }),
+    prisma.leadNote.findMany({
+      where: { lead: { contactId } },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      select: { id: true, body: true, createdAt: true, author: { select: { name: true } } },
+    }),
+  ]);
+
+  const mapping = readLegacyWhatsAppMappingMetadata(contact.metadata);
+  const customer360 = projectCustomer360({
+    customerId: mapping?.customerRef ?? contact.id,
+    displayName: contact.displayName || contact.profileName || contact.phone,
+    identities: mapping
+      ? [{
+          channel: mapping.channel,
+          connectionId: mapping.connectionId,
+          externalUserId: mapping.externalUserId,
+          verified: true,
+        }]
+      : [],
+    lead: contact.lead
+      ? {
+          stage: contact.lead.stage,
+          score: contact.lead.score,
+          ownerId: contact.lead.assignedToId ?? undefined,
+          nextFollowUpAt: contact.lead.nextFollowUpAt ?? undefined,
+        }
+      : undefined,
+    activities: [
+      ...messages.map((message) => ({
+        id: `message:${message.id}`,
+        type: `MESSAGE_${message.direction}`,
+        channel: message.conversation.source || "whatsapp",
+        occurredAt: message.messageTimestamp,
+        summary: message.text?.trim() || message.filename?.trim() || `${message.type} ${message.status}`,
+      })),
+      ...notes.map((note) => ({
+        id: `note:${note.id}`,
+        type: "LEAD_NOTE",
+        occurredAt: note.createdAt,
+        summary: `${note.author.name}: ${note.body}`.slice(0, 500),
+      })),
+    ],
+  });
+
+  return { ...mapContact(contact), customer360 };
 }
 
 export async function updateContact(
