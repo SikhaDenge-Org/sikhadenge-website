@@ -1,0 +1,172 @@
+name: WhatsApp Agent Phase17 Provider Binding Reconcile
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_release_sha:
+        description: Exact deployed release SHA to reconcile
+        required: true
+        default: a297e1e00c817312150686b09225392eac46ec69
+      execute:
+        description: Apply reconciliation after dry-run gates pass
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-phase17-provider-binding-reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PRODUCTION_SSH_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PRODUCTION_SSH_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PRODUCTION_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PRODUCTION_SSH_HOST_KEY }}
+      SSH_PORT: ${{ secrets.WHATSAPP_PRODUCTION_SSH_PORT }}
+      EXPECTED_RELEASE_SHA: ${{ inputs.expected_release_sha }}
+      EXECUTE: ${{ inputs.execute }}
+    steps:
+      - name: Checkout workflow source
+        uses: actions/checkout@v4
+
+      - name: Validate operator inputs and secrets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test -n "$SSH_HOST"
+          test -n "$SSH_USER"
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$SSH_HOST_KEY"
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
+          printf 'PASS: INPUT_AND_SECRET_GATE\n'
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+          printf 'PASS: PINNED_SSH_READY\n'
+
+      - name: Reconcile provider binding with no outbound writes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' EXECUTE='$EXECUTE' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          LIVE_APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          cd "$LIVE_APP"
+
+          live_sha="$(git rev-parse HEAD)"
+          dirty_count="$(git status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          test "$live_sha" = "$EXPECTED_RELEASE_SHA"
+          test "$dirty_count" = "0"
+          printf 'LIVE_SHA=%s\n' "$live_sha"
+          printf 'TRACKED_DIRTY_COUNT=%s\n' "$dirty_count"
+
+          pm2_state="$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s);const p=a.find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(p?.pm2_env?.status||"")})')"
+          test "$pm2_state" = "online"
+          login_http="$(curl -sS -o /dev/null -w '%{http_code}' https://whatsapp.sikhadenge.in/login)"
+          test "$login_http" = "200"
+          printf 'PM2_STATE=%s\nLOGIN_HTTP=%s\n' "$pm2_state" "$login_http"
+
+          set -a
+          source .env
+          set +a
+
+          outbound_mode="${WHATSAPP_OUTBOUND_MODE:-disabled}"
+          cutover="${WHATSAPP_CUTOVER_APPROVED:-false}"
+          live_ack_set=false
+          [[ -n "${WHATSAPP_OUTBOUND_LIVE_ACK:-}" ]] && live_ack_set=true
+          kill_switch="${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}"
+          test "${outbound_mode,,}" != "live"
+          test "${cutover,,}" != "true"
+          test "$live_ack_set" = "false"
+          test "${kill_switch,,}" = "on"
+          printf 'OUTBOUND_MODE=%s\nCUTOVER_APPROVED=%s\nLIVE_ACK_SET=%s\nKILL_SWITCH=%s\n' \
+            "${outbound_mode,,}" "${cutover,,}" "$live_ack_set" "${kill_switch,,}"
+
+          before_sent="$(node - <<'NODE'
+          const {PrismaClient}=require('@prisma/client');
+          const p=new PrismaClient();
+          (async()=>{const [q,s,d,r,f,meta]=await Promise.all([
+            p.whatsAppMessage.count({where:{direction:'OUTBOUND',status:'QUEUED'}}),
+            p.whatsAppMessage.count({where:{direction:'OUTBOUND',status:'SENT'}}),
+            p.whatsAppMessage.count({where:{direction:'OUTBOUND',status:'DELIVERED'}}),
+            p.whatsAppMessage.count({where:{direction:'OUTBOUND',status:'READ'}}),
+            p.whatsAppMessage.count({where:{direction:'OUTBOUND',status:'FAILED'}}),
+            p.whatsAppMessage.count({where:{direction:'OUTBOUND',metaMessageId:{not:null}}}),
+          ]); console.log([q,s,d,r,f,meta].join('|'));})().finally(()=>p.$disconnect());
+          NODE
+          )"
+          printf 'OUTBOUND_SNAPSHOT_BEFORE=%s\n' "$before_sent"
+
+          dry_output="$(npx tsx scripts/engageos-whatsapp-provider-binding-reconcile.ts)"
+          printf '%s\n' "$dry_output"
+          dry_needs="$(printf '%s' "$dry_output" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const o=JSON.parse(s); if(o.mode!=="DRY_RUN"||o.externalWhatsAppWriteSent!==false) process.exit(2); process.stdout.write(String(o.mappingsNeedingRepairBefore));})')"
+          dry_contacts="$(printf '%s' "$dry_output" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const o=JSON.parse(s);process.stdout.write(String(o.contactsScanned));})')"
+          test "$dry_contacts" -gt 0
+          printf 'DRY_RUN_CONTACTS=%s\nDRY_RUN_NEEDS_REPAIR=%s\n' "$dry_contacts" "$dry_needs"
+
+          if [[ "$EXECUTE" == "true" ]]; then
+            apply_output="$(ENGAGEOS_WHATSAPP_PROVIDER_BINDING_RECONCILE_MODE=APPLY npx tsx scripts/engageos-whatsapp-provider-binding-reconcile.ts)"
+            printf '%s\n' "$apply_output"
+            printf '%s' "$apply_output" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const o=JSON.parse(s); if(o.mode!=="APPLY"||o.externalWhatsAppWriteSent!==false||o.mappingsNeedingRepairAfter!==0||o.parityPassed!==true) process.exit(2); console.log(`APPLY_UPDATED=${o.mappingsUpdated}`);})'
+
+            verify_output="$(npx tsx scripts/engageos-whatsapp-provider-binding-reconcile.ts)"
+            printf '%s\n' "$verify_output"
+            printf '%s' "$verify_output" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const o=JSON.parse(s); if(o.mode!=="DRY_RUN"||o.mappingsNeedingRepairBefore!==0||o.externalWhatsAppWriteSent!==false) process.exit(2); console.log("PASS: POST_APPLY_IDEMPOTENCE");})'
+          else
+            printf 'PASS: DRY_RUN_ONLY\n'
+          fi
+
+          after_sent="$(node - <<'NODE'
+          const {PrismaClient}=require('@prisma/client');
+          const p=new PrismaClient();
+          (async()=>{const [q,s,d,r,f,meta]=await Promise.all([
+            p.whatsAppMessage.count({where:{direction:'OUTBOUND',status:'QUEUED'}}),
+            p.whatsAppMessage.count({where:{direction:'OUTBOUND',status:'SENT'}}),
+            p.whatsAppMessage.count({where:{direction:'OUTBOUND',status:'DELIVERED'}}),
+            p.whatsAppMessage.count({where:{direction:'OUTBOUND',status:'READ'}}),
+            p.whatsAppMessage.count({where:{direction:'OUTBOUND',status:'FAILED'}}),
+            p.whatsAppMessage.count({where:{direction:'OUTBOUND',metaMessageId:{not:null}}}),
+          ]); console.log([q,s,d,r,f,meta].join('|'));})().finally(()=>p.$disconnect());
+          NODE
+          )"
+          printf 'OUTBOUND_SNAPSHOT_AFTER=%s\n' "$after_sent"
+          test "$before_sent" = "$after_sent"
+
+          state="$(node - <<'NODE'
+          const {PrismaClient}=require('@prisma/client');
+          const p=new PrismaClient();
+          (async()=>{const x=await p.engageControlledLaunchState.findUnique({where:{workspaceId:'engagews_default'}}); const scope=x?.scope||{}; console.log([x?.stage,x?.mode,x?.writePolicy,x?.externalWritesAllowed,scope.externalWritesRequested,x?.version].join('|'));})().finally(()=>p.$disconnect());
+          NODE
+          )"
+          printf 'CONTROLLED_LAUNCH_STATE=%s\n' "$state"
+          test "$state" = 'ONE_CONNECTED_ACCOUNT|SHADOW|NO_EXTERNAL_WRITES|false|false|2'
+          printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          printf 'PASS: PHASE17_PROVIDER_BINDING_RECONCILIATION\n'
+          REMOTE
