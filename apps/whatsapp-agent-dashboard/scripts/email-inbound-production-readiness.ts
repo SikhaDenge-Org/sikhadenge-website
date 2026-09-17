@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
 
 import { prisma } from "@/lib/db/prisma";
+import { buildEmailE1Runtime } from "@/modules/email-automation/infrastructure/runtime";
+import { GmailEmailProviderAdapter } from "@/modules/email-automation/providers/gmail/gmail-adapter";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -8,10 +10,13 @@ function asRecord(value: unknown): Record<string, unknown> {
 function present(name: string): boolean { return Boolean(process.env[name]?.trim()); }
 function flag(name: string): boolean { return process.env[name]?.trim().toLowerCase() === "true"; }
 function gmailInbound(value: unknown) { return asRecord(asRecord(value).gmailInbound); }
+type Sender = { fromEmail?: unknown; verificationStatus?: unknown; isActive?: unknown };
 
 async function main() {
   const expected = process.env.EXPECTED_RELEASE_SHA?.trim() || "";
+  const activationAccount = (process.env.EMAIL_INBOUND_ACTIVATION_ACCOUNT?.trim() || "support@sikhadenge.in").toLowerCase();
   if (!/^[0-9a-f]{40}$/.test(expected)) throw new Error("EXPECTED_RELEASE_SHA is required.");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(activationAccount)) throw new Error("EMAIL_INBOUND_ACTIVATION_ACCOUNT is invalid.");
   const current = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   if (current !== expected) throw new Error("Deployed git SHA does not match EXPECTED_RELEASE_SHA.");
 
@@ -23,9 +28,46 @@ async function main() {
     orderBy: { createdAt: "asc" },
   });
   const gmail = connections.filter((row) => asRecord(row.capabilities).emailProvider === "GOOGLE_GMAIL");
+  const activationMatches = gmail.filter((connection) => {
+    const metadata = asRecord(asRecord(connection.capabilities).emailAutomation);
+    const senders = Array.isArray(metadata.senderIdentities) ? metadata.senderIdentities : [];
+    return senders.some((raw) => {
+      const sender = asRecord(raw) as Sender;
+      return typeof sender.fromEmail === "string" &&
+        sender.fromEmail.trim().toLowerCase() === activationAccount &&
+        sender.verificationStatus === "VERIFIED" &&
+        sender.isActive === true;
+    });
+  });
   const cursorReady = gmail.filter((row) => typeof gmailInbound(row.capabilities).historyId === "string" && String(gmailInbound(row.capabilities).historyId).trim());
   const inboundCount = await prisma.engageEmailInboundMessage.count();
   const unmatchedInboundCount = await prisma.engageEmailInboundMessage.count({ where: { contactId: null, classification: "INBOUND" } });
+
+  let gmailInboundAccess = { ok: false, status: 0, error: "activation account connection not uniquely resolved" };
+  if (activationMatches.length === 1) {
+    try {
+      const runtime = buildEmailE1Runtime();
+      const adapter = runtime.providers.get("GOOGLE_GMAIL");
+      if (!(adapter instanceof GmailEmailProviderAdapter)) throw new Error("Gmail provider is unavailable.");
+      const connection = activationMatches[0];
+      const token = await adapter.getAccessTokenForConnection(connection.workspaceId, connection.id);
+      const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
+        headers: { authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      gmailInboundAccess = {
+        ok: response.ok,
+        status: response.status,
+        error: response.ok ? "" : `Gmail profile probe returned HTTP ${response.status}`,
+      };
+    } catch (error) {
+      gmailInboundAccess = {
+        ok: false,
+        status: 0,
+        error: error instanceof Error ? error.message : "Gmail inbound access probe failed.",
+      };
+    }
+  }
 
   const checks = {
     gmailClientId: present("GOOGLE_GMAIL_CLIENT_ID"),
@@ -34,18 +76,28 @@ async function main() {
     credentialEncryptionKey: present("EMAIL_CREDENTIAL_ENCRYPTION_KEY_B64"),
     pubSubTopic: present("GOOGLE_GMAIL_PUBSUB_TOPIC"),
     schedulerToken: (process.env.EMAIL_AUTOMATION_SCHEDULER_TOKEN?.trim().length ?? 0) >= 32,
+    activationAccountConnection: activationMatches.length === 1,
+    gmailInboundReadAccess: gmailInboundAccess.ok,
   };
   const baseChecksReady = checks.gmailClientId && checks.gmailClientSecret && checks.gmailOauthStateSecret && checks.credentialEncryptionKey && checks.schedulerToken;
-  const configReady = baseChecksReady && inboundModeValid && gmail.length > 0 && (inboundMode !== "WATCH" || checks.pubSubTopic);
+  const configReady = baseChecksReady && inboundModeValid && gmail.length > 0 && checks.activationAccountConnection && checks.gmailInboundReadAccess && (inboundMode !== "WATCH" || checks.pubSubTopic);
+  const blockers = [
+    ...(!checks.activationAccountConnection ? [`Expected exactly one connected Gmail connection for ${activationAccount}; found ${activationMatches.length}.`] : []),
+    ...(!checks.gmailInboundReadAccess ? [`Gmail inbox read access is not authorized for ${activationAccount}. Use Enable Inbox Access and approve Google read-only Gmail access.`] : []),
+    ...(inboundMode === "WATCH" && !checks.pubSubTopic ? ["GOOGLE_GMAIL_PUBSUB_TOPIC is required in WATCH mode."] : []),
+  ];
   const evidence = {
     status: configReady ? "READY" : "BLOCKED",
     deployedSha: current,
+    activationAccount,
     inboundMode,
     inboundModeValid,
     inboundSyncEnabled: flag("EMAIL_INBOUND_SYNC_ENABLED"),
     runtimeMode: process.env.EMAIL_RUNTIME_MODE?.trim() || "DISABLED",
     externalWritesEnabled: flag("EMAIL_EXTERNAL_WRITES_ENABLED"),
     checks,
+    gmailInboundAccess,
+    blockers,
     connectedEmailConnections: connections.length,
     connectedGmailConnections: gmail.length,
     cursorReadyGmailConnections: cursorReady.length,
