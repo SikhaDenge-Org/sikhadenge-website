@@ -6,7 +6,7 @@ import {
   type GeneratedHighlight,
   type GeneratedStep,
   type GeneratedTool,
-} from "../../../components/generated/GeneratedPageKit";
+} from "../../../components/blog/BlogArticleLayout";
 import {
   getBlogBySlug,
   getBlogCandidatesForSlug,
