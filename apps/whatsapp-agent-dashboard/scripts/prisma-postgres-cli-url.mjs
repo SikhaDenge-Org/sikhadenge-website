@@ -11,6 +11,7 @@
 // Production Batch trigger for Page02 mobile Lead Intelligence drawer width fix — 2026-09-14
 // Email DRY_RUN PM2 environment synchronization deployment marker — 2026-09-17
 // Align exact production SHA before guarded Email internal-recipient test — 2026-09-17
+// Email lifecycle readiness audit after guarded DRY_RUN activation — 2026-09-17
 const rawUrl = process.argv[2] ?? "";
 
 if (!rawUrl.trim()) {
