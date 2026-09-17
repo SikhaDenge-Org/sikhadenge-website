@@ -6,6 +6,7 @@ import { STAGE2_GOVERNANCE_ACTIONS } from "@/modules/release/application/phase17
 const WORKSPACE_ID = process.env.PHASE17_WORKSPACE_ID?.trim() || "engagews_default";
 const APPLY_PHRASE = "RECORD_MACHINE_VERIFIED_EVIDENCE";
 const ENTITY_TYPE = "CONTROLLED_LAUNCH_GOVERNANCE";
+const ALLOWED_PRODUCTION_EVENTS = new Set(["push", "workflow_dispatch"]);
 
 const POLICY_CHECKS = [
   "typecheck",
@@ -49,9 +50,27 @@ async function main() {
   const expectedLiveSha = required("PHASE17_EXPECTED_LIVE_SHA");
   const productionRunId = required("PHASE17_PRODUCTION_RUN_ID");
   const productionRunNumber = required("PHASE17_PRODUCTION_RUN_NUMBER");
+  const productionRunAttempt = required("PHASE17_PRODUCTION_RUN_ATTEMPT");
+  const productionRunEvent = required("PHASE17_PRODUCTION_RUN_EVENT");
+  const productionArtifactId = required("PHASE17_PRODUCTION_ARTIFACT_ID");
+  const productionArtifactName = required("PHASE17_PRODUCTION_ARTIFACT_NAME");
   const policyRunId = required("PHASE17_POLICY_RUN_ID");
   const policyCommitSha = required("PHASE17_POLICY_COMMIT_SHA");
   const commit = process.env.PHASE17_MACHINE_EVIDENCE_COMMIT?.trim() === APPLY_PHRASE;
+
+  if (!ALLOWED_PRODUCTION_EVENTS.has(productionRunEvent)) {
+    throw new Error(`Unsupported production workflow event: ${productionRunEvent}.`);
+  }
+  if (!/^\d+$/.test(productionRunId) || !/^\d+$/.test(productionRunNumber) || !/^\d+$/.test(productionRunAttempt)) {
+    throw new Error("Production run id, number, and attempt must be numeric.");
+  }
+  if (!/^\d+$/.test(productionArtifactId)) {
+    throw new Error("Production artifact id must be numeric.");
+  }
+  const expectedArtifactName = `whatsapp-agent-production-github-${productionRunId}-${productionRunAttempt}`;
+  if (productionArtifactName !== expectedArtifactName) {
+    throw new Error(`Production artifact mismatch: expected ${expectedArtifactName}, got ${productionArtifactName}.`);
+  }
 
   const liveSha = currentGitSha();
   if (liveSha !== expectedLiveSha) {
@@ -153,14 +172,20 @@ async function main() {
       action: STAGE2_GOVERNANCE_ACTIONS.productionEvidence,
       metadata: {
         liveSha,
-        source: "github-actions-production-batch1-plus-postdeploy-proof",
+        source: "github-actions-production-batch1-plus-artifact-plus-runtime-identity",
         productionRunId,
         productionRunNumber,
+        productionRunAttempt,
+        productionWorkflowEvent: productionRunEvent,
+        productionArtifactId,
+        productionArtifactName,
         productionWorkflowConclusion: "success",
         exactLiveShaVerified: true,
         trackedWorktreeClean: true,
         processHealthVerified: true,
         loginSmokeVerified: true,
+        deployStateVerified: true,
+        runtimeIdentityVerified: true,
       },
     },
     {
@@ -180,6 +205,8 @@ async function main() {
   console.log(`PHASE17_MACHINE_EVIDENCE_STAGE=${state.stage}`);
   console.log(`PHASE17_MACHINE_EVIDENCE_VERSION=${state.version}`);
   console.log(`PHASE17_MACHINE_EVIDENCE_TRANSITION_COUNT=${transitionCount}`);
+  console.log(`PHASE17_MACHINE_EVIDENCE_PRODUCTION_EVENT=${productionRunEvent}`);
+  console.log(`PHASE17_MACHINE_EVIDENCE_PRODUCTION_ARTIFACT=${productionArtifactName}`);
   console.log(`PHASE17_MACHINE_EVIDENCE_ALLOWED_ACTIONS=${records.map((record) => record.action).join(",")}`);
 
   const existing = await prisma.engageSecurityAuditEvent.findMany({
