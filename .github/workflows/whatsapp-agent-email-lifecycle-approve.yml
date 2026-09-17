@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - release/whatsapp-instagram-agent-flow-20260731
+  workflow_dispatch:
+    inputs:
+      deployed_sha:
+        description: Exact production SHA to audit or operate against
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -13,7 +19,7 @@ jobs:
     concurrency:
       group: whatsapp-agent-production
       cancel-in-progress: false
-    if: contains(github.event.head_commit.message, '[email-lifecycle-approve]')
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[email-lifecycle-approve]')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: whatsapp-agent-production
@@ -23,7 +29,7 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
-      DEPLOYED_SHA: ${{ github.event.before }}
+      DEPLOYED_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.deployed_sha || github.event.before }}
       APPROVAL_RUN_ID: email-lifecycle-approval-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Validate deployed SHA and production secrets
