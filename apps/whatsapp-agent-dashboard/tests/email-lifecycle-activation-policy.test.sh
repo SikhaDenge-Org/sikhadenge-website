@@ -29,3 +29,4 @@ grep -q 'externalWritesEnabled' "$SCRIPT"
 echo "PASS: email lifecycle activation policy"
 
 # Activation marker PR intentionally changes no runtime code; the release commit marker is the operator signal.
+# Production deploy marker CI touch: email reliability v2, 2026-09-18
