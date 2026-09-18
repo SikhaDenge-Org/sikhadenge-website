@@ -3,12 +3,16 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT/scripts/email-lifecycle-activate.ts"
-WORKFLOW="$ROOT/../../.github/workflows/whatsapp-agent-email-lifecycle-activate.yml"
+WORKFLOW="$ROOT/../../.github/workflows/whatsapp-agent-email-lifecycle-approve.yml"
 
 test -f "$SCRIPT"
 test -f "$WORKFLOW"
 
 grep -q 'EMAIL_RUNTIME_MODE=DRY_RUN' "$WORKFLOW" || grep -q 'EMAIL_RUNTIME_MODE' "$WORKFLOW"
+
+grep -q 'activate:' "$WORKFLOW"
+grep -q "if: env.ACTIVATE == 'true'" "$WORKFLOW"
+grep -q "if: env.ACTIVATE != 'true'" "$WORKFLOW"
 grep -q 'EMAIL_EXTERNAL_WRITES_ENABLED' "$WORKFLOW"
 grep -q 'test "$(git rev-parse HEAD)" = "$DEPLOYED_SHA"' "$WORKFLOW"
 grep -q 'StrictHostKeyChecking=yes' "$WORKFLOW"
