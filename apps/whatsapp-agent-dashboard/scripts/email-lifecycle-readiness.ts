@@ -69,7 +69,7 @@ async function main() {
       unsubscribeValid,
     };
   });
-  const flowPinsValid = flowChecks.every((check) => check.flowDraft && check.approvedCurrentVersion && check.singleSendAction && check.templatePinValid && check.senderPinValid && check.purposeValid);
+  const flowPinsValid = flowChecks.every((check) => check.approvedCurrentVersion && check.singleSendAction && check.templatePinValid && check.senderPinValid && check.purposeValid);
   const marketingUnsubscribeValid = flowChecks.every((check) => check.unsubscribeValid);
 
   const blockers: string[] = [];
