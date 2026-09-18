@@ -3,6 +3,7 @@ name: WhatsApp Agent Phase17 Stage2 Machine Evidence
 # Exact-SHA machine evidence trigger for operator governance — 2026-09-14
 # Exact-SHA machine evidence trigger after Page02 V19 deployment — 2026-09-14
 # Clean exact-SHA machine evidence retry after concurrency drain — 2026-09-14
+# Production provenance hardening: explicit record gate + exact Production Batch artifact proof — 2026-09-17
 on:
   push:
     branches:
@@ -19,6 +20,16 @@ on:
       - "apps/whatsapp-agent-dashboard/scripts/engageos-production-phase17-postdeploy-gate.sh"
       - "apps/whatsapp-agent-dashboard/scripts/engageos-production-batch1.sh"
   workflow_dispatch:
+    inputs:
+      expected_live_sha:
+        description: Exact current release SHA that must already be live
+        required: true
+        type: string
+      record:
+        description: Record the two exact-SHA machine evidence rows after all proofs pass
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -48,7 +59,10 @@ jobs:
 
   record-machine-evidence:
     needs: validate-machine-evidence-policy
-    if: github.ref == 'refs/heads/release/whatsapp-instagram-agent-flow-20260731'
+    if: >-
+      github.ref == 'refs/heads/release/whatsapp-instagram-agent-flow-20260731' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.record == true
     runs-on: ubuntu-latest
     timeout-minutes: 12
     environment: whatsapp-agent-production
@@ -62,6 +76,7 @@ jobs:
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+      REQUESTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
       WORKSPACE_ID: engagews_default
 
     steps:
@@ -74,14 +89,16 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          [[ "$REQUESTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
           git fetch origin "+refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH"
           release_sha="$(git rev-parse "refs/remotes/origin/$RELEASE_BRANCH")"
           test "$release_sha" = "$GITHUB_SHA"
+          test "$release_sha" = "$REQUESTED_LIVE_SHA"
           printf 'EXPECTED_LIVE_SHA=%s\n' "$release_sha" >> "$GITHUB_ENV"
           printf 'POLICY_COMMIT_SHA=%s\n' "$GITHUB_SHA" >> "$GITHUB_ENV"
           printf 'FROZEN_RELEASE_SHA=%s\n' "$release_sha"
 
-      - name: Prove successful exact Production Batch
+      - name: Prove successful exact Production Batch and protected artifact
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -96,26 +113,78 @@ jobs:
                 | select(.head_sha == $sha)
                 | select(.status == "completed")
                 | select(.conclusion == "success")
-                | select(.event == "push")]
+                | select(.event == "push" or .event == "workflow_dispatch")]
               | sort_by(.updated_at)
               | reverse
               | .[0]
-              | if . == null then empty else [.id, .run_number, .updated_at] | @tsv end
+              | if . == null then empty else [.id, .run_number, .run_attempt, .event, .updated_at] | @tsv end
             ' <<<"$json")"
             if [[ -n "$match" ]]; then break; fi
-            failed="$(jq -r --arg sha "$EXPECTED_LIVE_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .event == "push" and .status == "completed" and .conclusion != "success")] | length' <<<"$json")"
+            failed="$(jq -r --arg sha "$EXPECTED_LIVE_SHA" '[.workflow_runs[] | select(.head_sha == $sha and (.event == "push" or .event == "workflow_dispatch") and .status == "completed" and .conclusion != "success")] | length' <<<"$json")"
             test "$failed" = "0"
             echo "WAIT_EXACT_PRODUCTION_BATCH attempt=$attempt sha=$EXPECTED_LIVE_SHA"
             sleep 10
           done
           test -n "$match"
-          IFS=$'\t' read -r production_run_id production_run_number production_updated_at <<< "$match"
+          IFS=$'\t' read -r production_run_id production_run_number production_run_attempt production_run_event production_updated_at <<< "$match"
           [[ "$production_run_id" =~ ^[0-9]+$ ]]
           [[ "$production_run_number" =~ ^[0-9]+$ ]]
+          [[ "$production_run_attempt" =~ ^[0-9]+$ ]]
+          [[ "$production_run_event" == "push" || "$production_run_event" == "workflow_dispatch" ]]
+
+          artifacts_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$production_run_id/artifacts?per_page=100")"
+          expected_artifact_name="whatsapp-agent-production-github-${production_run_id}-${production_run_attempt}"
+          artifact_match="$(jq -r --arg name "$expected_artifact_name" '
+            [.artifacts[] | select(.name == $name and .expired == false)]
+            | if length == 1 then .[0] | [.id, .name, (.digest // "")] | @tsv else empty end
+          ' <<<"$artifacts_json")"
+          test -n "$artifact_match"
+          IFS=$'\t' read -r production_artifact_id production_artifact_name production_artifact_digest <<< "$artifact_match"
+          [[ "$production_artifact_id" =~ ^[0-9]+$ ]]
+          test "$production_artifact_name" = "$expected_artifact_name"
+
+          artifact_zip="$(mktemp)"
+          artifact_dir="$(mktemp -d)"
+          trap 'rm -f "$artifact_zip"; rm -rf "$artifact_dir"' EXIT
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$production_artifact_id/zip" > "$artifact_zip"
+          test -s "$artifact_zip"
+          unzip -q "$artifact_zip" -d "$artifact_dir"
+
+          deploy_state="$artifact_dir/production-evidence/deploy-state.txt"
+          batch_result="$artifact_dir/production-evidence/batch-result.txt"
+          test -s "$deploy_state"
+          test -s "$batch_result"
+
+          value_from() {
+            awk -F= -v key="$2" '$1 == key {print substr($0, index($0,"=")+1); exit}' "$1"
+          }
+
+          expected_run_id="github-${production_run_id}-${production_run_attempt}"
+          deploy_release_sha="$(value_from "$deploy_state" RELEASE_SHA)"
+          deploy_new_build_id="$(value_from "$deploy_state" NEW_BUILD_ID)"
+          deploy_runtime_app="$(value_from "$deploy_state" RUNTIME_APP)"
+          batch_run_id="$(value_from "$batch_result" RUN_ID)"
+          batch_release_sha="$(value_from "$batch_result" RELEASE_SHA)"
+          batch_status="$(value_from "$batch_result" STATUS)"
+
+          test "$deploy_release_sha" = "$EXPECTED_LIVE_SHA"
+          test -n "$deploy_new_build_id"
+          case "$deploy_runtime_app" in /var/www/sikhadenge-whatsapp-agent/*) ;; *) exit 42 ;; esac
+          test "$batch_run_id" = "$expected_run_id"
+          test "$batch_release_sha" = "$EXPECTED_LIVE_SHA"
+          test "$batch_status" = "PASS"
+
+          production_deploy_state_file="/root/sikhadenge-backups/engageos-${expected_run_id}/deploy-state.txt"
           printf 'PRODUCTION_RUN_ID=%s\n' "$production_run_id" >> "$GITHUB_ENV"
           printf 'PRODUCTION_RUN_NUMBER=%s\n' "$production_run_number" >> "$GITHUB_ENV"
+          printf 'PRODUCTION_RUN_ATTEMPT=%s\n' "$production_run_attempt" >> "$GITHUB_ENV"
+          printf 'PRODUCTION_RUN_EVENT=%s\n' "$production_run_event" >> "$GITHUB_ENV"
           printf 'PRODUCTION_RUN_UPDATED_AT=%s\n' "$production_updated_at" >> "$GITHUB_ENV"
-          printf 'EXACT_PRODUCTION_BATCH=run:%s number:%s sha:%s\n' "$production_run_id" "$production_run_number" "$EXPECTED_LIVE_SHA"
+          printf 'PRODUCTION_ARTIFACT_ID=%s\n' "$production_artifact_id" >> "$GITHUB_ENV"
+          printf 'PRODUCTION_ARTIFACT_NAME=%s\n' "$production_artifact_name" >> "$GITHUB_ENV"
+          printf 'PRODUCTION_DEPLOY_STATE_FILE=%s\n' "$production_deploy_state_file" >> "$GITHUB_ENV"
+          printf 'EXACT_PRODUCTION_BATCH=run:%s number:%s attempt:%s event:%s sha:%s artifact:%s digest:%s\n' \
+            "$production_run_id" "$production_run_number" "$production_run_attempt" "$production_run_event" "$EXPECTED_LIVE_SHA" "$production_artifact_name" "${production_artifact_digest:-unavailable}"
 
       - name: Configure pinned production SSH
         shell: bash
@@ -144,7 +213,7 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' RELEASE_BRANCH='$RELEASE_BRANCH' WORKSPACE_ID='$WORKSPACE_ID' PRODUCTION_RUN_ID='$PRODUCTION_RUN_ID' PRODUCTION_RUN_NUMBER='$PRODUCTION_RUN_NUMBER' POLICY_RUN_ID='$GITHUB_RUN_ID' POLICY_COMMIT_SHA='$POLICY_COMMIT_SHA' bash -s" <<'REMOTE'
+            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' RELEASE_BRANCH='$RELEASE_BRANCH' WORKSPACE_ID='$WORKSPACE_ID' PRODUCTION_RUN_ID='$PRODUCTION_RUN_ID' PRODUCTION_RUN_NUMBER='$PRODUCTION_RUN_NUMBER' PRODUCTION_RUN_ATTEMPT='$PRODUCTION_RUN_ATTEMPT' PRODUCTION_RUN_EVENT='$PRODUCTION_RUN_EVENT' PRODUCTION_ARTIFACT_ID='$PRODUCTION_ARTIFACT_ID' PRODUCTION_ARTIFACT_NAME='$PRODUCTION_ARTIFACT_NAME' DEPLOY_STATE_FILE='$PRODUCTION_DEPLOY_STATE_FILE' POLICY_RUN_ID='$GITHUB_RUN_ID' POLICY_COMMIT_SHA='$POLICY_COMMIT_SHA' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           A=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           E="$A/.env"
@@ -180,6 +249,10 @@ jobs:
           printf 'LOGIN_HTTP=%s\n' "$login_http"
           test "$login_http" = "200"
 
+          test -f "$DEPLOY_STATE_FILE"
+          EXPECTED_RELEASE_SHA="$EXPECTED_LIVE_SHA" DEPLOY_STATE_FILE="$DEPLOY_STATE_FILE" \
+            bash "$A/scripts/engageos-phase17-runtime-identity-readonly.sh"
+
           test -f "$A/scripts/engageos-phase17-stage2-record-machine-evidence.ts"
           database_url="$(envv DATABASE_URL)"
           test -n "$database_url"
@@ -191,6 +264,10 @@ jobs:
           PHASE17_EXPECTED_LIVE_SHA="$EXPECTED_LIVE_SHA" \
           PHASE17_PRODUCTION_RUN_ID="$PRODUCTION_RUN_ID" \
           PHASE17_PRODUCTION_RUN_NUMBER="$PRODUCTION_RUN_NUMBER" \
+          PHASE17_PRODUCTION_RUN_ATTEMPT="$PRODUCTION_RUN_ATTEMPT" \
+          PHASE17_PRODUCTION_RUN_EVENT="$PRODUCTION_RUN_EVENT" \
+          PHASE17_PRODUCTION_ARTIFACT_ID="$PRODUCTION_ARTIFACT_ID" \
+          PHASE17_PRODUCTION_ARTIFACT_NAME="$PRODUCTION_ARTIFACT_NAME" \
           PHASE17_POLICY_RUN_ID="$POLICY_RUN_ID" \
           PHASE17_POLICY_COMMIT_SHA="$POLICY_COMMIT_SHA" \
           PHASE17_MACHINE_EVIDENCE_COMMIT=RECORD_MACHINE_VERIFIED_EVIDENCE \
