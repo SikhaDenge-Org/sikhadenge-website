@@ -1,25 +1,19 @@
-name: WhatsApp Agent Email Lifecycle Approval
+name: WhatsApp Agent Email Lifecycle Activation
 
 on:
   push:
     branches:
       - release/whatsapp-instagram-agent-flow-20260731
-  workflow_dispatch:
-    inputs:
-      deployed_sha:
-        description: Exact production SHA to audit or operate against
-        required: true
-        type: string
 
 permissions:
   contents: read
 
 jobs:
-  approve-email-lifecycle:
+  activate-email-lifecycle:
     concurrency:
       group: whatsapp-agent-production
       cancel-in-progress: false
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[email-lifecycle-approve]')
+    if: contains(github.event.head_commit.message, '[email-lifecycle-activate]')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: whatsapp-agent-production
@@ -29,8 +23,8 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
-      DEPLOYED_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.deployed_sha || github.event.before }}
-      APPROVAL_RUN_ID: email-lifecycle-approval-${{ github.run_id }}-${{ github.run_attempt }}
+      DEPLOYED_SHA: ${{ github.event.before }}
+      ACTIVATION_RUN_ID: email-lifecycle-activation-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Validate deployed SHA and production secrets
         shell: bash
@@ -50,19 +44,23 @@ jobs:
           set -Eeuo pipefail
           install -d -m 700 "$HOME/.ssh"
           key="$HOME/.ssh/whatsapp-production"
-          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
           chmod 600 "$key"
           read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
           test "$key_type" = "ssh-ed25519"
           printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
           ssh-keygen -y -f "$key" >/dev/null
-      - name: Approve reviewed lifecycle templates and pin draft flows
+
+      - name: Activate validated lifecycle flows under DRY_RUN guard
         shell: bash
         run: |
           set -Eeuo pipefail
-          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" \
-            "DEPLOYED_SHA='$DEPLOYED_SHA' RUN_ID='$APPROVAL_RUN_ID' bash -s" <<'REMOTE' | tee email-lifecycle-approval.log
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "DEPLOYED_SHA='$DEPLOYED_SHA' RUN_ID='$ACTIVATION_RUN_ID' bash -s" <<'REMOTE' | tee email-lifecycle-activation.log
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           BACKUP_DIR="/root/sikhadenge-backups/${RUN_ID}"
@@ -73,30 +71,33 @@ jobs:
           set -a
           source "$APP/.env"
           set +a
-          npx tsx scripts/email-lifecycle-approve.ts | tee "$BACKUP_DIR/result.log"
-          grep -q '^EMAIL_LIFECYCLE_APPROVAL=PASS$' "$BACKUP_DIR/result.log"
-          grep -q '"approvedTemplates":5' "$BACKUP_DIR/result.log"
-          grep -q '"draftFlows":5' "$BACKUP_DIR/result.log"
-          grep -q '"activated":false' "$BACKUP_DIR/result.log"
-          printf 'PASS: EMAIL_LIFECYCLE_REVIEWED_TEMPLATES_APPROVED_FLOWS_STAY_DRAFT\n'
+          test "${EMAIL_RUNTIME_MODE:-}" = "DRY_RUN"
+          test "${EMAIL_RUNTIME_ENABLED:-false}" = "true"
+          test "${EMAIL_AUTOMATION_ENABLED:-false}" = "true"
+          test "${EMAIL_EXTERNAL_WRITES_ENABLED:-false}" != "true"
+          npx tsx scripts/email-lifecycle-activate.ts | tee "$BACKUP_DIR/result.log"
+          grep -q '^EMAIL_LIFECYCLE_ACTIVATION=PASS$' "$BACKUP_DIR/result.log"
+          grep -q '"activeFlows":5' "$BACKUP_DIR/result.log"
+          grep -q '"externalRequestSent":false' "$BACKUP_DIR/result.log"
+          printf 'PASS: EMAIL_LIFECYCLE_ACTIVE_WITH_DRY_RUN_EXTERNAL_WRITE_GUARD\n'
           REMOTE
-      - name: Collect protected approval evidence
+
+      - name: Collect protected activation evidence
         if: always()
         shell: bash
         run: |
           set +e
-          mkdir -p email-lifecycle-approval-evidence
-          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-            "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${APPROVAL_RUN_ID}/result.log" email-lifecycle-approval-evidence/result.log >/dev/null 2>&1 || true
-          chmod -R go-rwx email-lifecycle-approval-evidence 2>/dev/null || true
+          mkdir -p email-lifecycle-activation-evidence
+          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${ACTIVATION_RUN_ID}/result.log" email-lifecycle-activation-evidence/result.log >/dev/null 2>&1 || true
+          chmod -R go-rwx email-lifecycle-activation-evidence 2>/dev/null || true
 
-      - name: Upload protected approval evidence
+      - name: Upload protected activation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: whatsapp-agent-email-lifecycle-approval-${{ env.APPROVAL_RUN_ID }}
+          name: whatsapp-agent-email-lifecycle-activation-${{ env.ACTIVATION_RUN_ID }}
           path: |
-            email-lifecycle-approval.log
-            email-lifecycle-approval-evidence
+            email-lifecycle-activation.log
+            email-lifecycle-activation-evidence
           if-no-files-found: error
           retention-days: 14
