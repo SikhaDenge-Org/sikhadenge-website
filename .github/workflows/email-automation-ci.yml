@@ -12,6 +12,8 @@ on:
       - "apps/whatsapp-agent-dashboard/scripts/email-automation-*.sh"
       - "apps/whatsapp-agent-dashboard/scripts/email-inbound-*.ts"
       - "apps/whatsapp-agent-dashboard/scripts/email-inbound-*.sh"
+      - "apps/whatsapp-agent-dashboard/scripts/email-lifecycle-*.ts"
+      - "apps/whatsapp-agent-dashboard/tests/email-lifecycle-*.sh"
       - "apps/whatsapp-agent-dashboard/tests/email-automation-*.sh"
       - "apps/whatsapp-agent-dashboard/tests/email-inbound-*.sh"
       - "apps/whatsapp-agent-dashboard/package.json"
@@ -19,6 +21,7 @@ on:
       - "apps/whatsapp-agent-dashboard/prisma/migrations/**"
       - ".github/workflows/email-automation-ci.yml"
       - ".github/workflows/whatsapp-agent-email-inbound-*.yml"
+      - ".github/workflows/whatsapp-agent-email-lifecycle-*.yml"
 
 permissions:
   contents: read
@@ -102,6 +105,9 @@ jobs:
 
       - name: Run email automation production DRY_RUN activation policy
         run: bash tests/email-automation-production-dryrun-activation-policy.test.sh
+
+      - name: Run email lifecycle activation safety policy
+        run: bash tests/email-lifecycle-activation-policy.test.sh
 
       - name: Run email platform finalization contracts
         run: npx tsx modules/email-automation/tests/platform-finalization.test.ts
