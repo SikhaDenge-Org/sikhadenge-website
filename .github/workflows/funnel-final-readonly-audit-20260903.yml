@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   restore:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, sikhadenge-ci]
     environment: whatsapp-agent-production
     timeout-minutes: 15
     steps:

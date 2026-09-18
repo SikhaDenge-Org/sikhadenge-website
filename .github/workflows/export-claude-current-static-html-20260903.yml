@@ -17,7 +17,7 @@ env:
 
 jobs:
   export:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, sikhadenge-ci]
     timeout-minutes: 6
     environment: whatsapp-agent-production
     steps:

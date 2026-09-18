@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   audit:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64, sikhadenge-ci]
     timeout-minutes: 10
     environment: whatsapp-agent-production
     env:
