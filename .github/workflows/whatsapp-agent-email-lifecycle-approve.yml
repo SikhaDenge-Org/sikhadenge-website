@@ -86,7 +86,7 @@ jobs:
         run: |
           set +e
           mkdir -p email-lifecycle-approval-evidence
-          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
             "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${APPROVAL_RUN_ID}/result.log" email-lifecycle-approval-evidence/result.log >/dev/null 2>&1 || true
           chmod -R go-rwx email-lifecycle-approval-evidence 2>/dev/null || true
 
