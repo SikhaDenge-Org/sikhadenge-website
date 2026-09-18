@@ -169,6 +169,27 @@ jobs:
           trap cleanup EXIT
 
           cd "$LIVE_APP"
+
+          # Remove only stale staging worktrees created by this guarded deploy workflow.
+          # Never touch the live app, persistent backups, uploads, databases, or env files.
+          git worktree prune --expire now || true
+          find /tmp -maxdepth 1 -mindepth 1 -type d -name 'sikhadenge-github-production-*' -print -exec rm -rf -- {} + || true
+          git worktree prune --expire now || true
+
+          free_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"
+          printf 'PRESTAGE_TMP_FREE_KB_AFTER_ORPHAN_CLEANUP=%s\n' "$free_kb"
+          if (( free_kb < 2097152 )); then
+            printf 'INFO: PRESTAGE_LOW_SPACE_CLEANING_NPM_CACHE\n'
+            npm cache clean --force >/dev/null 2>&1 || true
+            free_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"
+            printf 'PRESTAGE_TMP_FREE_KB_AFTER_NPM_CACHE_CLEANUP=%s\n' "$free_kb"
+          fi
+          if (( free_kb < 2097152 )); then
+            printf 'FAIL: PRESTAGE_INSUFFICIENT_DISK_SPACE free_kb=%s required_kb=2097152\n' "$free_kb" >&2
+            exit 36
+          fi
+          printf 'PASS: PRESTAGE_DISK_SPACE_GUARD\n'
+
           git fetch origin \
             +refs/heads/release/whatsapp-instagram-agent-flow-20260731:refs/remotes/origin/release/whatsapp-instagram-agent-flow-20260731
 
