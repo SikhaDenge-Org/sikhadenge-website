@@ -78,6 +78,10 @@ export type AgentKnowledgeReference = {
   heading: string | null;
   content: string;
   score: number;
+  category?: string | null;
+  sourceType?: string | null;
+  sourceUrl?: string | null;
+  documentVersion?: number | null;
 };
 
 export type AgentInput = {
