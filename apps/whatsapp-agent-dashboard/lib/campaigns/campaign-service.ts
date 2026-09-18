@@ -14,6 +14,7 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "../db/prisma";
 import { getOutboundMode } from "../meta/outbound-client";
 import { queueOutboundMessage } from "../outbound/outbound-service";
+import { readLegacyWhatsAppMappingMetadata } from "../../modules/channels/whatsapp/application/legacy-identity-mapping";
 import {
   type CampaignAudienceFilters,
   parseCampaignFilters,
@@ -468,9 +469,10 @@ export async function dispatchCampaignPlan(campaignId: string, actorId: string) 
         id: { notIn: payload.processedContactIds },
       },
       orderBy: { updatedAt: "desc" },
-      take: payload.batchSize,
+      take: Math.min(payload.batchSize, payload.sendRatePerMinute),
       select: {
         id: true,
+        metadata: true,
         conversations: {
           orderBy: { lastMessageAt: "desc" },
           take: 1,
@@ -499,16 +501,41 @@ export async function dispatchCampaignPlan(campaignId: string, actorId: string) 
     const messageIds = [...payload.messageIds];
 
     for (const recipient of recipients) {
-      processedContactIds.push(recipient.id);
       const conversation = recipient.conversations[0];
       if (!conversation) {
+        processedContactIds.push(recipient.id);
         skipped += 1;
         continue;
       }
+
+      const mapping = readLegacyWhatsAppMappingMetadata(recipient.metadata);
+      const suppressionRefs = [recipient.id, mapping?.customerRef].filter(
+        (value): value is string => Boolean(value),
+      );
+      const suppression = await prisma.engageCustomerSuppression.findFirst({
+        where: {
+          workspaceId: mapping?.workspaceId ?? "engagews_default",
+          customerRef: { in: suppressionRefs },
+          startsAt: { lte: new Date() },
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+          AND: [
+            { OR: [{ revokedAt: null }, { revokedAt: { gt: new Date() } }] },
+            { OR: [{ channel: null }, { channel: "WHATSAPP" }] },
+          ],
+        },
+        select: { id: true },
+      });
+      if (suppression) {
+        processedContactIds.push(recipient.id);
+        skipped += 1;
+        continue;
+      }
+
       const recentMessages = "messages" in conversation && Array.isArray(conversation.messages)
         ? conversation.messages
         : [];
       if (cutoff && recentMessages.length > 0) {
+        processedContactIds.push(recipient.id);
         skipped += 1;
         continue;
       }
@@ -525,6 +552,7 @@ export async function dispatchCampaignPlan(campaignId: string, actorId: string) 
           idempotencyKey: `campaign:${payload.campaignId}:${recipient.id}`,
           flowProvenance: { flowType: "CAMPAIGN", flowId: payload.campaignId, flowVersion: 1 },
         });
+        processedContactIds.push(recipient.id);
         if (result.queued || result.duplicate) queued += 1;
         if (result.message?.id) messageIds.push(result.message.id);
       } catch {
