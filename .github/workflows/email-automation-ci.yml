@@ -115,6 +115,9 @@ jobs:
       - name: Run email lifecycle readiness state policy
         run: bash tests/email-lifecycle-readiness-policy.test.sh
 
+      - name: Run email operational validation policy
+        run: bash tests/email-operational-validation-policy.test.sh
+
       - name: Run email production SCP bounds policy
         run: bash tests/email-production-scp-bounds-policy.test.sh
 
