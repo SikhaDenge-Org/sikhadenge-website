@@ -54,7 +54,13 @@ export class Microsoft365EmailProviderAdapter implements EmailProviderAdapter {
     return { accepted: true, status: "SENT", providerMessageId: null, providerThreadId: request.providerThreadId ?? null, externalRequestSent: true };
   }
 
-  async revoke(_connection: EmailConnection): Promise<void> { return; }
+  async revoke(connection: EmailConnection): Promise<void> {
+    // Microsoft Graph revokeSignInSessions is intentionally not used here: it revokes all
+    // application refresh tokens/session cookies for the user and requires broad consent.
+    // EmailConnectionService performs the app-scoped disconnect by deleting our encrypted
+    // credential material and marking this connection REVOKED after this adapter hook returns.
+    await this.credentials.loadOAuthCredentials({ workspaceId: connection.workspaceId, connectionId: connection.id });
+  }
   private async me(token: string): Promise<Me> { return responseJson<Me>(await fetch(`${GRAPH}/me`, { headers: { authorization: `Bearer ${token}` }, cache: "no-store" }), "Microsoft profile lookup"); }
   private async accessToken(workspaceId: string, connectionId: string): Promise<string> {
     const stored = await this.credentials.loadOAuthCredentials({ workspaceId, connectionId }); if (!stored) throw new Error("Microsoft OAuth credentials are unavailable.");
