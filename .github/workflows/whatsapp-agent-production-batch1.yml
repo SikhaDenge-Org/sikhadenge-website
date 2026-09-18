@@ -169,6 +169,41 @@ jobs:
           trap cleanup EXIT
 
           cd "$LIVE_APP"
+
+          # Remove only stale staging worktrees created by this guarded deploy workflow.
+          # Never touch the live app, persistent backups, uploads, databases, or env files.
+          git worktree prune --expire now || true
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+
+          root = Path("/tmp").resolve()
+          for path in root.glob("sikhadenge-github-production-*"):
+              resolved = path.resolve()
+              if path.is_symlink():
+                  raise SystemExit(f"refusing symlink staging cleanup: {path}")
+              if resolved.parent != root or not resolved.name.startswith("sikhadenge-github-production-"):
+                  raise SystemExit(f"refusing out-of-scope staging cleanup: {resolved}")
+              if resolved.is_dir():
+                  print(f"PRESTAGE_REMOVING_ORPHAN_STAGE={resolved}")
+                  shutil.rmtree(resolved)
+          PY
+          git worktree prune --expire now || true
+
+          free_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"
+          printf 'PRESTAGE_TMP_FREE_KB_AFTER_ORPHAN_CLEANUP=%s\n' "$free_kb"
+          if (( free_kb < 2097152 )); then
+            printf 'INFO: PRESTAGE_LOW_SPACE_CLEANING_NPM_CACHE\n'
+            npm cache clean --force >/dev/null 2>&1 || true
+            free_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"
+            printf 'PRESTAGE_TMP_FREE_KB_AFTER_NPM_CACHE_CLEANUP=%s\n' "$free_kb"
+          fi
+          if (( free_kb < 2097152 )); then
+            printf 'FAIL: PRESTAGE_INSUFFICIENT_DISK_SPACE free_kb=%s required_kb=2097152\n' "$free_kb" >&2
+            exit 36
+          fi
+          printf 'PASS: PRESTAGE_DISK_SPACE_GUARD\n'
+
           git fetch origin \
             +refs/heads/release/whatsapp-instagram-agent-flow-20260731:refs/remotes/origin/release/whatsapp-instagram-agent-flow-20260731
 

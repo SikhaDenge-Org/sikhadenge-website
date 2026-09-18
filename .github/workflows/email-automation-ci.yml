@@ -91,6 +91,9 @@ jobs:
       - name: Run email automation production preflight policy
         run: bash tests/email-automation-production-preflight-policy.test.sh
 
+      - name: Run production staging disk guard policy
+        run: bash tests/email-automation-production-disk-guard-policy.test.sh
+
       - name: Run email automation scheduler activation policy
         run: bash tests/email-automation-scheduler-activation-policy.test.sh
 
