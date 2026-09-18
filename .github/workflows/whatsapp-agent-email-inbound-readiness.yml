@@ -90,7 +90,7 @@ jobs:
           set +e
           mkdir -p email-inbound-readiness-evidence
           for file_name in inbound-readiness.json inbound-readiness-result.txt; do
-            scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
               "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${AUDIT_RUN_ID}/${file_name}" "email-inbound-readiness-evidence/${file_name}" >/dev/null 2>&1 || true
           done
           chmod -R go-rwx email-inbound-readiness-evidence 2>/dev/null || true
