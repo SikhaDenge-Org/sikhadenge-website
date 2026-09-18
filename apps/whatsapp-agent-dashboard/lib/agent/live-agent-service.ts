@@ -20,6 +20,7 @@ import {
   sanitizeOperationalValue,
 } from "../observability/sanitize";
 import { analyzeAndPersistConversation } from "./conversation-intelligence";
+import { evaluateAgentDecisionForExternalSend } from "./grounded-lifecycle-gate";
 
 export type LiveAgentLifecycleResult = {
   messageId: string;
@@ -123,7 +124,7 @@ async function finishLifecycle(
 async function markReviewRequired(input: {
   messageId: string;
   conversationId: string;
-  reason: "UNSUPPORTED_MEDIA" | "AGENT_UNAVAILABLE";
+  reason: "UNSUPPORTED_MEDIA" | "AGENT_UNAVAILABLE" | "AI_APPROVAL_REQUIRED" | "AI_GROUNDED_HANDOFF";
   messageType?: MessageType;
 }) {
   await prisma.$transaction(async (transaction) => {
@@ -314,6 +315,39 @@ export async function processInboundAgentLifecycle(input: {
     });
 
     const livePolicy = getLiveAgentPolicy();
+    const groundedDecision = evaluateAgentDecisionForExternalSend(decision);
+    if (groundedDecision.route !== "AUTO_SEND") {
+      await markReviewRequired({
+        messageId: message.id,
+        conversationId: message.conversationId,
+        reason: groundedDecision.route === "APPROVAL"
+          ? "AI_APPROVAL_REQUIRED"
+          : "AI_GROUNDED_HANDOFF",
+        messageType: message.type,
+      });
+      const result: LiveAgentLifecycleResult = {
+        ...base,
+        analyzed: true,
+        queued: false,
+        sent: false,
+        handoff: true,
+        skipped: false,
+        failed: false,
+        reason: groundedDecision.route === "APPROVAL"
+          ? "AI_APPROVAL_REQUIRED"
+          : "AI_GROUNDED_HANDOFF",
+      };
+      await finishLifecycle(message.id, result, {
+        intent: decision.intent,
+        confidence: decision.confidence,
+        requiresHuman: decision.requiresHuman,
+        knowledgeReferenceCount: decision.knowledgeReferences.length,
+        groundedDecision,
+        policy: livePolicy,
+      });
+      return result;
+    }
+
     const shouldAutoReply =
       livePolicy.liveAutoReplyReady &&
       decision.shouldReply &&
