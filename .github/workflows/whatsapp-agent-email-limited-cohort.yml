@@ -85,7 +85,7 @@ jobs:
           set +e
           mkdir -p email-limited-cohort-evidence
           for file_name in limited-cohort-result.txt limited-cohort-health.json; do
-            scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
               "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${TEST_RUN_ID}/${file_name}" "email-limited-cohort-evidence/${file_name}" >/dev/null 2>&1 || true
           done
           chmod -R go-rwx email-limited-cohort-evidence 2>/dev/null || true
