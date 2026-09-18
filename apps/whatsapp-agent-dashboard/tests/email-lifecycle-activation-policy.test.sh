@@ -10,7 +10,8 @@ test -f "$WORKFLOW"
 
 grep -q 'EMAIL_RUNTIME_MODE=DRY_RUN' "$WORKFLOW" || grep -q 'EMAIL_RUNTIME_MODE' "$WORKFLOW"
 
-grep -q 'activate:' "$WORKFLOW"
+grep -q 'ACTIVATE:' "$WORKFLOW"
+grep -q "\[email-lifecycle-activate\]" "$WORKFLOW"
 grep -q "if: env.ACTIVATE == 'true'" "$WORKFLOW"
 grep -q "if: env.ACTIVATE != 'true'" "$WORKFLOW"
 grep -q 'EMAIL_EXTERNAL_WRITES_ENABLED' "$WORKFLOW"
