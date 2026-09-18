@@ -8,15 +8,17 @@ import { processDueEmailSequences } from "../finalization/platform-service";
 import { syncWatchedGmailMailboxes } from "../inbound/gmail-inbound-service";
 import { getEmailRuntimePolicy } from "../application/runtime-policy";
 import { processEmailAutomationEvents } from "./dispatcher";
+import { EMAIL_AUTOMATION_RETRY_PENDING_PREFIX } from "../providers/provider-error-policy";
 
 export async function getEmailAutomationSchedulerHealth() {
   const now = new Date();
   const scheduledMaterialized = await materializeScheduledAutomationEvents(now);
   const staleBefore = new Date(Date.now() - 15 * 60 * 1000);
-  const [pending, processing, failed, staleProcessing, oldestPending, workspaces, latestSchedulerRun] = await Promise.all([
+  const [pending, processing, failed, retryPending, staleProcessing, oldestPending, workspaces, latestSchedulerRun] = await Promise.all([
     prisma.engageEmailAutomationEvent.count({ where: { status: "PENDING", availableAt: { lte: now } } }),
     prisma.engageEmailAutomationEvent.count({ where: { status: "PROCESSING" } }),
     prisma.engageEmailAutomationEvent.count({ where: { status: "FAILED" } }),
+    prisma.engageEmailAutomationEvent.count({ where: { status: "PENDING", lastError: { startsWith: EMAIL_AUTOMATION_RETRY_PENDING_PREFIX } } }),
     prisma.engageEmailAutomationEvent.count({ where: { status: "PROCESSING", updatedAt: { lt: staleBefore } } }),
     prisma.engageEmailAutomationEvent.findFirst({ where: { status: "PENDING", availableAt: { lte: now } }, orderBy: { availableAt: "asc" }, select: { availableAt: true, createdAt: true } }),
     prisma.engageEmailAutomationEvent.findMany({ where: { OR: [{ status: "PENDING", availableAt: { lte: now } }, { status: "PROCESSING", updatedAt: { lt: staleBefore } }] }, select: { workspaceId: true }, distinct: ["workspaceId"] }),
@@ -36,6 +38,8 @@ export async function getEmailAutomationSchedulerHealth() {
     pending,
     processing,
     failed,
+    deadLettered: failed,
+    retryPending,
     staleProcessing,
     workspacesWithRunnableEvents: workspaces.length,
     oldestPendingAt: oldestPending?.availableAt ?? oldestPending?.createdAt ?? null,
@@ -108,6 +112,8 @@ export async function processEmailAutomationScheduler(input: {
     sequenceResults,
     processed: results.reduce((sum, item) => sum + item.processed, 0),
     failed: results.reduce((sum, item) => sum + item.failed, 0),
+    retried: results.reduce((sum, item) => sum + item.retried, 0),
+    deadLettered: results.reduce((sum, item) => sum + item.deadLettered, 0),
     skipped: results.reduce((sum, item) => sum + item.skipped, 0),
     recovered: results.reduce((sum, item) => sum + item.recovered, 0),
     results,
