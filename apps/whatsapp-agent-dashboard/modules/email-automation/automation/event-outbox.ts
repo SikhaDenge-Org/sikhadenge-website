@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db/prisma";
 import type { EmailAutomationTrigger } from "./contracts";
+import { EMAIL_AUTOMATION_MANUAL_MAX_ATTEMPTS } from "../providers/provider-error-policy";
 
 export const EMAIL_EVENT_STATUS = ["PENDING", "PROCESSING", "PROCESSED", "FAILED"] as const;
 export type EmailAutomationEventStatus = (typeof EMAIL_EVENT_STATUS)[number];
@@ -9,7 +10,7 @@ export type EmailAutomationEventStatus = (typeof EMAIL_EVENT_STATUS)[number];
 export function assertEmailAutomationEventRequeueAllowed(
   status: string,
   attemptCount: number,
-  maxAttempts = 5,
+  maxAttempts = EMAIL_AUTOMATION_MANUAL_MAX_ATTEMPTS,
 ): void {
   const limit = Math.min(Math.max(maxAttempts, 1), 20);
   if (status !== "FAILED") throw new Error("Only FAILED email automation events can be requeued.");
@@ -110,7 +111,7 @@ export async function requeueFailedEmailAutomationEvent(input: {
   actorUserId: string;
   maxAttempts?: number;
 }) {
-  const maxAttempts = Math.min(Math.max(input.maxAttempts ?? 5, 1), 20);
+  const maxAttempts = Math.min(Math.max(input.maxAttempts ?? EMAIL_AUTOMATION_MANUAL_MAX_ATTEMPTS, 1), EMAIL_AUTOMATION_MANUAL_MAX_ATTEMPTS);
   return prisma.$transaction(async (tx) => {
     const event = await tx.engageEmailAutomationEvent.findFirst({
       where: { id: input.eventId, workspaceId: input.workspaceId },
