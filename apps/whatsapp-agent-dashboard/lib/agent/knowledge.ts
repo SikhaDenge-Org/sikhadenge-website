@@ -76,7 +76,10 @@ function mergeReferences(
     .filter(isStudentSafeReference)
     .sort((left, right) => right.score - left.score)
     .filter((reference) => {
-      const key = `${reference.documentId}:${reference.heading ?? ""}:${reference.content}`;
+      const key = `${reference.heading ?? ""}:${reference.content}`
+        .toLocaleLowerCase("en-IN")
+        .replace(/\s+/g, " ")
+        .trim();
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -136,7 +139,14 @@ export async function retrieveApprovedKnowledge(
       content: true,
       metadata: true,
       document: {
-        select: { id: true, title: true, category: true, version: true },
+        select: {
+          id: true,
+          title: true,
+          category: true,
+          version: true,
+          sourceType: true,
+          sourceUrl: true,
+        },
       },
     },
     orderBy: { updatedAt: "desc" },
@@ -175,6 +185,10 @@ export async function retrieveApprovedKnowledge(
         heading: chunk.heading,
         content: chunk.content,
         score: Number(Math.min(1, score).toFixed(4)),
+        category: chunk.document.category,
+        sourceType: chunk.document.sourceType,
+        sourceUrl: chunk.document.sourceUrl,
+        documentVersion: chunk.document.version,
       } satisfies AgentKnowledgeReference;
     })
     .filter((reference) => reference.score >= policy.knowledgeMinimumScore);
