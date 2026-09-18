@@ -8,6 +8,8 @@ import {
 } from "@prisma/client";
 
 import { prisma } from "../db/prisma";
+import { computeOperationalHealth } from "@/modules/analytics/domain/operational-health";
+import { listPersistedIntegrationHealth } from "@/modules/integrations/infrastructure/prisma-integration-health";
 import { getAgentRuntimePolicy } from "./runtime-policy";
 
 function record(value: Prisma.JsonValue | null): Record<string, unknown> {
@@ -49,7 +51,14 @@ export async function getAgentObservabilitySummary(days = 7) {
     pendingLearning,
     approvedKnowledge,
     queuedOutbound,
+    failedOutbound,
     reviewRequired,
+    webhookPending,
+    webhookFailed,
+    oldestPendingWebhook,
+    automationRetrying,
+    automationFailed,
+    providerHealth,
   ] = await Promise.all([
     prisma.auditLog.findMany({
       where: {
@@ -80,9 +89,53 @@ export async function getAgentObservabilitySummary(days = 7) {
         status: MessageStatus.QUEUED,
       },
     }),
+    prisma.whatsAppMessage.count({
+      where: {
+        direction: MessageDirection.OUTBOUND,
+        status: MessageStatus.FAILED,
+        createdAt: { gte: since },
+      },
+    }),
     prisma.whatsAppConversation.count({
       where: { agentMode: AgentMode.REVIEW_REQUIRED },
     }),
+    prisma.webhookEvent.count({
+      where: {
+        eventType: { in: ["message", "status"] },
+        processedAt: null,
+      },
+    }),
+    prisma.webhookEvent.count({
+      where: {
+        eventType: { in: ["message", "status"] },
+        receivedAt: { gte: since },
+        processingError: { not: null },
+      },
+    }),
+    prisma.webhookEvent.findFirst({
+      where: {
+        eventType: { in: ["message", "status"] },
+        processedAt: null,
+      },
+      orderBy: { receivedAt: "asc" },
+      select: { receivedAt: true },
+    }),
+    prisma.webhookEvent.count({
+      where: {
+        eventType: "automation_runtime_run",
+        payload: { path: ["status"], equals: "RETRYABLE" },
+      },
+    }),
+    prisma.webhookEvent.count({
+      where: {
+        eventType: "automation_runtime_run",
+        OR: [
+          { processingError: { not: null } },
+          { payload: { path: ["status"], equals: "FAILED" } },
+        ],
+      },
+    }),
+    listPersistedIntegrationHealth(),
   ]);
 
   const confidences: number[] = [];
@@ -140,6 +193,31 @@ export async function getAgentObservabilitySummary(days = 7) {
     outboundByStatus[row.status] = row._count._all;
   }
 
+  const queueLagMs = oldestPendingWebhook
+    ? Math.max(0, Date.now() - oldestPendingWebhook.receivedAt.getTime())
+    : 0;
+  const operationalHealth = computeOperationalHealth({
+    webhookReceived: Math.max(webhookPending + webhookFailed, 1),
+    webhookFailed,
+    outboundSent: Math.max(
+      (outboundByStatus[MessageStatus.SENT] || 0) +
+        (outboundByStatus[MessageStatus.DELIVERED] || 0) +
+        (outboundByStatus[MessageStatus.READ] || 0) +
+        failedOutbound,
+      1,
+    ),
+    outboundFailed: failedOutbound,
+    queueLagSamplesMs: queueLagMs > 0 ? [queueLagMs] : [],
+    deadLetterCount: automationFailed,
+  });
+  const providerSummary = providerHealth.map((item) => ({
+    provider: item.provider,
+    channel: item.channel,
+    status: item.status,
+    updatedAt: item.updatedAt.toISOString(),
+  }));
+  const degradedProviders = providerSummary.filter((item) => item.status !== "CONNECTED").length;
+
   const totalRuns = analyses.length;
   return {
     window: {
@@ -176,6 +254,24 @@ export async function getAgentObservabilitySummary(days = 7) {
       pendingLearning,
       approvedKnowledge,
       queuedOutbound,
+      failedOutbound,
+      webhook: {
+        pending: webhookPending,
+        failed: webhookFailed,
+        oldestPendingAgeMs: queueLagMs,
+      },
+      automation: {
+        retrying: automationRetrying,
+        failed: automationFailed,
+      },
+      providers: {
+        degraded: degradedProviders,
+        items: providerSummary,
+      },
+      health: {
+        ...operationalHealth,
+        degraded: operationalHealth.degraded || degradedProviders > 0,
+      },
       outboundByStatus,
     },
   };
