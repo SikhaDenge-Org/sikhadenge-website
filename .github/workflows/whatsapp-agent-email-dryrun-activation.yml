@@ -89,7 +89,7 @@ jobs:
           mkdir -p email-dryrun-evidence
           for file_name in activation-result.txt provision.log preflight.log activate.log first-run.log verify.log systemd-timer.txt; do
             scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
-              -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+              -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
               "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${ACTIVATION_RUN_ID}/${file_name}" \
               "email-dryrun-evidence/${file_name}" >/dev/null 2>&1 || true
           done
