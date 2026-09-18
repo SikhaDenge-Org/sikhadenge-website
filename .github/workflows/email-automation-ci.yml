@@ -112,6 +112,9 @@ jobs:
       - name: Run email lifecycle activation safety policy
         run: bash tests/email-lifecycle-activation-policy.test.sh
 
+      - name: Run email lifecycle readiness state policy
+        run: bash tests/email-lifecycle-readiness-policy.test.sh
+
       - name: Run email platform finalization contracts
         run: npx tsx modules/email-automation/tests/platform-finalization.test.ts
 
