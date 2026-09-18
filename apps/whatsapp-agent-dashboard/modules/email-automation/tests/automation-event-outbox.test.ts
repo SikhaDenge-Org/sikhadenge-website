@@ -27,3 +27,5 @@ console.log("Email automation E4 event outbox contracts: PASS");
 assert.doesNotThrow(() => assertEmailAutomationEventRequeueAllowed("FAILED", 0, 5));
 assert.throws(() => assertEmailAutomationEventRequeueAllowed("PENDING", 1, 5), /Only FAILED/);
 assert.throws(() => assertEmailAutomationEventRequeueAllowed("FAILED", 5, 5), /retry limit/);
+assert.doesNotThrow(() => assertEmailAutomationEventRequeueAllowed("FAILED", 5));
+assert.throws(() => assertEmailAutomationEventRequeueAllowed("FAILED", 20), /retry limit/);
