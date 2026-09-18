@@ -83,8 +83,8 @@ export default function EmailAutomationQueue() {
       const response = await fetch("/api/email/automation/process", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ limit: 20 }),
       });
-      const result = await readJson<{ processed: number; failed: number; skipped: number; recovered: number; paused: boolean; reason: string | null }>(response);
-      setNotice(result.paused ? (result.reason || "Automation processing is paused.") : `Processed ${result.processed}; failed ${result.failed}; recovered ${result.recovered}; skipped ${result.skipped}.`);
+      const result = await readJson<{ processed: number; failed: number; retried: number; deadLettered: number; skipped: number; recovered: number; paused: boolean; reason: string | null }>(response);
+      setNotice(result.paused ? (result.reason || "Automation processing is paused.") : `Processed ${result.processed}; retries scheduled ${result.retried}; dead-lettered ${result.deadLettered}; failed ${result.failed}; recovered ${result.recovered}; skipped ${result.skipped}.`);
       await load();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Automation queue processing failed."); }
     finally { setBusy(""); }

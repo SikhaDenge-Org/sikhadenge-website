@@ -8,6 +8,13 @@ import { buildEmailAutomationIdempotencyKey } from "./contracts";
 import { enqueueEmailAutomationEvent } from "./event-outbox";
 import { emailAutomationConditionPasses, emailAutomationContactContext, executeEmailAutomationCrmAction } from "./action-executor";
 import { createEmailUnsubscribeUrl } from "../campaigns/unsubscribe";
+import {
+  EMAIL_AUTOMATION_AUTO_MAX_ATTEMPTS,
+  classifyEmailProviderFailure,
+  computeEmailAutomationRetryDelayMs,
+  emailAutomationPendingRetryError,
+  isPendingEmailAutomationRetry,
+} from "../providers/provider-error-policy";
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -88,7 +95,7 @@ export async function processEmailAutomationEvents(input: {
   limit?: number;
 }) {
   const policy = automationPolicyReady();
-  if (!policy.ready) return { processed: 0, failed: 0, skipped: 0, recovered: 0, paused: true, reason: policy.reason, results: [] as unknown[] };
+  if (!policy.ready) return { processed: 0, failed: 0, retried: 0, deadLettered: 0, skipped: 0, recovered: 0, paused: true, reason: policy.reason, results: [] as unknown[] };
 
   const staleBefore = new Date(Date.now() - 15 * 60 * 1000);
   const recovered = await prisma.engageEmailAutomationEvent.updateMany({
@@ -109,9 +116,17 @@ export async function processEmailAutomationEvents(input: {
   const results: Array<Record<string, unknown>> = [];
   let processed = 0;
   let failed = 0;
+  let retried = 0;
+  let deadLettered = recovered.count;
   let skipped = 0;
 
   for (const event of events) {
+    if (isPendingEmailAutomationRetry(event.lastError) && !getEmailRuntimePolicy().externalWritesEnabled) {
+      skipped += 1;
+      results.push({ eventId: event.id, retryDeferred: true, reason: "External delivery is disabled; pending retry preserved without consuming an attempt." });
+      continue;
+    }
+    const attempt = event.attemptCount + 1;
     const claimed = await prisma.engageEmailAutomationEvent.updateMany({
       where: { id: event.id, workspaceId: input.workspaceId, status: "PENDING" },
       data: { status: "PROCESSING", attemptCount: { increment: 1 }, lastError: null },
@@ -194,14 +209,50 @@ export async function processEmailAutomationEvents(input: {
       if (actionCount === 0) results.push({ eventId: event.id, matchedEmailActions: 0 });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Email automation processing failed.";
+      const failure = classifyEmailProviderFailure(error);
+      if (failure.autoRetryable && attempt < EMAIL_AUTOMATION_AUTO_MAX_ATTEMPTS) {
+        const retryDelayMs = computeEmailAutomationRetryDelayMs(attempt);
+        const retryAt = new Date(Date.now() + retryDelayMs);
+        await prisma.engageEmailAutomationEvent.update({
+          where: { id: event.id },
+          data: {
+            status: "PENDING",
+            availableAt: retryAt,
+            processedAt: null,
+            lastError: emailAutomationPendingRetryError(error),
+          },
+        });
+        retried += 1;
+        results.push({
+          eventId: event.id,
+          retryScheduled: true,
+          attempt,
+          maxAttempts: EMAIL_AUTOMATION_AUTO_MAX_ATTEMPTS,
+          retryAt: retryAt.toISOString(),
+          statusCode: failure.statusCode,
+          category: failure.category,
+          error: message,
+        });
+        continue;
+      }
       await prisma.engageEmailAutomationEvent.update({
         where: { id: event.id },
         data: { status: "FAILED", lastError: message },
       });
       failed += 1;
-      results.push({ eventId: event.id, error: message });
+      deadLettered += 1;
+      results.push({
+        eventId: event.id,
+        error: message,
+        deadLettered: true,
+        attempt,
+        retrySafe: failure.safeToRetry,
+        autoRetryable: failure.autoRetryable,
+        statusCode: failure.statusCode,
+        category: failure.category,
+      });
     }
   }
 
-  return { processed, failed, skipped, recovered: recovered.count, paused: false, reason: null, results };
+  return { processed, failed, retried, deadLettered, skipped, recovered: recovered.count, paused: false, reason: null, results };
 }
