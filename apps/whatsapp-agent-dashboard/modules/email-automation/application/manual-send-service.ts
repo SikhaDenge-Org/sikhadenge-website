@@ -13,6 +13,7 @@ import {
 import { getEmailRuntimePolicy } from "./runtime-policy";
 import { assertManualEmailDispatchPolicy, assertManualEmailRetryAllowed, internalRecipientAllowlist } from "./manual-send-policy";
 import { instrumentEmailHtml } from "../analytics/tracking";
+import { isPersistedDeliveryRetrySafe, persistedEmailDeliveryError } from "../providers/provider-error-policy";
 
 const KEY = /^[A-Za-z0-9._:-]{8,128}$/;
 function json(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }
@@ -69,7 +70,17 @@ export class ManualEmailSendService {
     const idempotencyKey = input.idempotencyKey.trim();
     if (!KEY.test(idempotencyKey)) throw new Error("idempotencyKey must be 8-128 safe characters.");
     const prior = await prisma.engageEmailMessage.findUnique({ where: { workspaceId_idempotencyKey: { workspaceId: input.workspaceId, idempotencyKey } } });
-    if (prior) return { message: prior, replayed: true };
+    const retryPersisted = Boolean(
+      input.deliveryContext === "AUTOMATION" &&
+      prior?.status === "FAILED" &&
+      !prior.externalRequestSent &&
+      isPersistedDeliveryRetrySafe(prior.lastError),
+    );
+    if (prior && !retryPersisted) {
+      if (prior.status === "FAILED") throw new Error("Persisted email delivery failed and is not automatically retry-safe. Use an explicit manual retry after operator review.");
+      if (prior.status === "SENDING") throw new Error("Persisted email delivery is still SENDING; automatic replay is blocked because delivery outcome is unknown.");
+      return { message: prior, replayed: true };
+    }
 
     const to = addresses(input.to, true), cc = addresses(input.cc), bcc = addresses(input.bcc);
     const allRecipients = [...to, ...cc, ...bcc];
@@ -106,8 +117,19 @@ export class ManualEmailSendService {
     const auditAttachments = attachments.map(({ contentBase64: _content, ...item }) => item);
     const replyTo = input.replyTo ? addresses([input.replyTo], true)[0] : resolved.sender.replyToEmail ? { email: resolved.sender.replyToEmail } : undefined;
     let created;
-    try {
-      created = await prisma.engageEmailMessage.create({ data: {
+    if (retryPersisted && prior) {
+      if (
+        prior.templateId !== template.id ||
+        prior.templateVersionId !== version.id ||
+        prior.connectionId !== connection.id ||
+        prior.senderIdentityId !== resolved.sender.id
+      ) {
+        throw new Error("Persisted retry-safe email no longer matches the pinned automation delivery contract.");
+      }
+      created = prior;
+    } else {
+      try {
+        created = await prisma.engageEmailMessage.create({ data: {
       workspaceId: input.workspaceId, templateId: template.id, templateVersionId: version.id, connectionId: connection.id,
       senderIdentityId: resolved.sender.id, senderResolutionSource: resolved.source, status: "DRAFT", runtimeMode: decision.mode,
       toRecipients: json(to), ccRecipients: json(cc), bccRecipients: json(bcc), ...(replyTo ? { replyTo: json(replyTo) } : {}),
@@ -119,14 +141,18 @@ export class ManualEmailSendService {
         const replay = await prisma.engageEmailMessage.findUnique({ where: { workspaceId_idempotencyKey: { workspaceId: input.workspaceId, idempotencyKey } } });
         if (replay) return { message: replay, replayed: true };
       }
-      throw error;
+        throw error;
+      }
     }
-    if (!decision.externalRequestAllowed) return { message: created, replayed: false };
+    if (!decision.externalRequestAllowed) {
+      if (retryPersisted) throw new Error("Retry-safe failed delivery remains pending until external delivery is enabled.");
+      return { message: created, replayed: false };
+    }
     const outboundRendered = getEmailRuntimePolicy().trackingEnabled
       ? { ...rendered, html: instrumentEmailHtml({ messageId: created.id, html: rendered.html, appUrl: process.env.APP_URL || '' }) }
       : rendered;
 
-    await prisma.engageEmailMessage.update({ where: { id: created.id }, data: { status: "SENDING" } });
+    await prisma.engageEmailMessage.update({ where: { id: created.id }, data: { status: "SENDING", lastError: null, runtimeMode: decision.mode } });
     try {
       const result = await emailRuntime.providers.get(connection.provider).sendMessage({
         workspaceId: input.workspaceId, connectionId: connection.id, senderIdentityId: resolved.sender.id,
@@ -139,7 +165,7 @@ export class ManualEmailSendService {
       }});
       return { message, replayed: false };
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Email provider send failed.";
+      const message = persistedEmailDeliveryError(error);
       await prisma.engageEmailMessage.update({ where: { id: created.id }, data: { status: "FAILED", lastError: message } });
       throw error;
     }
