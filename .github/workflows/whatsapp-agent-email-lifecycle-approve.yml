@@ -24,7 +24,7 @@ jobs:
     concurrency:
       group: whatsapp-agent-production
       cancel-in-progress: false
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[email-lifecycle-approve]')
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[email-lifecycle-approve]') || contains(github.event.head_commit.message, '[email-lifecycle-activate]')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: whatsapp-agent-production
@@ -36,7 +36,7 @@ jobs:
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       DEPLOYED_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.deployed_sha || github.event.before }}
       APPROVAL_RUN_ID: email-lifecycle-approval-${{ github.run_id }}-${{ github.run_attempt }}
-      ACTIVATE: ${{ github.event_name == 'workflow_dispatch' && inputs.activate || false }}
+      ACTIVATE: ${{ (github.event_name == 'workflow_dispatch' && inputs.activate) || contains(github.event.head_commit.message, '[email-lifecycle-activate]') }}
     steps:
       - name: Validate deployed SHA and production secrets
         shell: bash
