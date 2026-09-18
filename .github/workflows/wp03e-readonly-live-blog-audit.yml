@@ -1,0 +1,61 @@
+name: WP03E Readonly Live Blog Audit
+on:
+  push:
+    branches: [ops/wp03e-readonly-audit-20260918]
+    paths: [.github/workflows/wp03e-readonly-live-blog-audit.yml]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SSH_PORT="${SSH_PORT:-22}"; echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
+          install -d -m 700 "$HOME/.ssh"; KEY="$HOME/.ssh/prod"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"; fi
+          chmod 600 "$KEY"; read -r _ kt km _ <<< "$SSH_HOST_KEY"; test "$kt" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"; chmod 600 "$HOME/.ssh/known_hosts"
+      - name: Inspect exact live blog runtime read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          export HOME=/root PM2_HOME=/root/.pm2
+          APP='sikhadenge-checkout-hotfix-3955-20260831-210229'
+          PID="$(pm2 pid "$APP" | tail -1)"
+          [[ "$PID" =~ ^[0-9]+$ ]] && [ "$PID" -gt 1 ]
+          LIVE="$(readlink -f /proc/$PID/cwd)"
+          echo "APP=$APP"
+          echo "PID=$PID"
+          echo "LIVE_CWD=$LIVE"
+          echo "BLOG_ROUTE_EXISTS=$(test -f "$LIVE/app/blog/[slug]/page.tsx" && echo 1 || echo 0)"
+          BLOG="$LIVE/data/blogs.json"
+          echo "BLOG_DATA_EXISTS=$(test -f "$BLOG" && echo 1 || echo 0)"
+          if [ -f "$BLOG" ]; then
+            echo "BLOG_DATA_SHA=$(sha256sum "$BLOG" | awk '{print $1}')"
+            BLOG="$BLOG" python3 - <<'PY'
+import json,os
+p=os.environ["BLOG"]
+with open(p,encoding="utf-8") as f: d=json.load(f)
+print("BLOG_COUNT="+str(len(d)))
+for i,x in enumerate(d[:8]):
+    print("BLOG_SAMPLE_%d=%s|%s|%s"%(i+1,x.get("slug",""),x.get("title",""),x.get("category","")))
+PY
+          fi
+          code=$(curl -ksS -o /tmp/wp03e-blog-index -w '%{http_code}' 'https://sikhadenge.in/blog?wp03e_audit=1')
+          echo "PUBLIC_BLOG_INDEX_HTTP=$code"
+          echo "PUBLIC_BLOG_INDEX_SHA=$(sha256sum /tmp/wp03e-blog-index | awk '{print $1}')"
+          echo 'WP03E_LIVE_BLOG_READONLY_AUDIT=PASS'
+          REMOTE
