@@ -36,6 +36,8 @@ export async function getPlatformAnalytics() {
     leads,
     campaignEvents,
     automationEvents,
+    automationRunCount,
+    automationFailureCount,
     engagementEvents,
     lifecycleEvents,
   ] = await Promise.all([
@@ -115,6 +117,18 @@ export async function getPlatformAnalytics() {
       take: 200,
       select: { payload: true, receivedAt: true },
     }),
+    prisma.webhookEvent.count({
+      where: { eventType: "automation_runtime_run" },
+    }),
+    prisma.webhookEvent.count({
+      where: {
+        eventType: "automation_runtime_run",
+        OR: [
+          { processingError: { not: null } },
+          { payload: { path: ["status"], equals: "FAILED" } },
+        ],
+      },
+    }),
     prisma.webhookEvent.findMany({
       where: {
         eventType: {
@@ -158,8 +172,8 @@ export async function getPlatformAnalytics() {
   const inboundMessages = messages.filter((message) => message.direction === MessageDirection.INBOUND).length;
   const outboundMessages = messages.filter((message) => message.direction === MessageDirection.OUTBOUND).length;
   const deliveryBase = Math.max(1, outboundMessages);
-  const delivered = messageStatuses[MessageStatus.DELIVERED] || 0;
   const read = messageStatuses[MessageStatus.READ] || 0;
+  const delivered = (messageStatuses[MessageStatus.DELIVERED] || 0) + read;
   const failed = messageStatuses[MessageStatus.FAILED] || 0;
 
   const campaignMetrics = campaignEvents.reduce(
@@ -185,11 +199,15 @@ export async function getPlatformAnalytics() {
       const status = String(payload.status || "").toUpperCase();
       if (status === "ACTIVE") totals.active += 1;
       if (status === "PAUSED") totals.paused += 1;
-      totals.runs += numberValue(payload.runCount);
-      totals.failures += numberValue(payload.failureCount);
       return totals;
     },
-    { flows: 0, active: 0, paused: 0, runs: 0, failures: 0 },
+    {
+      flows: 0,
+      active: 0,
+      paused: 0,
+      runs: automationRunCount,
+      failures: automationFailureCount,
+    },
   );
 
   const engagementMetrics = engagementEvents.reduce(
