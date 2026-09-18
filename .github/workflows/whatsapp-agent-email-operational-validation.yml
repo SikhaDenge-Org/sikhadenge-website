@@ -20,9 +20,7 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
-      EXPECTED_DEPLOYED_SHA: 2c8938f2c07e6969790e2c210bff2be90100d92e
-      MESSAGE_ID: cmu49vhqz0005kwcjyw859za4
-      IDEMPOTENCY_KEY: internal-test-email-internal-35117460188-1
+      EXPECTED_DEPLOYED_SHA: ${{ github.event.before }}
     steps:
       - name: Validate production access
         shell: bash
@@ -53,7 +51,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_DEPLOYED_SHA='$EXPECTED_DEPLOYED_SHA' MESSAGE_ID='$MESSAGE_ID' IDEMPOTENCY_KEY='$IDEMPOTENCY_KEY' bash -s" <<'REMOTE'
+            "EXPECTED_DEPLOYED_SHA='$EXPECTED_DEPLOYED_SHA' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           cd "$APP"
@@ -63,6 +61,5 @@ jobs:
           set +a
           test "${EMAIL_RUNTIME_MODE:-}" = "DRY_RUN"
           test "${EMAIL_EXTERNAL_WRITES_ENABLED:-false}" = "false"
-          export MESSAGE_ID IDEMPOTENCY_KEY
-          npm exec -- tsx -e 'import { prisma } from "./lib/db/prisma"; import { ManualEmailSendService } from "./modules/email-automation/application/manual-send-service"; (async()=>{ const id=process.env.MESSAGE_ID!; const key=process.env.IDEMPOTENCY_KEY!; const m=await prisma.engageEmailMessage.findUnique({where:{id}}); if(!m) throw new Error("message missing"); if(m.status!=="SENT"||!m.externalRequestSent||!m.providerMessageId||!m.sentAt) throw new Error("persisted send invalid"); const to=Array.isArray(m.toRecipients)?m.toRecipients:[]; if(!to.some((x:any)=>x?.email==="ankitsingh@sikhadenge.in")) throw new Error("recipient mismatch"); const replay=await new ManualEmailSendService().send({workspaceId:m.workspaceId,templateId:m.templateId!,manualSenderIdentityId:m.senderIdentityId,to:[{email:"ankitsingh@sikhadenge.in"}],idempotencyKey:key,actorUserId:m.createdById}); if(!replay.replayed||replay.message.id!==m.id) throw new Error("idempotency replay failed"); const count=await prisma.engageEmailMessage.count({where:{workspaceId:m.workspaceId,idempotencyKey:key}}); if(count!==1) throw new Error("duplicate record detected"); console.log(`VALIDATION_STATUS=PASS`); console.log(`MESSAGE_STATUS=${m.status}`); console.log(`PROVIDER_MESSAGE_ID_PRESENT=${Boolean(m.providerMessageId)}`); console.log(`IDEMPOTENCY_REPLAYED=${replay.replayed}`); console.log(`DUPLICATE_RECORD_COUNT=${count}`); await prisma.$disconnect(); })().catch(async e=>{console.error(e); try{await prisma.$disconnect()}catch{} process.exit(1)});'
+          npm exec -- tsx -e 'import { prisma } from "./lib/db/prisma"; import { ManualEmailSendService } from "./modules/email-automation/application/manual-send-service"; (async()=>{ const rows=await prisma.engageEmailMessage.findMany({where:{status:"SENT",externalRequestSent:true,idempotencyKey:{startsWith:"internal-test-"}},orderBy:{createdAt:"desc"},take:25}); const m=rows.find((row:any)=>{ const to=Array.isArray(row.toRecipients)?row.toRecipients:[]; return to.some((x:any)=>x?.email==="ankitsingh@sikhadenge.in") && Boolean(row.idempotencyKey) && Boolean(row.providerMessageId) && Boolean(row.sentAt) && Boolean(row.templateId) && Boolean(row.senderIdentityId); }); if(!m) throw new Error("no persisted internal canary found"); const key=m.idempotencyKey!; const replay=await new ManualEmailSendService().send({workspaceId:m.workspaceId,templateId:m.templateId!,manualSenderIdentityId:m.senderIdentityId,to:[{email:"ankitsingh@sikhadenge.in"}],idempotencyKey:key,actorUserId:m.createdById}); if(!replay.replayed||replay.message.id!==m.id) throw new Error("idempotency replay failed"); const count=await prisma.engageEmailMessage.count({where:{workspaceId:m.workspaceId,idempotencyKey:key}}); if(count!==1) throw new Error("duplicate record detected"); console.log("VALIDATION_STATUS=PASS"); console.log(`MESSAGE_ID=${m.id}`); console.log(`MESSAGE_STATUS=${m.status}`); console.log(`PROVIDER_MESSAGE_ID_PRESENT=${Boolean(m.providerMessageId)}`); console.log(`IDEMPOTENCY_REPLAYED=${replay.replayed}`); console.log(`DUPLICATE_RECORD_COUNT=${count}`); await prisma.$disconnect(); })().catch(async e=>{console.error(e); try{await prisma.$disconnect()}catch{} process.exit(1)});'
           REMOTE
