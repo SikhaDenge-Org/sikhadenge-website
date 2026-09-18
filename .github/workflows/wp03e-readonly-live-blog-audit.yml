@@ -1,8 +1,8 @@
 name: WP03E Readonly Live Blog Audit
 on:
   push:
-    branches: [ops/wp03e-readonly-audit-20260918]
-    paths: [.github/workflows/wp03e-readonly-live-blog-audit.yml]
+    branches: [main]
+    paths: ['.github/workflows/wp03e-readonly-live-blog-audit.yml']
 permissions:
   contents: read
 jobs:
