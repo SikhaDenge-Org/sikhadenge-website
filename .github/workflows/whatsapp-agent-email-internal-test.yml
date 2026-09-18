@@ -83,7 +83,7 @@ jobs:
           set +e
           mkdir -p email-internal-test-evidence
           for file_name in internal-test-result.txt send.log; do
-            scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
               "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${TEST_RUN_ID}/${file_name}" "email-internal-test-evidence/${file_name}" >/dev/null 2>&1 || true
           done
           chmod -R go-rwx email-internal-test-evidence 2>/dev/null || true
