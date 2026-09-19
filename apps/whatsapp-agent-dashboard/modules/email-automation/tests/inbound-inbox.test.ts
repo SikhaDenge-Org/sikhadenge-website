@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { emailInboxThreadIdentity } from "../inbound/inbox-service";
+import { detectGmailBounce } from "../inbound/gmail-bounce-detection";
 
 const threaded = emailInboxThreadIdentity({
   provider: "GOOGLE_GMAIL",
@@ -38,6 +39,68 @@ const standalone = emailInboxThreadIdentity({
 assert.equal(standalone.threadKind, "MESSAGE");
 assert.equal(standalone.threadId, "message-2");
 
+const dsnPayload = {
+  mimeType: "multipart/report",
+  parts: [
+    {
+      mimeType: "message/delivery-status",
+      body: { data: Buffer.from("Final-Recipient: rfc822; User@Example.com\nAction: failed\nStatus: 5.1.1").toString("base64url") },
+    },
+  ],
+};
+const dsn = detectGmailBounce({
+  headers: [{ name: "Content-Type", value: "multipart/report; report-type=delivery-status" }],
+  payload: dsnPayload,
+  from: "MAILER-DAEMON <mailer-daemon@googlemail.com>",
+  subject: "Delivery Status Notification (Failure)",
+});
+assert.equal(dsn.classification, "BOUNCE");
+assert.equal(dsn.failedRecipient, "user@example.com");
+assert.equal(dsn.bounceClass, "HARD");
+assert.equal(dsn.statusCode, "5.1.1");
+assert.ok(dsn.signals.includes("MESSAGE_DELIVERY_STATUS"));
+
+const failedHeader = detectGmailBounce({
+  headers: [{ name: "X-Failed-Recipients", value: "Student@Example.com" }],
+  from: "mailer-daemon@googlemail.com",
+  subject: "Delivery Status Notification (Failure)",
+});
+assert.equal(failedHeader.classification, "BOUNCE");
+assert.equal(failedHeader.failedRecipient, "student@example.com");
+
+const softDsn = detectGmailBounce({
+  headers: [{ name: "Content-Type", value: "multipart/report; report-type=delivery-status" }],
+  payload: {
+    mimeType: "multipart/report",
+    parts: [{
+      mimeType: "message/delivery-status",
+      body: { data: Buffer.from("Final-Recipient: rfc822; soft@example.com\nAction: delayed\nStatus: 4.2.2").toString("base64url") },
+    }],
+  },
+  from: "mailer-daemon@googlemail.com",
+  subject: "Delivery Status Notification (Delay)",
+});
+assert.equal(softDsn.classification, "BOUNCE");
+assert.equal(softDsn.failedRecipient, "soft@example.com");
+assert.equal(softDsn.bounceClass, "SOFT");
+assert.equal(softDsn.statusCode, "4.2.2");
+
+const ambiguousDsn = detectGmailBounce({
+  headers: [{ name: "X-Failed-Recipients", value: "one@example.com, two@example.com" }],
+  from: "mailer-daemon@googlemail.com",
+  subject: "Delivery Status Notification (Failure)",
+});
+assert.equal(ambiguousDsn.classification, "BOUNCE");
+assert.equal(ambiguousDsn.failedRecipient, null);
+
+const ordinaryInbound = detectGmailBounce({
+  from: "student@example.com",
+  subject: "Course question",
+  bodyText: "Hello",
+});
+assert.equal(ordinaryInbound.classification, "INBOUND");
+assert.equal(ordinaryInbound.failedRecipient, null);
+
 const inbox = readFileSync("modules/email-automation/inbound/inbox-service.ts", "utf8");
 const gmail = readFileSync("modules/email-automation/inbound/gmail-inbound-service.ts", "utf8");
 const safeIngest = readFileSync("modules/email-automation/inbound/workspace-safe-ingest.ts", "utf8");
@@ -50,6 +113,7 @@ const attachmentRoute = readFileSync("app/api/email/inbound/[messageId]/attachme
 const googleConnectRoute = readFileSync("app/api/email/google/connect/route.ts", "utf8");
 const oauthScopes = readFileSync("modules/email-automation/providers/gmail/oauth-scopes.ts", "utf8");
 const connectionService = readFileSync("modules/email-automation/application/connection-service.ts", "utf8");
+const sequenceService = readFileSync("modules/email-automation/sequences/sequence-service.ts", "utf8");
 const inboxPage = readFileSync("app/email/inbox/page.tsx", "utf8");
 const inboxUi = readFileSync("modules/email-automation/ui/EmailInboxWorkspace.tsx", "utf8");
 
@@ -81,6 +145,27 @@ assert.match(safeIngest, /where:\s*\{\s*workspaceId,\s*fromAddress:/);
 assert.match(safeIngest, /where:\s*\{\s*workspaceId,\s*contactId:/);
 assert.match(safeIngest, /matches\.length === 1 \? matches\[0\]\.id : null/);
 assert.doesNotMatch(safeIngest, /whatsAppContact\.findFirst\(\{\s*where:\s*\{\s*email/);
+assert.match(safeIngest, /resolveWorkspaceBounceTarget/);
+assert.match(safeIngest, /resolveWorkspaceSafeTrackingContactId/);
+assert.match(safeIngest, /failedRecipient:\s*bounceRecipient/);
+assert.match(safeIngest, /candidates\.length === 1 \? \{ id: candidates\[0\]\.id \} : null/);
+assert.match(safeIngest, /status:\s*\{ in:\s*\["SENT",\s*"DELIVERED"\] \}/);
+assert.match(safeIngest, /connectionId:\s*input\.connectionId/);
+assert.match(safeIngest, /ccRecipients:\s*true/);
+assert.match(safeIngest, /bccRecipients:\s*true/);
+assert.match(safeIngest, /storedRecipientEmails\(row\.toRecipients,\s*row\.ccRecipients,\s*row\.bccRecipients\)/);
+assert.doesNotMatch(safeIngest, /7 \* 24 \* 60 \* 60 \* 1000/);
+assert.doesNotMatch(safeIngest, /sentAt:\s*\{ gte:/);
+assert.match(safeIngest, /eventType:\s*"BOUNCED"/);
+assert.match(safeIngest, /trigger:\s*"EMAIL_BOUNCED"/);
+assert.match(safeIngest, /failedRecipient:\s*bounceRecipient/);
+assert.match(safeIngest, /bounceClass === "HARD"/);
+assert.match(safeIngest, /reason:\s*"EMAIL_HARD_BOUNCE"/);
+assert.match(safeIngest, /purposes:\s*json\(\["ALL"\]\)/);
+assert.match(safeIngest, /engageCustomerSuppression\.create/);
+assert.match(safeIngest, /bounceClass,\s*statusCode:\s*bounceStatusCode/);
+assert.match(sequenceService, /assertEmailRecipientNotSuppressed/);
+assert.match(sequenceService, /purpose:e\.sequence\.purpose/);
 
 // E5 automation contracts: received and reply events are emitted from persisted inbound mail.
 assert.match(safeIngest, /trigger:\s*"EMAIL_RECEIVED"/);
@@ -95,6 +180,10 @@ assert.match(gmail, /gmailInbound/);
 assert.match(gmail, /EMAIL_INBOUND_SYNC_ENABLED/);
 assert.match(gmail, /startHistoryId\?\.trim\(\)\s*\|\|\s*state\.historyId/);
 assert.match(gmail, /ingestWorkspaceSafeInboundEmail/);
+assert.match(gmail, /detectGmailBounce/);
+assert.match(gmail, /classification:\s*bounce\.classification/);
+assert.match(gmail, /bounceRecipient:\s*bounce\.failedRecipient/);
+assert.doesNotMatch(gmail, /classification:\s*"INBOUND",\s*receivedAt/);
 assert.doesNotMatch(gmail, /finalization\/platform-service/);
 assert.match(internalInboundRoute, /inbound\/workspace-safe-ingest/);
 assert.match(internalInboundRoute, /ingestWorkspaceSafeInboundEmail as ingestInboundEmail/);
