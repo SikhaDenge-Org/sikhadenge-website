@@ -133,6 +133,8 @@ export async function ingestWorkspaceSafeInboundEmail(input: {
   attachments?: unknown;
   classification?: "INBOUND" | "BOUNCE";
   bounceRecipient?: string | null;
+  bounceClass?: "HARD" | "SOFT" | "UNKNOWN" | null;
+  bounceStatusCode?: string | null;
   receivedAt?: string;
 }) {
   const provider = clean(input.provider, 40);
@@ -151,6 +153,12 @@ export async function ingestWorkspaceSafeInboundEmail(input: {
   const threadId = clean(input.providerThreadId, 240) || null;
   const classification = input.classification === "BOUNCE" ? "BOUNCE" : "INBOUND";
   const bounceRecipient = classification === "BOUNCE" ? optionalNormalizedEmail(input.bounceRecipient) : null;
+  const bounceClass = classification === "BOUNCE" && ["HARD", "SOFT", "UNKNOWN"].includes(String(input.bounceClass))
+    ? input.bounceClass as "HARD" | "SOFT" | "UNKNOWN"
+    : classification === "BOUNCE" ? "UNKNOWN" : null;
+  const bounceStatusCode = classification === "BOUNCE" && typeof input.bounceStatusCode === "string" && /^[245]\.\d{1,3}\.\d{1,3}$/.test(input.bounceStatusCode.trim())
+    ? input.bounceStatusCode.trim()
+    : null;
   const bounceTarget = classification === "BOUNCE"
     ? await resolveWorkspaceBounceTarget({
         workspaceId: input.workspaceId,
@@ -191,7 +199,12 @@ export async function ingestWorkspaceSafeInboundEmail(input: {
       if (bounceTarget) {
         await tx.engageEmailMessage.update({
           where: { id: bounceTarget.id },
-          data: { status: "BOUNCED", lastError: bounceRecipient ? `Provider reported a bounce for ${bounceRecipient}.` : "Provider reported a bounce." },
+          data: {
+            status: "BOUNCED",
+            lastError: bounceRecipient
+              ? `Provider reported a ${bounceClass?.toLowerCase() ?? "unknown"} bounce for ${bounceRecipient}${bounceStatusCode ? ` (${bounceStatusCode})` : ""}.`
+              : `Provider reported a ${bounceClass?.toLowerCase() ?? "unknown"} bounce${bounceStatusCode ? ` (${bounceStatusCode})` : ""}.`,
+          },
         });
         await tx.engageEmailAnalyticsEvent.create({
           data: {
@@ -202,16 +215,54 @@ export async function ingestWorkspaceSafeInboundEmail(input: {
             eventType: "BOUNCED",
             provider,
             eventKey: eventKey(["bounce", stored.id]),
-            metadata: bounceRecipient ? json({ failedRecipient: bounceRecipient }) : Prisma.JsonNull,
+            metadata: json({
+              failedRecipient: bounceRecipient,
+              bounceClass,
+              statusCode: bounceStatusCode,
+            }),
             occurredAt: receivedAt,
           },
         });
+        if (contactId && bounceClass === "HARD") {
+          const activeHardBounceSuppression = await tx.engageCustomerSuppression.findFirst({
+            where: {
+              workspaceId: input.workspaceId,
+              customerRef: contactId,
+              channel: "EMAIL",
+              reason: "EMAIL_HARD_BOUNCE",
+              revokedAt: null,
+              startsAt: { lte: receivedAt },
+              OR: [{ expiresAt: null }, { expiresAt: { gt: receivedAt } }],
+            },
+            select: { id: true },
+          });
+          if (!activeHardBounceSuppression) {
+            await tx.engageCustomerSuppression.create({
+              data: {
+                workspaceId: input.workspaceId,
+                customerRef: contactId,
+                connectionId: null,
+                channel: "EMAIL",
+                purposes: json(["ALL"]),
+                reason: "EMAIL_HARD_BOUNCE",
+                startsAt: receivedAt,
+              },
+            });
+          }
+        }
         if (contactId) await enqueueEmailAutomationEvent(tx, {
           workspaceId: input.workspaceId,
           sourceEventId: stored.id,
           trigger: "EMAIL_BOUNCED",
           contactId,
-          payload: { inboundMessageId: stored.id, messageId: bounceTarget.id, providerMessageId, failedRecipient: bounceRecipient },
+          payload: {
+            inboundMessageId: stored.id,
+            messageId: bounceTarget.id,
+            providerMessageId,
+            failedRecipient: bounceRecipient,
+            bounceClass,
+            statusCode: bounceStatusCode,
+          },
         });
       }
     } else {

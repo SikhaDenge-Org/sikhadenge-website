@@ -55,6 +55,20 @@ function structuredRecipients(value: string): string[] {
   return out;
 }
 
+function structuredStatusCodes(value: string): string[] {
+  return [...value.matchAll(/^Status\s*:\s*([245]\.\d{1,3}\.\d{1,3})\s*$/gimu)]
+    .map((match) => match[1]);
+}
+
+function classifyBounceStatus(codes: readonly string[]): { bounceClass: "HARD" | "SOFT" | "UNKNOWN"; statusCode: string | null } {
+  const unique = [...new Set(codes)];
+  const hard = unique.find((code) => code.startsWith("5."));
+  if (hard) return { bounceClass: "HARD", statusCode: hard };
+  const soft = unique.find((code) => code.startsWith("4."));
+  if (soft) return { bounceClass: "SOFT", statusCode: soft };
+  return { bounceClass: "UNKNOWN", statusCode: unique[0] ?? null };
+}
+
 export function detectGmailBounce(input: {
   headers?: readonly GmailHeader[];
   payload?: GmailPayload;
@@ -63,7 +77,7 @@ export function detectGmailBounce(input: {
   snippet?: string;
   bodyText?: string;
   bodyHtml?: string;
-}): { classification: "INBOUND" | "BOUNCE"; failedRecipient: string | null; signals: string[] } {
+}): { classification: "INBOUND" | "BOUNCE"; failedRecipient: string | null; signals: string[]; bounceClass: "HARD" | "SOFT" | "UNKNOWN" | null; statusCode: string | null } {
   const contentType = header(input.headers, "Content-Type").toLowerCase();
   const subject = (input.subject || "").trim();
   const from = (input.from || "").trim().toLowerCase();
@@ -80,7 +94,7 @@ export function detectGmailBounce(input: {
   if (daemonSender && failureSubject) signals.push("DAEMON_FAILURE_SUBJECT");
 
   const classification: "INBOUND" | "BOUNCE" = signals.length ? "BOUNCE" : "INBOUND";
-  if (classification !== "BOUNCE") return { classification, failedRecipient: null, signals: [] };
+  if (classification !== "BOUNCE") return { classification, failedRecipient: null, signals: [], bounceClass: null, statusCode: null };
 
   const failedHeader = header(input.headers, "X-Failed-Recipients");
   const evidence = [
@@ -92,9 +106,12 @@ export function detectGmailBounce(input: {
   ].filter(Boolean).join("\n");
 
   const recipients = [...new Set(structuredRecipients(evidence))];
+  const bounce = classifyBounceStatus(structuredStatusCodes(evidence));
   return {
     classification,
     failedRecipient: recipients.length === 1 ? recipients[0] : null,
     signals,
+    bounceClass: bounce.bounceClass,
+    statusCode: bounce.statusCode,
   };
 }
