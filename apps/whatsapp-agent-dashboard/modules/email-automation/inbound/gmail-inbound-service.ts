@@ -134,7 +134,7 @@ export async function syncGmailHistory(input: { workspaceId: string; connectionI
       bodyHtml: bodies.html,
     });
     try {
-      const result = await ingestInboundEmail({ workspaceId: input.workspaceId, connectionId: input.connectionId, provider: "GOOGLE_GMAIL", providerMessageId: message.id, providerThreadId: message.threadId, from, to: [header(headers,"To")], cc: header(headers,"Cc") ? [header(headers,"Cc")] : [], replyTo: header(headers,"Reply-To") || null, subject, snippet: message.snippet || "", bodyText: bodies.text, bodyHtml: bodies.html, attachments: attachmentMetadata(message.payload), classification: bounce.classification, bounceRecipient: bounce.failedRecipient, receivedAt: message.internalDate ? new Date(Number(message.internalDate)).toISOString() : new Date().toISOString() });
+      const result = await ingestInboundEmail({ workspaceId: input.workspaceId, connectionId: input.connectionId, provider: "GOOGLE_GMAIL", providerMessageId: message.id, providerThreadId: message.threadId, from, to: [header(headers,"To")], cc: header(headers,"Cc") ? [header(headers,"Cc")] : [], replyTo: header(headers,"Reply-To") || null, subject, snippet: message.snippet || "", bodyText: bodies.text, bodyHtml: bodies.html, attachments: attachmentMetadata(message.payload), classification: bounce.classification, bounceRecipient: bounce.failedRecipient, bounceClass: bounce.bounceClass, bounceStatusCode: bounce.statusCode, receivedAt: message.internalDate ? new Date(Number(message.internalDate)).toISOString() : new Date().toISOString() });
       if (result.replayed) replayed += 1; else imported += 1;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") replayed += 1;
