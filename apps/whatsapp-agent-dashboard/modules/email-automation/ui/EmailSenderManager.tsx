@@ -13,6 +13,7 @@ type Sender = {
   isActive:boolean; dailyLimit:number|null;
 };
 type EmailState = { workspace:{id:string;slug:string}; connections:Connection[]; senders:Sender[] };
+type InboxHealth = { gmailConnected:boolean; connectedGmailConnections:number; readAccess:boolean; readAccessStatus:"AUTHORIZED"|"NEEDS_AUTHORIZATION"; statusCode:number; probeError:string; inboundSyncEnabled:boolean; inboundMode:string; cursorReadyConnections:number };
 type ActionState = { key:string; message:string; kind:"working"|"success"|"error" } | null;
 
 async function apiJson<T>(url:string,init?:RequestInit):Promise<T>{
@@ -27,11 +28,12 @@ function relativeDate(value:string|null){if(!value)return "Not yet";const t=new 
 
 export default function EmailSenderManager(){
   const [state,setState]=useState<EmailState|null>(null);
+  const [inboxHealth,setInboxHealth]=useState<InboxHealth|null>(null);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState<string|null>(null);
   const [action,setAction]=useState<ActionState>(null);
 
-  const load=useCallback(async()=>{try{setError(null);setState(await apiJson<EmailState>("/api/email/connections"));}catch(e){setError(e instanceof Error?e.message:"Email state could not be loaded.");}finally{setLoading(false);}},[]);
+  const load=useCallback(async()=>{try{setError(null);const [nextState,nextHealth]=await Promise.all([apiJson<EmailState>("/api/email/connections"),apiJson<InboxHealth>("/api/email/inbound/health").catch(()=>null)]);setState(nextState);setInboxHealth(nextHealth);}catch(e){setError(e instanceof Error?e.message:"Email state could not be loaded.");}finally{setLoading(false);}},[]);
   useEffect(()=>{void load();},[load]);
 
   const activeConnections=useMemo(()=>state?.connections.filter(c=>c.status!=="REVOKED")??[],[state]);
@@ -58,6 +60,11 @@ export default function EmailSenderManager(){
 
     {error?<div className={styles.errorBanner}>{error}</div>:null}
     {action?<div className={`${styles.actionBanner} ${styles[action.kind]}`}>{action.message}</div>:null}
+    {primaryConnection?.provider==="GOOGLE_GMAIL"?<div className={`${styles.inboxAccessNotice} ${inboxHealth?.readAccess?styles.inboxAccessReady:styles.inboxAccessBlocked}`}>
+      <div><strong>{inboxHealth?.readAccess?"Inbox access authorized":"Inbox access requires Google authorization"}</strong><span>{inboxHealth?.readAccess?`Google read-only access is active. Mode: ${inboxHealth.inboundMode}. Cursor-ready: ${inboxHealth.cursorReadyConnections}.`:inboxHealth?.statusCode===403?"Google returned HTTP 403. Approve read-only Gmail access to enable incoming email sync.":"Sending access and Inbox read access are separate. Approve Google read-only Gmail access for incoming email sync."}</span></div>
+      <span className={styles.inboxAccessStatus}>{inboxHealth?.readAccess?"AUTHORIZED":"NEEDS AUTHORIZATION"}</span>
+      {!inboxHealth?.readAccess?<button type="button" onClick={()=>void enableInboxAccess()} disabled={action?.kind==="working"}>{action?.key==="inbox-access"&&action.kind==="working"?"Opening Google…":"Enable Inbox Access"}</button>:null}
+    </div>:null}
 
     {primaryConnection ? <article className={styles.accountHero}>
       <div className={styles.googleLogo}>G</div>
