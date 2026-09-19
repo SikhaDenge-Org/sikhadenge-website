@@ -7,6 +7,11 @@ on:
         description: Exact protected release SHA currently deployed
         required: true
         type: string
+  workflow_run:
+    workflows:
+      - "WhatsApp Agent Production Batch 1"
+    types:
+      - completed
 
 permissions:
   contents: read
@@ -16,7 +21,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  dispatch-protected-activation:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'release/whatsapp-instagram-agent-flow-20260731'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch protected release activation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          gh workflow run whatsapp-agent-automation-scheduler-activation.yml             --repo "$GITHUB_REPOSITORY"             --ref release/whatsapp-instagram-agent-flow-20260731             -f expected_live_sha="$TARGET_SHA"
+          printf 'DISPATCHED_PROTECTED_ACTIVATION_SHA=%s\n' "$TARGET_SHA"
+
   activate:
+    if: github.event_name == 'workflow_dispatch'
     environment: whatsapp-agent-production
     runs-on: ubuntu-latest
     env:
