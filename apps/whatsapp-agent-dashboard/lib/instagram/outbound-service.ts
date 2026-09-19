@@ -11,6 +11,7 @@ import { prisma } from "../db/prisma";
 import { sha256Hex } from "../meta/signature";
 import { evaluateOutboundPolicy } from "../outbound/policy";
 import type { OutboundContent } from "../outbound/types";
+import { assertInstagramControlledOutboundAllowed } from "./outbound-policy-gate";
 import {
   getInstagramOutboundMode,
   sendInstagramTextMessage,
@@ -84,6 +85,10 @@ export async function sendInstagramConversationMessage(input: {
   if (!instagramScopedId) {
     throw new Error("Instagram recipient ID is missing from the contact record.");
   }
+
+  await assertInstagramControlledOutboundAllowed({
+    conversationAccountId: stringValue(metadata.instagramAccountId),
+  });
 
   const policy = evaluateOutboundPolicy({
     context: {
