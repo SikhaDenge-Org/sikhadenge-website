@@ -10,6 +10,8 @@ const ITEMS = [
   ["Accounts", "/email/accounts", "Gmail & senders", "@"],
   ["Templates", "/email/templates", "Reusable designs", "▤"],
   ["Send", "/email/send", "Manual send", "↗"],
+  ["Campaigns", "/email/campaigns", "Audience delivery", "◎"],
+  ["Sequences", "/email/sequences", "Lifecycle journeys", "⋮"],
   ["Automation", "/email/automation", "Queue & runtime", "ϟ"],
 ] as const;
 
