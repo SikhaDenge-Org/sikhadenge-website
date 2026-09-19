@@ -1,0 +1,188 @@
+name: WhatsApp Agent Phase17 Monitoring Runbook Review Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_live_sha:
+        description: Exact production release SHA under review
+        required: true
+        type: string
+      parity_run_id:
+        description: Successful provider parity monitor run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  prepare-monitoring-runbook-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
+      PARITY_RUN_ID: ${{ inputs.parity_run_id }}
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+
+    steps:
+      - name: Freeze exact release and verify support runbook
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PARITY_RUN_ID" =~ ^[0-9]+$ ]]
+          git init -q verify
+          cd verify
+          git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          git fetch -q --depth=1 origin "$RELEASE_BRANCH"
+          release_sha="$(git rev-parse FETCH_HEAD)"
+          test "$release_sha" = "$EXPECTED_LIVE_SHA"
+          runbook_path="apps/whatsapp-agent-dashboard/docs/engageos/PHASE_17_STAGE2_SUPPORT_RUNBOOK.md"
+          git show "$EXPECTED_LIVE_SHA:$runbook_path" > ../phase17-stage2-support-runbook.md
+          cd ..
+          test -s phase17-stage2-support-runbook.md
+          grep -q '^## Monitoring checklist' phase17-stage2-support-runbook.md
+          grep -q '^## Critical incident triage' phase17-stage2-support-runbook.md
+          grep -q '^## Duplicate-send investigation' phase17-stage2-support-runbook.md
+          grep -q '^## Rollback procedure' phase17-stage2-support-runbook.md
+          runbook_sha256="$(sha256sum phase17-stage2-support-runbook.md | awk '{print $1}')"
+          {
+            echo "RELEASE_SHA=$release_sha"
+            echo "SUPPORT_RUNBOOK_PRESENT=true"
+            echo "SUPPORT_RUNBOOK_SHA256=$runbook_sha256"
+          } > review-facts.txt
+          echo "SUPPORT_RUNBOOK_SHA256=$runbook_sha256" >> "$GITHUB_ENV"
+
+      - name: Verify successful provider parity monitor
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PARITY_RUN_ID")"
+          name="$(jq -r '.name' <<<"$run")"
+          conclusion="$(jq -r '.conclusion // ""' <<<"$run")"
+          status="$(jq -r '.status' <<<"$run")"
+          head_sha="$(jq -r '.head_sha' <<<"$run")"
+          head_branch="$(jq -r '.head_branch' <<<"$run")"
+          event="$(jq -r '.event' <<<"$run")"
+          path="$(jq -r '.path' <<<"$run")"
+
+          test "$name" = "WhatsApp Provider Parity Monitor"
+          test "$status" = "completed"
+          test "$conclusion" = "success"
+          test "$head_sha" = "$EXPECTED_LIVE_SHA"
+          test "$head_branch" = "$RELEASE_BRANCH"
+          test "$path" = ".github/workflows/whatsapp-agent-provider-parity-monitor.yml"
+
+          {
+            echo "PARITY_RUN_ID=$PARITY_RUN_ID"
+            echo "PARITY_RUN_STATUS=$status"
+            echo "PARITY_RUN_CONCLUSION=$conclusion"
+            echo "PARITY_RUN_HEAD_SHA=$head_sha"
+            echo "PARITY_RUN_HEAD_BRANCH=$head_branch"
+            echo "PARITY_RUN_EVENT=$event"
+          } >> review-facts.txt
+
+      - name: Verify parity counters from run log
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh run view "$PARITY_RUN_ID" --repo "$GITHUB_REPOSITORY" --log > parity-run.log
+          grep -q '"providerConnectionsFound": 1' parity-run.log
+          grep -q '"connectedConnections": 1' parity-run.log
+          grep -q '"degradedConnections": 0' parity-run.log
+          grep -q '"missingMappings": 0' parity-run.log
+          grep -q '"connectionMismatch": 0' parity-run.log
+          grep -q '"externalUserMismatch": 0' parity-run.log
+          grep -q '"canonicalRefMismatch": 0' parity-run.log
+          grep -q '"mutationPerformed": false' parity-run.log
+          grep -q '"externalWhatsAppWriteSent": false' parity-run.log
+          grep -q '"parityPassed": true' parity-run.log
+          contacts="$(grep -oE '"contactsScanned": [0-9]+' parity-run.log | tail -n1 | grep -oE '[0-9]+')"
+          test -n "$contacts"
+          {
+            echo "PROVIDER_CONNECTIONS_FOUND=1"
+            echo "CONNECTED_CONNECTIONS=1"
+            echo "DEGRADED_CONNECTIONS=0"
+            echo "CONTACTS_SCANNED=$contacts"
+            echo "MISSING_MAPPINGS=0"
+            echo "CONNECTION_MISMATCH=0"
+            echo "EXTERNAL_USER_MISMATCH=0"
+            echo "CANONICAL_REF_MISMATCH=0"
+            echo "MONITOR_MUTATION_PERFORMED=false"
+            echo "MONITOR_EXTERNAL_WHATSAPP_WRITE_SENT=false"
+            echo "PARITY_PASSED=true"
+          } >> review-facts.txt
+
+      - name: Build monitoring and runbook review package
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p review-package
+          monitor_proof_ref="github-actions://$GITHUB_REPOSITORY/runs/$PARITY_RUN_ID"
+          runbook_proof_ref="github://$GITHUB_REPOSITORY@$EXPECTED_LIVE_SHA/apps/whatsapp-agent-dashboard/docs/engageos/PHASE_17_STAGE2_SUPPORT_RUNBOOK.md#sha256:$SUPPORT_RUNBOOK_SHA256"
+
+          jq -n \
+            --arg action "PHASE17_MONITORING_ACTIVE" \
+            --arg liveSha "$EXPECTED_LIVE_SHA" \
+            --arg proofRef "$monitor_proof_ref" \
+            --arg runId "$PARITY_RUN_ID" \
+            '{
+              classification:"READY_FOR_HUMAN_REVIEW_NOT_ATTESTED",
+              action:$action,
+              liveSha:$liveSha,
+              proofRef:$proofRef,
+              gateMetadata:{monitoringStatus:"ACTIVE"},
+              evidence:{providerParityRunId:$runId,providerParityPassed:true,externalWritesSent:false},
+              humanFieldsRequired:["PHASE17_OPERATOR_ACTOR_ID","PHASE17_OPERATOR_VERIFIED_AT","PHASE17_OPERATOR_REQUEST_ID","PHASE17_OPERATOR_ATTESTATION"]
+            }' > review-package/monitoring-active-review.json
+
+          jq -n \
+            --arg action "PHASE17_SUPPORT_RUNBOOK_ACTIVE" \
+            --arg liveSha "$EXPECTED_LIVE_SHA" \
+            --arg proofRef "$runbook_proof_ref" \
+            --arg sha256 "$SUPPORT_RUNBOOK_SHA256" \
+            '{
+              classification:"READY_FOR_HUMAN_REVIEW_NOT_ATTESTED",
+              action:$action,
+              liveSha:$liveSha,
+              proofRef:$proofRef,
+              gateMetadata:{runbookStatus:"ACTIVE"},
+              evidence:{runbookPresent:true,runbookSha256:$sha256,requiredSectionsVerified:true},
+              humanFieldsRequired:["PHASE17_OPERATOR_ACTOR_ID","PHASE17_OPERATOR_VERIFIED_AT","PHASE17_OPERATOR_REQUEST_ID","PHASE17_OPERATOR_ATTESTATION"]
+            }' > review-package/support-runbook-active-review.json
+
+          cp review-facts.txt review-package/
+          cp phase17-stage2-support-runbook.md review-package/
+          cat > review-package/README.txt <<EOF
+          Phase17 Monitoring + Support Runbook review package
+          Exact live SHA: $EXPECTED_LIVE_SHA
+          Provider parity run: $PARITY_RUN_ID
+
+          This package is approval-ready evidence only.
+          It does not create operator attestations.
+          It does not modify production state.
+          It does not send WhatsApp messages.
+          EOF
+
+          {
+            echo "## Phase17 Monitoring + Support Runbook review"
+            echo
+            echo "- Exact live SHA: `$EXPECTED_LIVE_SHA`"
+            echo "- Provider parity run: `$PARITY_RUN_ID`"
+            echo "- Monitoring: **READY FOR HUMAN REVIEW — NOT ATTESTED**"
+            echo "- Support Runbook: **READY FOR HUMAN REVIEW — NOT ATTESTED**"
+            echo "- External WhatsApp write: **false**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload review package
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase17-monitoring-runbook-review-${{ inputs.expected_live_sha }}
+          path: review-package
+          if-no-files-found: error
+          retention-days: 30
