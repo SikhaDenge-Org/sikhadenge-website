@@ -13,7 +13,7 @@ type Sender = {
   isActive:boolean; dailyLimit:number|null;
 };
 type EmailState = { workspace:{id:string;slug:string}; connections:Connection[]; senders:Sender[] };
-type InboxHealth = { gmailConnected:boolean; connectedGmailConnections:number; readAccess:boolean; readAccessStatus:"AUTHORIZED"|"NEEDS_AUTHORIZATION"; statusCode:number; probeError:string; inboundSyncEnabled:boolean; inboundMode:string; cursorReadyConnections:number };
+type InboxHealth = { activationAccount:string; activationConnectionReady:boolean; gmailConnected:boolean; connectedGmailConnections:number; matchingActivationConnections:number; readAccess:boolean; readAccessStatus:"AUTHORIZED"|"NEEDS_AUTHORIZATION"; statusCode:number; probeError:string; inboundSyncEnabled:boolean; inboundMode:string; cursorReadyConnections:number };
 type ActionState = { key:string; message:string; kind:"working"|"success"|"error" } | null;
 
 async function apiJson<T>(url:string,init?:RequestInit):Promise<T>{
@@ -61,7 +61,7 @@ export default function EmailSenderManager(){
     {error?<div className={styles.errorBanner}>{error}</div>:null}
     {action?<div className={`${styles.actionBanner} ${styles[action.kind]}`}>{action.message}</div>:null}
     {primaryConnection?.provider==="GOOGLE_GMAIL"?<div className={`${styles.inboxAccessNotice} ${inboxHealth?.readAccess?styles.inboxAccessReady:styles.inboxAccessBlocked}`}>
-      <div><strong>{inboxHealth?.readAccess?"Inbox access authorized":"Inbox access requires Google authorization"}</strong><span>{inboxHealth?.readAccess?`Google read-only access is active. Mode: ${inboxHealth.inboundMode}. Cursor-ready: ${inboxHealth.cursorReadyConnections}.`:inboxHealth?.statusCode===403?"Google returned HTTP 403. Approve read-only Gmail access to enable incoming email sync.":"Sending access and Inbox read access are separate. Approve Google read-only Gmail access for incoming email sync."}</span></div>
+      <div><strong>{inboxHealth?.readAccess?"Inbox access authorized":"Inbox access requires Google authorization"}</strong><span>{inboxHealth?.readAccess?`Google read-only access is active for ${inboxHealth.activationAccount}. Mode: ${inboxHealth.inboundMode}. Cursor-ready: ${inboxHealth.cursorReadyConnections}.`:inboxHealth?.statusCode===403?`Google returned HTTP 403 for ${inboxHealth.activationAccount}. Approve read-only Gmail access to enable incoming email sync.`:inboxHealth&&!inboxHealth.activationConnectionReady?`Expected one connected Gmail sender for ${inboxHealth.activationAccount}; found ${inboxHealth.matchingActivationConnections}.`:"Sending access and Inbox read access are separate. Approve Google read-only Gmail access for incoming email sync."}</span></div>
       <span className={styles.inboxAccessStatus}>{inboxHealth?.readAccess?"AUTHORIZED":"NEEDS AUTHORIZATION"}</span>
       {!inboxHealth?.readAccess?<button type="button" onClick={()=>void enableInboxAccess()} disabled={action?.kind==="working"}>{action?.key==="inbox-access"&&action.kind==="working"?"Opening Google…":"Enable Inbox Access"}</button>:null}
     </div>:null}

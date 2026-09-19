@@ -21,9 +21,28 @@ function inboundState(value: unknown) {
   return asRecord(asRecord(value).gmailInbound);
 }
 
+function hasActivationSender(value: unknown, activationAccount: string): boolean {
+  const emailAutomation = asRecord(asRecord(value).emailAutomation);
+  const senders = Array.isArray(emailAutomation.senderIdentities)
+    ? emailAutomation.senderIdentities
+    : [];
+  return senders.some((raw) => {
+    const sender = asRecord(raw);
+    return typeof sender.fromEmail === "string" &&
+      sender.fromEmail.trim().toLowerCase() === activationAccount &&
+      sender.verificationStatus === "VERIFIED" &&
+      sender.isActive === true;
+  });
+}
+
 export async function GET() {
   try {
     const access = await requireEmailManagerAccess();
+    const activationAccount = (
+      process.env.EMAIL_INBOUND_ACTIVATION_ACCOUNT?.trim() ||
+      "support@sikhadenge.in"
+    ).toLowerCase();
+
     const connections = await prisma.engageChannelConnection.findMany({
       where: {
         workspaceId: access.workspaceId,
@@ -40,6 +59,9 @@ export async function GET() {
     const gmail = connections.filter(
       (row) => asRecord(row.capabilities).emailProvider === "GOOGLE_GMAIL",
     );
+    const activationMatches = gmail.filter((row) =>
+      hasActivationSender(row.capabilities, activationAccount)
+    );
 
     const runtime = buildEmailE1Runtime();
     const adapter = runtime.providers.get("GOOGLE_GMAIL");
@@ -48,47 +70,50 @@ export async function GET() {
     let probeError = "";
     let authorizedConnectionId: string | null = null;
 
-    if (adapter instanceof GmailEmailProviderAdapter) {
-      for (const connection of gmail) {
-        try {
-          const token = await adapter.getAccessTokenForConnection(
-            access.workspaceId,
-            connection.id,
-          );
-          const response = await fetch(
-            "https://gmail.googleapis.com/gmail/v1/users/me/profile",
-            {
-              headers: { authorization: `Bearer ${token}` },
-              cache: "no-store",
-            },
-          );
-          statusCode = response.status;
-          if (response.ok) {
-            readAccess = true;
-            authorizedConnectionId = connection.id;
-            probeError = "";
-            break;
-          }
-          probeError = `Gmail profile probe returned HTTP ${response.status}`;
-        } catch (error) {
-          probeError = error instanceof Error
-            ? error.message
-            : "Gmail Inbox access probe failed.";
-        }
-      }
-    } else {
+    if (!(adapter instanceof GmailEmailProviderAdapter)) {
       probeError = "Gmail provider is unavailable.";
+    } else if (activationMatches.length !== 1) {
+      probeError = `Expected exactly one connected Gmail connection for ${activationAccount}; found ${activationMatches.length}.`;
+    } else {
+      const connection = activationMatches[0];
+      try {
+        const token = await adapter.getAccessTokenForConnection(
+          access.workspaceId,
+          connection.id,
+        );
+        const response = await fetch(
+          "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+          {
+            headers: { authorization: `Bearer ${token}` },
+            cache: "no-store",
+          },
+        );
+        statusCode = response.status;
+        if (response.ok) {
+          readAccess = true;
+          authorizedConnectionId = connection.id;
+        } else {
+          probeError = `Gmail profile probe returned HTTP ${response.status}`;
+        }
+      } catch (error) {
+        probeError = error instanceof Error
+          ? error.message
+          : "Gmail Inbox access probe failed.";
+      }
     }
 
-    const cursorReady = gmail.filter((row) => {
+    const cursorReady = activationMatches.filter((row) => {
       const state = inboundState(row.capabilities);
       return typeof state.historyId === "string" && state.historyId.trim().length > 0;
     }).length;
 
     return NextResponse.json(
       {
+        activationAccount,
+        activationConnectionReady: activationMatches.length === 1,
         gmailConnected: gmail.length > 0,
         connectedGmailConnections: gmail.length,
+        matchingActivationConnections: activationMatches.length,
         readAccess,
         readAccessStatus: readAccess ? "AUTHORIZED" : "NEEDS_AUTHORIZATION",
         statusCode,
