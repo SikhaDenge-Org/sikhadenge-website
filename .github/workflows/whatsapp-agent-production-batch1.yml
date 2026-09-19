@@ -402,6 +402,34 @@ jobs:
           find production-evidence -maxdepth 1 -type f -print -exec chmod 600 {} \;
           exit 0
 
+      - name: Verify production evidence integrity
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          required=(
+            manifest.txt
+            migration-evidence.txt
+            deploy-state.txt
+            post-deploy-evidence.txt
+            rollback-evidence.txt
+            batch-result.txt
+          )
+          if [[ "${{ steps.production.outcome }}" == "success" ]]; then
+            for file_name in "${required[@]}"; do
+              test -s "production-evidence/$file_name"
+            done
+          fi
+          if compgen -G "production-evidence/*" > /dev/null; then
+            (
+              cd production-evidence
+              sha256sum * > SHA256SUMS.txt
+              sha256sum --check SHA256SUMS.txt
+            )
+          fi
+          printf 'PASS: PRODUCTION_EVIDENCE_INTEGRITY_VERIFIED
+'
+
       - name: Upload production evidence
         if: always()
         uses: actions/upload-artifact@v4
