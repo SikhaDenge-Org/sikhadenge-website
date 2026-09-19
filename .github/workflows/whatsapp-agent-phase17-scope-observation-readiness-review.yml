@@ -175,8 +175,8 @@ jobs:
           {
             echo "## Phase17 Scope + Observation Readiness"
             echo
-            echo "- Exact live SHA: `$EXPECTED_LIVE_SHA`"
-            echo "- Candidate: `$CANDIDATE_ID`"
+            echo "- Exact live SHA: $EXPECTED_LIVE_SHA"
+            echo "- Candidate: $CANDIDATE_ID"
             echo "- Scope approval: **READY FOR HUMAN DECISION — NOT APPROVED**"
             echo "- Monitoring operator gate: **$MONITORING_GATE**"
             echo "- Support Runbook operator gate: **$RUNBOOK_GATE**"

@@ -163,7 +163,7 @@ jobs:
           {
             echo "## Phase17 two-gate operator review package"
             echo
-            echo "- Exact live SHA: `$EXPECTED_LIVE_SHA`"
+            echo "- Exact live SHA: $EXPECTED_LIVE_SHA"
             echo "- Objective proof run: `$PROOF_RUN_ID`"
             echo "- Artifact ID: `$PROOF_ARTIFACT_ID`"
             echo "- Critical Incident Review: **READY FOR HUMAN REVIEW — NOT ATTESTED**"

@@ -172,8 +172,8 @@ jobs:
           {
             echo "## Phase17 Monitoring + Support Runbook review"
             echo
-            echo "- Exact live SHA: `$EXPECTED_LIVE_SHA`"
-            echo "- Provider parity run: `$PARITY_RUN_ID`"
+            echo "- Exact live SHA: $EXPECTED_LIVE_SHA"
+            echo "- Provider parity run: $PARITY_RUN_ID"
             echo "- Monitoring: **READY FOR HUMAN REVIEW — NOT ATTESTED**"
             echo "- Support Runbook: **READY FOR HUMAN REVIEW — NOT ATTESTED**"
             echo "- External WhatsApp write: **false**"

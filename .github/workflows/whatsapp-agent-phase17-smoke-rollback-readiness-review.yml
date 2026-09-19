@@ -154,7 +154,7 @@ jobs:
           {
             echo "## Phase17 Smoke + Rollback Readiness Review"
             echo
-            echo "- Exact live SHA: `$EXPECTED_LIVE_SHA`"
+            echo "- Exact live SHA: $EXPECTED_LIVE_SHA"
             echo "- Authenticated smoke: **PASS / READY FOR HUMAN REVIEW — NOT ATTESTED**"
             echo "- DR readiness: **PASS**"
             echo "- Rollback rehearsal: **NOT EXECUTED**"
