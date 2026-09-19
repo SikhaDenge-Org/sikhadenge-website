@@ -1,0 +1,193 @@
+name: WhatsApp Agent Phase17 Scope Observation Readiness Review
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_live_sha:
+        description: Exact production release SHA under review
+        required: true
+        type: string
+      audit_run_id:
+        description: Successful current operator evidence audit run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  prepare-scope-observation-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
+      AUDIT_RUN_ID: ${{ inputs.audit_run_id }}
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+
+    steps:
+      - name: Freeze exact release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$AUDIT_RUN_ID" =~ ^[0-9]+$ ]]
+          release_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/$RELEASE_BRANCH" --jq '.commit.sha')"
+          test "$release_sha" = "$EXPECTED_LIVE_SHA"
+          printf 'RELEASE_SHA=%s\n' "$release_sha" > readiness-facts.txt
+
+      - name: Verify current operator audit and extract gate state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$AUDIT_RUN_ID")"
+          test "$(jq -r '.name' <<<"$run")" = "WhatsApp Agent Phase17 Current Operator Evidence Audit"
+          test "$(jq -r '.status' <<<"$run")" = "completed"
+          test "$(jq -r '.conclusion' <<<"$run")" = "success"
+          test "$(jq -r '.head_sha' <<<"$run")" = "$EXPECTED_LIVE_SHA"
+
+          gh run view "$AUDIT_RUN_ID" --repo "$GITHUB_REPOSITORY" --log > audit.log
+
+          last_value() {
+            local key="$1"
+            grep -oE "${key}=[^[:space:]]+" audit.log | tail -n1 | cut -d= -f2-
+          }
+
+          live_sha="$(last_value LIVE_SHA)"
+          candidate_id="$(last_value CURRENT_WHATSAPP_CANDIDATE_ID)"
+          controlled_state="$(last_value CONTROLLED_LAUNCH_STATE)"
+          production_evidence="$(last_value PHASE17_PRODUCTION_EVIDENCE_RECORDED)"
+          policy_evidence="$(last_value PHASE17_POLICY_VERIFIED)"
+          scope_gate="$(last_value PHASE17_STAGE2_SCOPE_APPROVED)"
+          monitoring_gate="$(last_value PHASE17_MONITORING_ACTIVE)"
+          runbook_gate="$(last_value PHASE17_SUPPORT_RUNBOOK_ACTIVE)"
+          observation_gate="$(last_value PHASE17_OBSERVATION_WINDOW_COMPLETE)"
+          external_write="$(last_value EXTERNAL_WRITE_SENT)"
+
+          test "$live_sha" = "$EXPECTED_LIVE_SHA"
+          test -n "$candidate_id"
+          test "$controlled_state" = "ONE_CONNECTED_ACCOUNT|SHADOW|NO_EXTERNAL_WRITES|f|2"
+          test "$production_evidence" = "PROVEN"
+          test "$policy_evidence" = "PROVEN"
+          test "$external_write" = "false"
+
+          {
+            echo "AUDIT_RUN_ID=$AUDIT_RUN_ID"
+            echo "LIVE_SHA=$live_sha"
+            echo "CURRENT_WHATSAPP_CANDIDATE_ID=$candidate_id"
+            echo "CONTROLLED_LAUNCH_STATE=$controlled_state"
+            echo "PHASE17_PRODUCTION_EVIDENCE_RECORDED=$production_evidence"
+            echo "PHASE17_POLICY_VERIFIED=$policy_evidence"
+            echo "PHASE17_STAGE2_SCOPE_APPROVED=$scope_gate"
+            echo "PHASE17_MONITORING_ACTIVE=$monitoring_gate"
+            echo "PHASE17_SUPPORT_RUNBOOK_ACTIVE=$runbook_gate"
+            echo "PHASE17_OBSERVATION_WINDOW_COMPLETE=$observation_gate"
+            echo "EXTERNAL_WRITE_SENT=$external_write"
+          } >> readiness-facts.txt
+
+          echo "CANDIDATE_ID=$candidate_id" >> "$GITHUB_ENV"
+          echo "SCOPE_GATE=$scope_gate" >> "$GITHUB_ENV"
+          echo "MONITORING_GATE=$monitoring_gate" >> "$GITHUB_ENV"
+          echo "RUNBOOK_GATE=$runbook_gate" >> "$GITHUB_ENV"
+          echo "OBSERVATION_GATE=$observation_gate" >> "$GITHUB_ENV"
+
+      - name: Build scope approval readiness package
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p review-package
+
+          jq -n \
+            --arg action "PHASE17_STAGE2_SCOPE_APPROVED" \
+            --arg liveSha "$EXPECTED_LIVE_SHA" \
+            --arg candidateId "$CANDIDATE_ID" \
+            --arg currentGate "$SCOPE_GATE" \
+            '{
+              classification:"READY_FOR_HUMAN_SCOPE_APPROVAL_NOT_APPROVED",
+              action:$action,
+              liveSha:$liveSha,
+              candidateId:$candidateId,
+              currentGateState:$currentGate,
+              machinePrerequisites:{productionEvidence:"PROVEN",policyVerified:"PROVEN"},
+              controlledLaunch:{stage:"ONE_CONNECTED_ACCOUNT",mode:"SHADOW",writePolicy:"NO_EXTERNAL_WRITES",externalWritesAllowed:false},
+              gateMetadataRequiredForFutureAttestation:{candidateId:$candidateId,decision:"APPROVED"},
+              approvalDecisionRecorded:false,
+              humanFieldsRequired:["PHASE17_OPERATOR_ACTOR_ID","PHASE17_OPERATOR_VERIFIED_AT","PHASE17_OPERATOR_REQUEST_ID","PHASE17_OPERATOR_ATTESTATION"],
+              note:"Product/business approver must make the approval decision; technical readiness does not equal business approval."
+            }' > review-package/stage2-scope-approval-readiness.json
+
+      - name: Build observation window eligibility package
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          eligibility="ELIGIBLE_TO_START_REAL_OBSERVATION_WINDOW"
+          blockers='[]'
+          if [[ "$MONITORING_GATE" != "PROVEN" ]]; then
+            eligibility="NOT_ELIGIBLE_TO_START"
+            blockers="$(jq -c '. + ["PHASE17_MONITORING_ACTIVE is not operator-proven for the exact live SHA"]' <<<"$blockers")"
+          fi
+          if [[ "$RUNBOOK_GATE" != "PROVEN" ]]; then
+            eligibility="NOT_ELIGIBLE_TO_START"
+            blockers="$(jq -c '. + ["PHASE17_SUPPORT_RUNBOOK_ACTIVE is not operator-proven for the exact live SHA"]' <<<"$blockers")"
+          fi
+
+          jq -n \
+            --arg action "PHASE17_OBSERVATION_WINDOW_COMPLETE" \
+            --arg liveSha "$EXPECTED_LIVE_SHA" \
+            --arg currentGate "$OBSERVATION_GATE" \
+            --arg monitoringGate "$MONITORING_GATE" \
+            --arg runbookGate "$RUNBOOK_GATE" \
+            --arg eligibility "$eligibility" \
+            --argjson blockers "$blockers" \
+            '{
+              classification:$eligibility,
+              action:$action,
+              liveSha:$liveSha,
+              currentGateState:$currentGate,
+              prerequisites:{monitoringActive:$monitoringGate,supportRunbookActive:$runbookGate},
+              blockers:$blockers,
+              observationWindowStarted:false,
+              observationWindowCompleted:false,
+              timestampsInvented:false,
+              futureGateMetadataShape:{complete:true,windowStartedAt:"REAL_UTC_TIMESTAMP_REQUIRED",windowEndedAt:"REAL_UTC_TIMESTAMP_REQUIRED"},
+              note:"A real observation window may only be captured after monitoring and the support runbook are genuinely active. No timestamps are generated by this workflow."
+            }' > review-package/observation-window-readiness.json
+
+          cp readiness-facts.txt review-package/
+          cat > review-package/README.txt <<EOF
+          Phase17 Stage2 Scope Approval + Observation Window readiness package
+          Exact live SHA: $EXPECTED_LIVE_SHA
+          Candidate ID: $CANDIDATE_ID
+          Audit run: $AUDIT_RUN_ID
+
+          Scope approval is ready for a real human/product decision but is NOT approved.
+          Observation-window eligibility is derived from exact-SHA operator gate state.
+          No observation timestamps are invented.
+          No operator evidence is recorded.
+          No WhatsApp/customer message is sent.
+          EOF
+
+          {
+            echo "## Phase17 Scope + Observation Readiness"
+            echo
+            echo "- Exact live SHA: `$EXPECTED_LIVE_SHA`"
+            echo "- Candidate: `$CANDIDATE_ID`"
+            echo "- Scope approval: **READY FOR HUMAN DECISION — NOT APPROVED**"
+            echo "- Monitoring operator gate: **$MONITORING_GATE**"
+            echo "- Support Runbook operator gate: **$RUNBOOK_GATE**"
+            echo "- Observation window: **$eligibility**"
+            echo "- External WhatsApp write: **false**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload readiness review package
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase17-scope-observation-readiness-${{ inputs.expected_live_sha }}
+          path: review-package
+          if-no-files-found: error
+          retention-days: 30
