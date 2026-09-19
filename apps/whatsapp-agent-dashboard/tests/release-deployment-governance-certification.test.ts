@@ -19,6 +19,7 @@ assert.match(workflow, /Verify production evidence integrity/);
 assert.match(workflow, /rollback-evidence\.txt/);
 assert.match(workflow, /sha256sum \* > SHA256SUMS\.txt/);
 assert.match(workflow, /sha256sum --check SHA256SUMS\.txt/);
+assert.match(workflow, /printf '%s\\n' 'PASS: PRODUCTION_EVIDENCE_INTEGRITY_VERIFIED'/);
 assert.match(workflow, /if-no-files-found: error/);
 assert.match(ci, /permissions:\s*\n\s*contents: read/);
 assert.match(ci, /concurrency:/);
