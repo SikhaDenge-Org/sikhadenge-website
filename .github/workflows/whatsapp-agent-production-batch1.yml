@@ -407,18 +407,20 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          required=(
+          success_required=(
             manifest.txt
             migration-evidence.txt
             deploy-state.txt
             post-deploy-evidence.txt
-            rollback-evidence.txt
             batch-result.txt
           )
           if [[ "${{ steps.production.outcome }}" == "success" ]]; then
-            for file_name in "${required[@]}"; do
+            for file_name in "${success_required[@]}"; do
               test -s "production-evidence/$file_name"
             done
+          fi
+          if grep -q 'PASS: AUTOMATIC_ROLLBACK_COMPLETED' production-batch.log; then
+            test -s production-evidence/rollback-evidence.txt
           fi
           if compgen -G "production-evidence/*" > /dev/null; then
             (
