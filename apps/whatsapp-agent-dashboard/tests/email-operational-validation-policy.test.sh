@@ -24,3 +24,5 @@ if grep -Eq 'MESSAGE_ID:[[:space:]]*cmu|IDEMPOTENCY_KEY:[[:space:]]*internal-tes
 fi
 
 echo "PASS: email operational validation follows latest persisted canary"
+
+# Governed operational validation marker; no runtime behavior change.
