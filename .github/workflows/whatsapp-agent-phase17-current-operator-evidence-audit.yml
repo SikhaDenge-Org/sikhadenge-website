@@ -100,6 +100,7 @@ jobs:
           cd "$A"
           PHASE17_WORKSPACE_ID="$WORKSPACE_ID" \
           PHASE17_EXPECTED_LIVE_SHA="$EXPECTED_LIVE_SHA" \
-            npx tsx scripts/engageos-phase17-current-operator-evidence-audit.ts          printf 'EXTERNAL_WRITE_SENT=false\n'
+            npx tsx scripts/engageos-phase17-current-operator-evidence-audit.ts
+          printf 'EXTERNAL_WRITE_SENT=false\n'
           printf 'PASS: PHASE17_CURRENT_OPERATOR_EVIDENCE_READONLY_AUDIT\n'
           REMOTE
