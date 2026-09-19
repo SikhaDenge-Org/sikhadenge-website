@@ -15,6 +15,10 @@ on:
         description: Successful Smoke Rollback Readiness Review run ID
         required: true
         type: string
+      two_gate_run_id:
+        description: Successful Critical Incident and Duplicate Send review run ID
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -28,6 +32,7 @@ jobs:
       EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
       MONITORING_RUN_ID: ${{ inputs.monitoring_run_id }}
       SMOKE_RUN_ID: ${{ inputs.smoke_run_id }}
+      TWO_GATE_RUN_ID: ${{ inputs.two_gate_run_id }}
       RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
 
     steps:
@@ -40,6 +45,7 @@ jobs:
           [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$MONITORING_RUN_ID" =~ ^[0-9]+$ ]]
           [[ "$SMOKE_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$TWO_GATE_RUN_ID" =~ ^[0-9]+$ ]]
           release_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/$RELEASE_BRANCH" --jq '.commit.sha')"
           test "$release_sha" = "$EXPECTED_LIVE_SHA"
           printf 'RELEASE_SHA=%s\n' "$release_sha" > consolidated-facts.txt
@@ -92,12 +98,56 @@ jobs:
           echo "SMOKE_ARTIFACT_ID=$id" >> "$GITHUB_ENV"
           echo "SMOKE_ARTIFACT_DIGEST=$digest" >> "$GITHUB_ENV"
 
+      - name: Verify critical incident and duplicate send review artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$TWO_GATE_RUN_ID")"
+          test "$(jq -r '.name' <<<"$run")" = "WhatsApp Agent Phase17 Two-Gate Operator Review Package"
+          test "$(jq -r '.status' <<<"$run")" = "completed"
+          test "$(jq -r '.conclusion' <<<"$run")" = "success"
+          artifact_name="phase17-two-gate-review-$EXPECTED_LIVE_SHA"
+          artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$TWO_GATE_RUN_ID/artifacts?per_page=100")"
+          artifact="$(jq -c --arg n "$artifact_name" '[.artifacts[] | select(.name==$n and .expired==false)] | if length==1 then .[0] else empty end' <<<"$artifacts")"
+          test -n "$artifact"
+          id="$(jq -r '.id' <<<"$artifact")"
+          digest="$(jq -r '.digest // "unavailable"' <<<"$artifact")"
+          {
+            echo "TWO_GATE_REVIEW_RUN_ID=$TWO_GATE_RUN_ID"
+            echo "TWO_GATE_REVIEW_ARTIFACT_ID=$id"
+            echo "TWO_GATE_REVIEW_ARTIFACT_DIGEST=$digest"
+          } >> consolidated-facts.txt
+          echo "TWO_GATE_ARTIFACT_ID=$id" >> "$GITHUB_ENV"
+          echo "TWO_GATE_ARTIFACT_DIGEST=$digest" >> "$GITHUB_ENV"
+
       - name: Build exact attestation-ready inputs
         shell: bash
         run: |
           set -Eeuo pipefail
           mkdir -p package
           human='["PHASE17_OPERATOR_ACTOR_ID","PHASE17_OPERATOR_VERIFIED_AT","PHASE17_OPERATOR_REQUEST_ID","PHASE17_OPERATOR_ATTESTATION"]'
+
+          jq -n             --arg action "PHASE17_CRITICAL_INCIDENT_REVIEW"             --arg liveSha "$EXPECTED_LIVE_SHA"             --arg proofRef "github-actions://$GITHUB_REPOSITORY/runs/$TWO_GATE_RUN_ID/artifacts/$TWO_GATE_ARTIFACT_ID"             --arg digest "$TWO_GATE_ARTIFACT_DIGEST"             --argjson human "$human"             '{
+              classification:"ATTESTATION_READY_NOT_ATTESTED",
+              action:$action,
+              liveSha:$liveSha,
+              proofRef:$proofRef,
+              artifactDigest:$digest,
+              gateMetadata:{unresolvedCriticalIncidents:0},
+              humanFieldsRequired:$human
+            }' > package/critical-incident-attestation-ready.json
+
+          jq -n             --arg action "PHASE17_DUPLICATE_SEND_REVIEW"             --arg liveSha "$EXPECTED_LIVE_SHA"             --arg proofRef "github-actions://$GITHUB_REPOSITORY/runs/$TWO_GATE_RUN_ID/artifacts/$TWO_GATE_ARTIFACT_ID"             --arg digest "$TWO_GATE_ARTIFACT_DIGEST"             --argjson human "$human"             '{
+              classification:"ATTESTATION_READY_NOT_ATTESTED",
+              action:$action,
+              liveSha:$liveSha,
+              proofRef:$proofRef,
+              artifactDigest:$digest,
+              gateMetadata:{unexplainedDuplicateSends:0},
+              humanFieldsRequired:$human
+            }' > package/duplicate-send-attestation-ready.json
 
           jq -n             --arg action "PHASE17_MONITORING_ACTIVE"             --arg liveSha "$EXPECTED_LIVE_SHA"             --arg proofRef "github-actions://$GITHUB_REPOSITORY/runs/$MONITORING_RUN_ID/artifacts/$MONITORING_ARTIFACT_ID"             --arg digest "$MONITORING_ARTIFACT_DIGEST"             --argjson human "$human"             '{
               classification:"ATTESTATION_READY_NOT_ATTESTED",
@@ -142,6 +192,8 @@ jobs:
           Exact live SHA: $EXPECTED_LIVE_SHA
 
           Attestation-ready only:
+          - PHASE17_CRITICAL_INCIDENT_REVIEW
+          - PHASE17_DUPLICATE_SEND_REVIEW
           - PHASE17_MONITORING_ACTIVE
           - PHASE17_SUPPORT_RUNBOOK_ACTIVE
           - PHASE17_AUTHENTICATED_SMOKE
@@ -157,6 +209,8 @@ jobs:
             echo "## Phase17 Consolidated Attestation-Ready Package"
             echo
             echo "- Exact live SHA: `$EXPECTED_LIVE_SHA`"
+            echo "- Critical Incident Review: **ATTESTATION READY — NOT ATTESTED**"
+            echo "- Duplicate Send Review: **ATTESTATION READY — NOT ATTESTED**"
             echo "- Monitoring Active: **ATTESTATION READY — NOT ATTESTED**"
             echo "- Support Runbook Active: **ATTESTATION READY — NOT ATTESTED**"
             echo "- Authenticated Smoke: **ATTESTATION READY — NOT ATTESTED**"
