@@ -1170,3 +1170,28 @@ model EngageEmailAnalyticsEvent {
   @@index([workspaceId, contactId, occurredAt])
   @@index([workspaceId, messageId])
 }
+
+model EngageWhatsAppAutomationEvent {
+  id             String   @id @default(cuid())
+  workspaceId    String
+  eventKey       String
+  sourceEventId  String
+  trigger        String
+  relatedTriggers Json?
+  conversationId String?
+  contactId      String?
+  availableAt    DateTime @default(now())
+  status         String   @default("PENDING")
+  attemptCount   Int      @default(0)
+  payload        Json
+  claimedAt      DateTime?
+  processedAt    DateTime?
+  lastError      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([workspaceId, eventKey])
+  @@index([workspaceId, status, availableAt, createdAt])
+  @@index([conversationId, createdAt])
+  @@index([contactId, createdAt])
+}

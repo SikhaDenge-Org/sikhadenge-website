@@ -90,7 +90,9 @@
     "test:saas-commercial": "tsx tests/saas-api-commercial-certification.test.ts",
     "test:release-governance": "tsx tests/release-deployment-governance-certification.test.ts",
     "test:disaster-recovery": "tsx tests/disaster-recovery-qualification.test.ts",
-    "test:reliability-failure-injection": "tsx tests/reliability-failure-injection-certification.test.ts"
+    "test:reliability-failure-injection": "tsx tests/reliability-failure-injection-certification.test.ts",
+    "worker:whatsapp-automation": "tsx scripts/whatsapp-automation-scheduler.ts",
+    "test:whatsapp-automation-scheduler": "tsx tests/whatsapp-automation-scheduler-certification.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.12.0",

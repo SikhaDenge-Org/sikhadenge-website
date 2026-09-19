@@ -9,7 +9,8 @@ import {
   Prisma,
 } from "@prisma/client";
 
-import { syncLegacyWhatsAppIdentityMappingForInbound } from "@/modules/channels/whatsapp/application/provider-connection-binding";
+import { DEFAULT_ENGAGE_WORKSPACE_ID, syncLegacyWhatsAppIdentityMappingForInbound } from "@/modules/channels/whatsapp/application/provider-connection-binding";
+import { enqueueWhatsAppAutomationEvent } from "@/modules/automations/application/whatsapp-automation-event-outbox";
 import { prisma } from "../db/prisma";
 import { sha256Hex } from "./signature";
 import {
@@ -184,7 +185,7 @@ async function processInboundMessage(
     select: { id: true, metadata: true },
   });
 
-  await syncLegacyWhatsAppIdentityMappingForInbound(transaction, {
+  const binding = await syncLegacyWhatsAppIdentityMappingForInbound(transaction, {
     contactId: contact.id,
     waId: event.waId,
     phoneNumberId: event.phoneNumberId,
@@ -214,6 +215,23 @@ async function processInboundMessage(
       messageTimestamp: inboundAt,
     },
   });
+
+  if (binding.connectionId) {
+    await enqueueWhatsAppAutomationEvent(transaction, {
+      workspaceId: DEFAULT_ENGAGE_WORKSPACE_ID,
+      sourceEventId: `meta-inbound:${event.message.id}`,
+      trigger: "INCOMING_KEYWORD",
+      conversationId: conversation.id,
+      contactId: contact.id,
+      payload: {
+        text: event.message.text ?? "",
+        messageType: event.message.type,
+        metaMessageId: event.message.id,
+        waId: event.waId,
+        inboundAt: inboundAt.toISOString(),
+      },
+    });
+  }
 
   const effectiveLastMessageAt =
     conversation.lastMessageAt && conversation.lastMessageAt > inboundAt
