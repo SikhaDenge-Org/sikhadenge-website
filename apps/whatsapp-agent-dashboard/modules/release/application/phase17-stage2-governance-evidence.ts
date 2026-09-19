@@ -106,7 +106,7 @@ function productionEvidence(
   liveSha: string,
 ): AuditEvent | undefined {
   return machineVerifiedForSha(events, STAGE2_GOVERNANCE_ACTIONS.productionEvidence, liveSha, (metadata) =>
-    metadata.source === "github-actions-production-batch1-plus-postdeploy-proof" &&
+    metadata.source === "github-actions-production-batch1-plus-artifact-plus-runtime-identity" &&
     nonEmptyString(metadata.productionRunId) &&
     nonEmptyString(metadata.productionRunNumber) &&
     metadata.productionWorkflowConclusion === "success" &&
