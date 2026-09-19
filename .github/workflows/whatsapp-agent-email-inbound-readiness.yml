@@ -95,6 +95,50 @@ jobs:
           done
           chmod -R go-rwx email-inbound-readiness-evidence 2>/dev/null || true
 
+      - name: Publish readiness summary
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          json_file="email-inbound-readiness-evidence/inbound-readiness.json"
+          result_file="email-inbound-readiness-evidence/inbound-readiness-result.txt"
+          {
+            echo "## Email inbound production readiness"
+            echo
+            echo "- Audited SHA: \`$DEPLOYED_SHA\`"
+            if [[ -f "$json_file" ]]; then
+              status="$(jq -r '.status // "UNKNOWN"' "$json_file")"
+              account="$(jq -r '.activationAccount // "unknown"' "$json_file")"
+              mode="$(jq -r '.inboundMode // "unknown"' "$json_file")"
+              runtime="$(jq -r '.runtimeMode // "unknown"' "$json_file")"
+              sync="$(jq -r '.inboundSyncEnabled // false' "$json_file")"
+              access="$(jq -r '.checks.gmailInboundReadAccess // false' "$json_file")"
+              cursor="$(jq -r '.cursorReadyGmailConnections // 0' "$json_file")"
+              echo "- Status: **$status**"
+              echo "- Activation account: \`$account\`"
+              echo "- Inbound mode: \`$mode\`"
+              echo "- Runtime mode: \`$runtime\`"
+              echo "- Inbound sync enabled: \`$sync\`"
+              echo "- Gmail read access: \`$access\`"
+              echo "- Cursor-ready Gmail connections: \`$cursor\`"
+              echo
+              echo "### Blockers"
+              blockers="$(jq -r '.blockers[]? // empty' "$json_file")"
+              if [[ -n "$blockers" ]]; then
+                while IFS= read -r blocker; do echo "- $blocker"; done <<< "$blockers"
+              else
+                echo "- None"
+              fi
+            else
+              echo "- Status: **NO_EVIDENCE**"
+              echo "- Readiness evidence was not collected."
+            fi
+            if [[ -f "$result_file" ]]; then
+              echo
+              echo "- $(cat "$result_file")"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload protected readiness evidence
         if: always()
         uses: actions/upload-artifact@v4
