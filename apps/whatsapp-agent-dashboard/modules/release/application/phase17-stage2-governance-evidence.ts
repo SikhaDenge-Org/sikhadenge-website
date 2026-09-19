@@ -17,6 +17,11 @@ export const STAGE2_GOVERNANCE_ENTITY_TYPE = "CONTROLLED_LAUNCH_GOVERNANCE";
 export const STAGE2_MACHINE_REASON_CODE = "MACHINE_VERIFIED_EXACT_SHA";
 export const STAGE2_OPERATOR_REASON_CODE = "OPERATOR_VERIFIED_EXACT_SHA";
 
+const PRODUCTION_EVIDENCE_SOURCES = new Set([
+  "github-actions-production-batch1-plus-artifact-plus-runtime-identity",
+  "github-actions-production-batch1-plus-postdeploy-proof",
+]);
+
 const REQUIRED_POLICY_CHECKS = [
   "typecheck",
   "phase17-controlled-launch",
@@ -106,7 +111,8 @@ function productionEvidence(
   liveSha: string,
 ): AuditEvent | undefined {
   return machineVerifiedForSha(events, STAGE2_GOVERNANCE_ACTIONS.productionEvidence, liveSha, (metadata) =>
-    metadata.source === "github-actions-production-batch1-plus-postdeploy-proof" &&
+    typeof metadata.source === "string" &&
+    PRODUCTION_EVIDENCE_SOURCES.has(metadata.source) &&
     nonEmptyString(metadata.productionRunId) &&
     nonEmptyString(metadata.productionRunNumber) &&
     metadata.productionWorkflowConclusion === "success" &&
