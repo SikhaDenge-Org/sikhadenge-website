@@ -58,6 +58,10 @@ export default function EmailSenderManager(){
 
     {error?<div className={styles.errorBanner}>{error}</div>:null}
     {action?<div className={`${styles.actionBanner} ${styles[action.kind]}`}>{action.message}</div>:null}
+    {primaryConnection?.provider==="GOOGLE_GMAIL"?<div className={styles.inboxAccessNotice}>
+      <div><strong>Inbox access is authorized separately from sending.</strong><span>If incoming email is not syncing, approve Google read-only Gmail access for this account.</span></div>
+      <button type="button" onClick={()=>void enableInboxAccess()} disabled={action?.kind==="working"}>{action?.key==="inbox-access"&&action.kind==="working"?"Opening Google…":"Enable Inbox Access"}</button>
+    </div>:null}
 
     {primaryConnection ? <article className={styles.accountHero}>
       <div className={styles.googleLogo}>G</div>
