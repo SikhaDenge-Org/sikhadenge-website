@@ -70,7 +70,7 @@ jobs:
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
             "$SSH_USER@$SSH_HOST" 'set -Eeuo pipefail
               APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
-              RUNTIME_APP="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");if(!p?.pm2_env?.pm_cwd)process.exit(3);process.stdout.write(String(p.pm2_env.pm_cwd))})')"
+              RUNTIME_APP="$(pm2 jlist 2>/dev/null | jq -r ".[] | select(.name==\"sikhadenge-whatsapp-agent\") | .pm2_env.pm_cwd" | head -n1)"
               case "$RUNTIME_APP" in /var/www/sikhadenge-whatsapp-agent/*) ;; *) exit 45 ;; esac
               ENV_FILE="$RUNTIME_APP/.env"
               test -f "$ENV_FILE"
