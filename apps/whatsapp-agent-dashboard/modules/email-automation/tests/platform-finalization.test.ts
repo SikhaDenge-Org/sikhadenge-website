@@ -18,4 +18,25 @@ const primary=sender("g","GOOGLE_GMAIL"),microsoft=sender("m","MICROSOFT_365"),b
 const schedulerSource=readFileSync("modules/email-automation/automation/scheduler.ts","utf8");
 assert.match(schedulerSource,/processDueEmailSequences\s*\}\s*from\s*"\.\.\/sequences\/sequence-service"/);
 assert.doesNotMatch(schedulerSource,/processDueEmailSequences\s*\}\s*from\s*"\.\.\/finalization\/platform-service"/);
+
+const emailNavSource=readFileSync("modules/email-automation/ui/EmailWorkspaceNav.tsx","utf8");
+const campaignPageSource=readFileSync("app/email/campaigns/page.tsx","utf8");
+const sequencePageSource=readFileSync("app/email/sequences/page.tsx","utf8");
+const campaignUiSource=readFileSync("modules/email-automation/ui/EmailCampaignsWorkspace.tsx","utf8");
+const sequenceUiSource=readFileSync("modules/email-automation/ui/EmailSequencesWorkspace.tsx","utf8");
+assert.match(emailNavSource,/\["Campaigns",\s*"\/email\/campaigns"/);
+assert.match(emailNavSource,/\["Sequences",\s*"\/email\/sequences"/);
+assert.match(campaignPageSource,/EmailCampaignsWorkspace/);
+assert.match(sequencePageSource,/EmailSequencesWorkspace/);
+for(const route of ["\/api\/email\/campaigns","\/api\/email\/templates","\/api\/email\/connections","\/api\/email\/runtime"]) assert.match(campaignUiSource,new RegExp(route));
+assert.match(campaignUiSource,/control\(c\.id,\s*"DISPATCH"\)/);
+assert.match(campaignUiSource,/result\.waiting===true/);
+assert.match(campaignUiSource,/result\.processed/);
+assert.match(campaignUiSource,/result\.failed/);
+assert.match(campaignUiSource,/result\.remaining/);
+assert.match(campaignUiSource,/Campaign batch completed with recipient failures/);
+assert.match(sequenceUiSource,/\/api\/email\/sequences/);
+assert.match(sequenceUiSource,/action:\s*"ENROLL"/);
+assert.match(sequenceUiSource,/"PAUSED"/);
+assert.match(sequenceUiSource,/"ARCHIVED"/);
 console.log("email platform finalization contracts: ok");
