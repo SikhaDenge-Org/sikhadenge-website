@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db/prisma";
 import { buildEmailE1Runtime } from "../infrastructure/runtime";
 import { GmailEmailProviderAdapter } from "../providers/gmail/gmail-adapter";
 import { ingestWorkspaceSafeInboundEmail as ingestInboundEmail } from "./workspace-safe-ingest";
+import { detectGmailBounce } from "./gmail-bounce-detection";
 
 function header(headers: Array<{ name?: string; value?: string }> | undefined, name: string): string {
   return headers?.find((item) => item.name?.toLowerCase() === name.toLowerCase())?.value?.trim() || "";
@@ -122,8 +123,18 @@ export async function syncGmailHistory(input: { workspaceId: string; connectionI
     const fromMatch = /<([^>]+)>/.exec(fromRaw);
     const from = (fromMatch?.[1] || fromRaw).trim();
     if (!from.includes("@")) continue;
+    const subject = header(headers,"Subject");
+    const bounce = detectGmailBounce({
+      headers,
+      payload: message.payload,
+      from: fromRaw,
+      subject,
+      snippet: message.snippet || "",
+      bodyText: bodies.text,
+      bodyHtml: bodies.html,
+    });
     try {
-      const result = await ingestInboundEmail({ workspaceId: input.workspaceId, connectionId: input.connectionId, provider: "GOOGLE_GMAIL", providerMessageId: message.id, providerThreadId: message.threadId, from, to: [header(headers,"To")], cc: header(headers,"Cc") ? [header(headers,"Cc")] : [], replyTo: header(headers,"Reply-To") || null, subject: header(headers,"Subject"), snippet: message.snippet || "", bodyText: bodies.text, bodyHtml: bodies.html, attachments: attachmentMetadata(message.payload), classification: "INBOUND", receivedAt: message.internalDate ? new Date(Number(message.internalDate)).toISOString() : new Date().toISOString() });
+      const result = await ingestInboundEmail({ workspaceId: input.workspaceId, connectionId: input.connectionId, provider: "GOOGLE_GMAIL", providerMessageId: message.id, providerThreadId: message.threadId, from, to: [header(headers,"To")], cc: header(headers,"Cc") ? [header(headers,"Cc")] : [], replyTo: header(headers,"Reply-To") || null, subject, snippet: message.snippet || "", bodyText: bodies.text, bodyHtml: bodies.html, attachments: attachmentMetadata(message.payload), classification: bounce.classification, bounceRecipient: bounce.failedRecipient, receivedAt: message.internalDate ? new Date(Number(message.internalDate)).toISOString() : new Date().toISOString() });
       if (result.replayed) replayed += 1; else imported += 1;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") replayed += 1;
