@@ -6,6 +6,7 @@ on:
       - "apps/whatsapp-agent-dashboard/**"
       - "modules/whatsapp-agent/**"
       - ".github/workflows/whatsapp-agent-ci.yml"
+      - ".github/workflows/whatsapp-agent-production-batch1.yml"
   push:
     branches:
       - feature/whatsapp-ai-agent-roadmap
