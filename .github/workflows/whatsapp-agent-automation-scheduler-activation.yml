@@ -1,0 +1,130 @@
+name: WhatsApp Automation Scheduler Activation
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_live_sha:
+        description: Exact protected release SHA currently deployed
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  activate:
+    environment: whatsapp-agent-production
+    runs-on: ubuntu-latest
+    env:
+      EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_SSH_HOST }}
+      SSH_PORT: ${{ secrets.WHATSAPP_PROD_SSH_PORT }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_SSH_USER }}
+    steps:
+      - name: Validate input and secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test -n "$SSH_HOST"
+          test -n "$SSH_PORT"
+          test -n "$SSH_USER"
+          test -n "${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}"
+          test -n "${{ secrets.WHATSAPP_PROD_SSH_KNOWN_HOSTS }}"
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}" > "$HOME/.ssh/whatsapp-production"
+          chmod 600 "$HOME/.ssh/whatsapp-production"
+          printf '%s\n' "${{ secrets.WHATSAPP_PROD_SSH_KNOWN_HOSTS }}" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Activate fail-closed scheduler
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' bash -s" <<'REMOTE' | tee phase21-scheduler-activation.txt
+          set -euo pipefail
+          LIVE_APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          PROCESS=sikhadenge-whatsapp-automation-scheduler
+
+          test "$(git -C "$LIVE_APP" rev-parse --is-inside-work-tree)" = "true"
+          live_sha="$(git -C "$LIVE_APP" rev-parse HEAD)"
+          test "$live_sha" = "$EXPECTED_LIVE_SHA"
+          test "$(git -C "$LIVE_APP" status --porcelain --untracked-files=no | wc -l)" -eq 0
+          test -f "$LIVE_APP/ecosystem.automation-scheduler.cjs"
+          test -f "$LIVE_APP/scripts/whatsapp-automation-scheduler.ts"
+
+          grep -q 'WHATSAPP_AUTOMATION_SCHEDULER_ENABLED: "true"' "$LIVE_APP/ecosystem.automation-scheduler.cjs"
+          grep -q 'AUTOMATION_RUNTIME_ENABLED: "false"' "$LIVE_APP/ecosystem.automation-scheduler.cjs"
+          grep -q 'AUTOMATION_ACTIONS_ENABLED: "false"' "$LIVE_APP/ecosystem.automation-scheduler.cjs"
+          grep -q 'JOURNEY_RUNTIME_ENABLED: "false"' "$LIVE_APP/ecosystem.automation-scheduler.cjs"
+          grep -q 'JOURNEY_ACTIONS_ENABLED: "false"' "$LIVE_APP/ecosystem.automation-scheduler.cjs"
+          grep -q 'WHATSAPP_CAMPAIGNS_ENABLED: "false"' "$LIVE_APP/ecosystem.automation-scheduler.cjs"
+          grep -q 'WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED: "false"' "$LIVE_APP/ecosystem.automation-scheduler.cjs"
+          grep -q 'WHATSAPP_OUTBOUND_MODE: "disabled"' "$LIVE_APP/ecosystem.automation-scheduler.cjs"
+          grep -q 'WHATSAPP_OUTBOUND_KILL_SWITCH: "on"' "$LIVE_APP/ecosystem.automation-scheduler.cjs"
+
+          cd "$LIVE_APP"
+          activation_epoch_ms="$(date +%s%3N)"
+          pm2 startOrReload ecosystem.automation-scheduler.cjs --only "$PROCESS" --update-env
+          pm2 save
+
+          sleep 8
+          state="$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s).find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(p?.pm2_env?.status||"missing")})')"
+          test "$state" = "online"
+
+          pm2 logs "$PROCESS" --lines 80 --nostream > /tmp/phase21-scheduler.log
+          grep -q '"service":"sikhadenge-whatsapp-automation-scheduler"' /tmp/phase21-scheduler.log
+          node -e '
+            const fs = require("fs");
+            const [file, sinceRaw] = process.argv.slice(1);
+            const since = Number(sinceRaw);
+            const events = fs.readFileSync(file, "utf8").split(/\r?\n/).flatMap((line) => {
+              const start = line.indexOf("{");
+              if (start < 0) return [];
+              try { return [JSON.parse(line.slice(start))]; } catch { return []; }
+            }).filter((row) =>
+              row.service === "sikhadenge-whatsapp-automation-scheduler" &&
+              Number.isFinite(Date.parse(row.at)) &&
+              Date.parse(row.at) >= since
+            );
+            if (!events.some((row) => row.event === "cycle" || row.event === "paused")) process.exit(11);
+            if (events.some((row) => ["cycle_error", "uncaught_exception", "unhandled_rejection"].includes(row.event))) process.exit(12);
+          ' /tmp/phase21-scheduler.log "$activation_epoch_ms"
+
+          final_live_sha="$(git -C "$LIVE_APP" rev-parse HEAD)"
+          test "$final_live_sha" = "$EXPECTED_LIVE_SHA"
+          test "$(git -C "$LIVE_APP" status --porcelain --untracked-files=no | wc -l)" -eq 0
+
+          printf 'LIVE_SHA=%s\n' "$final_live_sha"
+          printf 'SCHEDULER_PROCESS=%s\n' "$PROCESS"
+          printf 'SCHEDULER_PM2_STATE=%s\n' "$state"
+          printf 'SCHEDULER_ENABLED=true\n'
+          printf 'AUTOMATION_RUNTIME_ENABLED=false\n'
+          printf 'AUTOMATION_ACTIONS_ENABLED=false\n'
+          printf 'JOURNEY_RUNTIME_ENABLED=false\n'
+          printf 'JOURNEY_ACTIONS_ENABLED=false\n'
+          printf 'WHATSAPP_CAMPAIGNS_ENABLED=false\n'
+          printf 'WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED=false\n'
+          printf 'WHATSAPP_OUTBOUND_MODE=disabled\n'
+          printf 'WHATSAPP_OUTBOUND_KILL_SWITCH=on\n'
+          printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          REMOTE
+
+      - name: Upload activation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase21-whatsapp-automation-scheduler-activation-${{ inputs.expected_live_sha }}
+          path: phase21-scheduler-activation.txt
+          if-no-files-found: warn
+          retention-days: 30

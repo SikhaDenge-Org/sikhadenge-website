@@ -7,6 +7,7 @@ on:
       - "modules/whatsapp-agent/**"
       - ".github/workflows/whatsapp-agent-ci.yml"
       - ".github/workflows/whatsapp-agent-production-batch1.yml"
+      - ".github/workflows/whatsapp-agent-automation-scheduler-activation.yml"
       - ".github/workflows/whatsapp-agent-email-inbound-readiness.yml"
       - ".github/workflows/whatsapp-agent-email-inbound-activate.yml"
       - ".github/workflows/whatsapp-agent-phase17-*.yml"
