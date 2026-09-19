@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "../db/prisma";
 import { listAutomationFlowsForWorkspace } from "../automation/automation-service";
 import { enqueueEmailAutomationEvent, findActorEmailWorkspaceId, supersedePendingEmailAutomationEvents } from "../../modules/email-automation/automation/event-outbox";
+import { enqueueWhatsAppAutomationEvent, findActorWhatsAppWorkspaceId, supersedePendingWhatsAppAutomationEvents } from "../../modules/automations/application/whatsapp-automation-event-outbox";
 
 const FORM_EVENT = "engagement_form";
 const SUBMISSION_EVENT = "engagement_submission";
@@ -343,19 +344,32 @@ export async function recordFormStarted(input: {
 }) {
   const formId = clean(input.formId, 80); const contactId = clean(input.contactId, 100); const sessionId = clean(input.sessionId, 120);
   if (!formId || !contactId || !sessionId) throw new Error("Form lifecycle identifiers are required.");
-  const [formEvent, contact, emailWorkspaceId] = await Promise.all([
+  const [formEvent, contact, emailWorkspaceId, whatsappWorkspaceId] = await Promise.all([
     prisma.webhookEvent.findUnique({ where: { eventKey: `engagement-form:${formId}` } }),
     prisma.whatsAppContact.findUnique({ where: { id: contactId }, select: { id: true, email: true } }),
     findActorEmailWorkspaceId(input.actorId),
+    findActorWhatsAppWorkspaceId(input.actorId),
   ]);
   const form = formEvent ? parseForm(formEvent.payload) : null; if (!form || !contact) throw new Error("Form session context is invalid.");
-  if (!emailWorkspaceId) return { tracked: false, reason: "EMAIL_WORKSPACE_NOT_FOUND" };
+  if (!emailWorkspaceId && !whatsappWorkspaceId) return { tracked: false, reason: "WORKSPACE_NOT_FOUND" };
   const source = clean(input.source, 100) || "Website";
   return prisma.$transaction(async (tx) => {
-    await enqueueEmailAutomationEvent(tx,{workspaceId:emailWorkspaceId,sourceEventId:`engagement-form-start:${formId}:${sessionId}`,trigger:"FORM_STARTED",contactId,payload:{formId,sessionId,source,email:contact.email}});
-    const recovery=await enqueueEmailAutomationEvent(tx,{workspaceId:emailWorkspaceId,sourceEventId:`engagement-form-abandon:${formId}:${sessionId}`,trigger:"FORM_ABANDONED",contactId,availableAt:minutesFromNow(FORM_ABANDON_AFTER_MINUTES),payload:{formId,sessionId,source,email:contact.email,abandonAfterMinutes:FORM_ABANDON_AFTER_MINUTES}});
-    await tx.auditLog.create({data:{actorId:input.actorId,action:"ENGAGEMENT_FORM_STARTED",entityType:"EngagementFormSession",entityId:sessionId,after:toJson({formId,contactId,source,recoveryEventId:recovery.id})}});
-    return { tracked:true, recoveryEventId:recovery.id, availableAt:recovery.availableAt };
+    let recoveryEventId: string | null = null;
+    let recoveryAvailableAt: Date | null = null;
+    if (emailWorkspaceId) {
+      await enqueueEmailAutomationEvent(tx,{workspaceId:emailWorkspaceId,sourceEventId:`engagement-form-start:${formId}:${sessionId}`,trigger:"FORM_STARTED",contactId,payload:{formId,sessionId,source,email:contact.email}});
+      const recovery=await enqueueEmailAutomationEvent(tx,{workspaceId:emailWorkspaceId,sourceEventId:`engagement-form-abandon:${formId}:${sessionId}`,trigger:"FORM_ABANDONED",contactId,availableAt:minutesFromNow(FORM_ABANDON_AFTER_MINUTES),payload:{formId,sessionId,source,email:contact.email,abandonAfterMinutes:FORM_ABANDON_AFTER_MINUTES}});
+      recoveryEventId = recovery.id;
+      recoveryAvailableAt = recovery.availableAt;
+    }
+    if (whatsappWorkspaceId) {
+      await enqueueWhatsAppAutomationEvent(tx,{workspaceId:whatsappWorkspaceId,sourceEventId:`engagement-form-start:${formId}:${sessionId}`,trigger:"FORM_STARTED",contactId,payload:{formId,sessionId,source}});
+      const recovery=await enqueueWhatsAppAutomationEvent(tx,{workspaceId:whatsappWorkspaceId,sourceEventId:`engagement-form-abandon:${formId}:${sessionId}`,trigger:"FORM_ABANDONED",contactId,availableAt:minutesFromNow(FORM_ABANDON_AFTER_MINUTES),payload:{formId,sessionId,source,abandonAfterMinutes:FORM_ABANDON_AFTER_MINUTES}});
+      recoveryEventId = recoveryEventId ?? recovery.id;
+      recoveryAvailableAt = recoveryAvailableAt ?? recovery.availableAt;
+    }
+    await tx.auditLog.create({data:{actorId:input.actorId,action:"ENGAGEMENT_FORM_STARTED",entityType:"EngagementFormSession",entityId:sessionId,after:toJson({formId,contactId,source,recoveryEventId})}});
+    return { tracked:true, recoveryEventId, availableAt:recoveryAvailableAt };
   });
 }
 
@@ -383,6 +397,7 @@ export async function createFormSubmission(input: {
     if (!values[field.id]) throw new Error(`${field.label} is required.`);
   }
   const emailWorkspaceId = await findActorEmailWorkspaceId(input.actorId);
+  const whatsappWorkspaceId = await findActorWhatsAppWorkspaceId(input.actorId);
   const submission: StoredSubmission = {
     id: randomUUID(),
     formId,
@@ -410,6 +425,16 @@ export async function createFormSubmission(input: {
         trigger: "FORM_SUBMITTED",
         contactId: submission.contactId,
         submissionId: submission.id,
+        payload: { formId, contactId: submission.contactId, values, source: submission.source },
+      });
+    }
+    if (whatsappWorkspaceId) {
+      if (submission.contactId) await supersedePendingWhatsAppAutomationEvents(tx,{workspaceId:whatsappWorkspaceId,trigger:"FORM_ABANDONED",contactId:submission.contactId,sourceEventIdPrefix:`engagement-form-abandon:${formId}:`});
+      await enqueueWhatsAppAutomationEvent(tx, {
+        workspaceId: whatsappWorkspaceId,
+        sourceEventId: `engagement-submission:${submission.id}`,
+        trigger: "FORM_SUBMITTED",
+        contactId: submission.contactId,
         payload: { formId, contactId: submission.contactId, values, source: submission.source },
       });
     }
@@ -460,8 +485,18 @@ export async function createAppointment(input: {
     updatedAt: now,
   };
   const emailWorkspaceId = appointment.contactId ? await findActorEmailWorkspaceId(input.actorId) : null;
+  const whatsappWorkspaceId = appointment.contactId ? await findActorWhatsAppWorkspaceId(input.actorId) : null;
   const reminderFlows = emailWorkspaceId
     ? (await listAutomationFlowsForWorkspace(emailWorkspaceId, false)).filter((flow) => {
+        if (flow.status !== "ACTIVE") return false;
+        const trigger = flow.nodes.find((node) => node.kind === "TRIGGER");
+        if (!trigger || trigger.type !== "APPOINTMENT_REMINDER") return false;
+        const minutes = Number(trigger.config.reminderMinutesBefore);
+        return Number.isFinite(minutes) && minutes >= 1 && minutes <= 43_200;
+      })
+    : [];
+  const whatsappReminderFlows = whatsappWorkspaceId
+    ? (await listAutomationFlowsForWorkspace(whatsappWorkspaceId, false)).filter((flow) => {
         if (flow.status !== "ACTIVE") return false;
         const trigger = flow.nodes.find((node) => node.kind === "TRIGGER");
         if (!trigger || trigger.type !== "APPOINTMENT_REMINDER") return false;
@@ -506,6 +541,38 @@ export async function createAppointment(input: {
         const availableAt = requestedAt.getTime() > Date.now() ? requestedAt : new Date();
         await enqueueEmailAutomationEvent(tx, {
           workspaceId: emailWorkspaceId,
+          sourceEventId: `engagement-appointment-reminder:${appointment.id}:${flow.flowId}:${flow.version}`,
+          trigger: "APPOINTMENT_REMINDER",
+          contactId: appointment.contactId,
+          availableAt,
+          payload: {
+            appointmentId: appointment.id,
+            title: appointment.title,
+            scheduledAt: appointment.scheduledAt,
+            ownerId: appointment.ownerId,
+            reminderMinutesBefore: minutes,
+            targetFlowId: flow.flowId,
+            targetFlowVersion: flow.version,
+          },
+        });
+      }
+    }
+    if (whatsappWorkspaceId && appointment.contactId) {
+      await enqueueWhatsAppAutomationEvent(tx, {
+        workspaceId: whatsappWorkspaceId,
+        sourceEventId: `engagement-appointment:${appointment.id}`,
+        trigger: "APPOINTMENT_CREATED",
+        contactId: appointment.contactId,
+        payload: { appointmentId: appointment.id, title: appointment.title, scheduledAt: appointment.scheduledAt, ownerId: appointment.ownerId },
+      });
+      for (const flow of whatsappReminderFlows) {
+        const trigger = flow.nodes.find((node) => node.kind === "TRIGGER" && node.type === "APPOINTMENT_REMINDER");
+        const minutes = Number(trigger?.config.reminderMinutesBefore);
+        if (!trigger || !Number.isFinite(minutes) || minutes < 1 || minutes > 43_200) continue;
+        const requestedAt = new Date(scheduledAt.getTime() - minutes * 60_000);
+        const availableAt = requestedAt.getTime() > Date.now() ? requestedAt : new Date();
+        await enqueueWhatsAppAutomationEvent(tx, {
+          workspaceId: whatsappWorkspaceId,
           sourceEventId: `engagement-appointment-reminder:${appointment.id}:${flow.flowId}:${flow.version}`,
           trigger: "APPOINTMENT_REMINDER",
           contactId: appointment.contactId,
@@ -603,6 +670,7 @@ export async function createPaymentRecord(input: {
     updatedAt: now,
   };
   const emailWorkspaceId = payment.contactId ? await findActorEmailWorkspaceId(input.actorId) : null;
+  const whatsappWorkspaceId = payment.contactId ? await findActorWhatsAppWorkspaceId(input.actorId) : null;
   await prisma.$transaction(async (tx) => {
     await tx.webhookEvent.create({
       data: {
@@ -627,6 +695,12 @@ export async function createPaymentRecord(input: {
       if(status === "PENDING") await enqueueEmailAutomationEvent(tx,{workspaceId:emailWorkspaceId,sourceEventId:`engagement-checkout:${payment.id}:created`,trigger:"CHECKOUT_STARTED",contactId:payment.contactId,payload:{paymentId:payment.id,reference:payment.reference,course:payment.course,amountMinor:payment.amountMinor,currency:payment.currency,provider:payment.provider}});
       await enqueueEmailAutomationEvent(tx,{workspaceId:emailWorkspaceId,sourceEventId:`engagement-payment:${payment.id}:created`,trigger:status === "PAID" ? "PAYMENT_PAID" : "PAYMENT_PENDING",contactId:payment.contactId,payload:{paymentId:payment.id,reference:payment.reference,course:payment.course,amountMinor:payment.amountMinor,currency:payment.currency,status:payment.status,provider:payment.provider}});
       if(status === "PENDING") await enqueueEmailAutomationEvent(tx,{workspaceId:emailWorkspaceId,sourceEventId:`engagement-payment-abandon:${payment.id}`,trigger:"PAYMENT_ABANDONED",contactId:payment.contactId,availableAt:minutesFromNow(PAYMENT_ABANDON_AFTER_MINUTES),payload:{paymentId:payment.id,reference:payment.reference,course:payment.course,amountMinor:payment.amountMinor,currency:payment.currency,provider:payment.provider,abandonAfterMinutes:PAYMENT_ABANDON_AFTER_MINUTES}});
+    }
+    if (whatsappWorkspaceId && payment.contactId && (status === "PENDING" || status === "PAID")) {
+      if(status === "PAID") await supersedePendingWhatsAppAutomationEvents(tx,{workspaceId:whatsappWorkspaceId,trigger:"PAYMENT_ABANDONED",contactId:payment.contactId});
+      if(status === "PENDING") await enqueueWhatsAppAutomationEvent(tx,{workspaceId:whatsappWorkspaceId,sourceEventId:`engagement-checkout:${payment.id}:created`,trigger:"CHECKOUT_STARTED",contactId:payment.contactId,payload:{paymentId:payment.id,reference:payment.reference,course:payment.course,amountMinor:payment.amountMinor,currency:payment.currency,provider:payment.provider}});
+      await enqueueWhatsAppAutomationEvent(tx,{workspaceId:whatsappWorkspaceId,sourceEventId:`engagement-payment:${payment.id}:created`,trigger:status === "PAID" ? "PAYMENT_PAID" : "PAYMENT_PENDING",contactId:payment.contactId,payload:{paymentId:payment.id,reference:payment.reference,course:payment.course,amountMinor:payment.amountMinor,currency:payment.currency,status:payment.status,provider:payment.provider}});
+      if(status === "PENDING") await enqueueWhatsAppAutomationEvent(tx,{workspaceId:whatsappWorkspaceId,sourceEventId:`engagement-payment-abandon:${payment.id}`,trigger:"PAYMENT_ABANDONED",contactId:payment.contactId,availableAt:minutesFromNow(PAYMENT_ABANDON_AFTER_MINUTES),payload:{paymentId:payment.id,reference:payment.reference,course:payment.course,amountMinor:payment.amountMinor,currency:payment.currency,provider:payment.provider,abandonAfterMinutes:PAYMENT_ABANDON_AFTER_MINUTES}});
     }
   });
   return payment;
@@ -654,6 +728,7 @@ export async function updatePaymentRecord(input: {
     updatedAt: new Date().toISOString(),
   };
   const emailWorkspaceId = payment.contactId && status !== payment.status ? await findActorEmailWorkspaceId(input.actorId) : null;
+  const whatsappWorkspaceId = payment.contactId && status !== payment.status ? await findActorWhatsAppWorkspaceId(input.actorId) : null;
   await prisma.$transaction(async (tx) => {
     await tx.webhookEvent.update({ where: { id: event.id }, data: { payload: toJson(updated) } });
     await tx.auditLog.create({
@@ -670,6 +745,11 @@ export async function updatePaymentRecord(input: {
       if(status === "PAID") await supersedePendingEmailAutomationEvents(tx,{workspaceId:emailWorkspaceId,trigger:"PAYMENT_ABANDONED",contactId:payment.contactId});
       await enqueueEmailAutomationEvent(tx,{workspaceId:emailWorkspaceId,sourceEventId:`engagement-payment:${payment.id}:status:${payment.updatedAt}:${status}`,trigger:status === "PAID" ? "PAYMENT_PAID" : "PAYMENT_PENDING",contactId:payment.contactId,payload:{paymentId:payment.id,reference:payment.reference,course:payment.course,amountMinor:payment.amountMinor,currency:payment.currency,previousStatus:payment.status,status,provider:payment.provider,providerPaymentId:updated.providerPaymentId}});
       if(status === "PENDING") await enqueueEmailAutomationEvent(tx,{workspaceId:emailWorkspaceId,sourceEventId:`engagement-payment-abandon:${payment.id}:${updated.updatedAt}`,trigger:"PAYMENT_ABANDONED",contactId:payment.contactId,availableAt:minutesFromNow(PAYMENT_ABANDON_AFTER_MINUTES),payload:{paymentId:payment.id,reference:payment.reference,course:payment.course,amountMinor:payment.amountMinor,currency:payment.currency,provider:payment.provider,abandonAfterMinutes:PAYMENT_ABANDON_AFTER_MINUTES}});
+    }
+    if (whatsappWorkspaceId && payment.contactId && (status === "PENDING" || status === "PAID")) {
+      if(status === "PAID") await supersedePendingWhatsAppAutomationEvents(tx,{workspaceId:whatsappWorkspaceId,trigger:"PAYMENT_ABANDONED",contactId:payment.contactId});
+      await enqueueWhatsAppAutomationEvent(tx,{workspaceId:whatsappWorkspaceId,sourceEventId:`engagement-payment:${payment.id}:status:${payment.updatedAt}:${status}`,trigger:status === "PAID" ? "PAYMENT_PAID" : "PAYMENT_PENDING",contactId:payment.contactId,payload:{paymentId:payment.id,reference:payment.reference,course:payment.course,amountMinor:payment.amountMinor,currency:payment.currency,previousStatus:payment.status,status,provider:payment.provider,providerPaymentId:updated.providerPaymentId}});
+      if(status === "PENDING") await enqueueWhatsAppAutomationEvent(tx,{workspaceId:whatsappWorkspaceId,sourceEventId:`engagement-payment-abandon:${payment.id}:${updated.updatedAt}`,trigger:"PAYMENT_ABANDONED",contactId:payment.contactId,availableAt:minutesFromNow(PAYMENT_ABANDON_AFTER_MINUTES),payload:{paymentId:payment.id,reference:payment.reference,course:payment.course,amountMinor:payment.amountMinor,currency:payment.currency,provider:payment.provider,abandonAfterMinutes:PAYMENT_ABANDON_AFTER_MINUTES}});
     }
   });
   return updated;
