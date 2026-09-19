@@ -70,29 +70,32 @@ jobs:
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
             "$SSH_USER@$SSH_HOST" 'set -Eeuo pipefail
               APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
-              ENV_FILE="$APP/.env"
+              RUNTIME_APP="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");if(!p?.pm2_env?.pm_cwd)process.exit(3);process.stdout.write(String(p.pm2_env.pm_cwd))})')"
+              case "$RUNTIME_APP" in /var/www/sikhadenge-whatsapp-agent/*) ;; *) exit 45 ;; esac
+              ENV_FILE="$RUNTIME_APP/.env"
+              test -f "$ENV_FILE"
               token="$(cat)"
               test -n "$token"
               TOKEN_VALUE="$token" ENV_FILE="$ENV_FILE" node - <<"NODE"
-const fs = require("node:fs");
-const file = process.env.ENV_FILE;
-const token = process.env.TOKEN_VALUE;
-const key = "WHATSAPP_ANALYTICS_TOKEN";
-const original = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
-const lines = original.split(/\r?\n/);
-let replaced = false;
-const next = lines.map((raw) => {
-  const line = raw.trim();
-  if (!line || line.startsWith("#")) return raw;
-  const normalized = line.startsWith("export ") ? line.slice(7).trim() : line;
-  const i = normalized.indexOf("=");
-  if (i < 1 || normalized.slice(0, i).trim() !== key) return raw;
-  replaced = true;
-  return `${key}=${JSON.stringify(token)}`;
-});
-if (!replaced) next.push(`${key}=${JSON.stringify(token)}`);
-fs.writeFileSync(file, next.join("\n").replace(/\n+$/, "") + "\n", { mode: 0o600 });
-NODE
+              const fs = require("node:fs");
+              const file = process.env.ENV_FILE;
+              const token = process.env.TOKEN_VALUE;
+              const key = "WHATSAPP_ANALYTICS_TOKEN";
+              const original = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+              const lines = original.split(/\r?\n/);
+              let replaced = false;
+              const next = lines.map((raw) => {
+                const line = raw.trim();
+                if (!line || line.startsWith("#")) return raw;
+                const normalized = line.startsWith("export ") ? line.slice(7).trim() : line;
+                const i = normalized.indexOf("=");
+                if (i < 1 || normalized.slice(0, i).trim() !== key) return raw;
+                replaced = true;
+                return `${key}=${JSON.stringify(token)}`;
+              });
+              if (!replaced) next.push(`${key}=${JSON.stringify(token)}`);
+              fs.writeFileSync(file, next.join("\n").replace(/\n+$/, "") + "\n", { mode: 0o600 });
+              NODE
               chmod 600 "$ENV_FILE"
               pm2 restart sikhadenge-whatsapp-agent --update-env >/dev/null
               pm2 save >/dev/null
@@ -118,7 +121,10 @@ NODE
             "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' bash -s" <<'REMOTE' | tee authenticated-readonly-smoke.txt
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
-          ENV_FILE="$APP/.env"
+          RUNTIME_APP="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");if(!p?.pm2_env?.pm_cwd)process.exit(3);process.stdout.write(String(p.pm2_env.pm_cwd))})')"
+          case "$RUNTIME_APP" in /var/www/sikhadenge-whatsapp-agent/*) ;; *) exit 45 ;; esac
+          ENV_FILE="$RUNTIME_APP/.env"
+          test -f "$ENV_FILE"
           PUBLIC_URL=https://whatsapp.sikhadenge.in
 
           read_env() {
