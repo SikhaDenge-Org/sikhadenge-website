@@ -8,6 +8,7 @@ import { buildEmailAutomationIdempotencyKey } from "./contracts";
 import { enqueueEmailAutomationEvent } from "./event-outbox";
 import { emailAutomationConditionPasses, emailAutomationContactContext, executeEmailAutomationCrmAction } from "./action-executor";
 import { createEmailUnsubscribeUrl } from "../campaigns/unsubscribe";
+import { backfillWorkspaceTrackingContactId } from "../analytics/workspace-safe-attribution";
 import {
   EMAIL_AUTOMATION_AUTO_MAX_ATTEMPTS,
   classifyEmailProviderFailure,
@@ -182,6 +183,21 @@ export async function processEmailAutomationEvents(input: {
             };
             const rawKey = buildEmailAutomationIdempotencyKey({ workspaceId: input.workspaceId, automationId: flow.flowId, automationVersion: flow.version, triggerEventId: event.id, contactId: event.contactId, actionNodeId: node.id });
             const result = await sender.send({ workspaceId: input.workspaceId, templateId, templateVersionId, automationSenderIdentityId: typeof node.config.senderIdentityId === "string" ? node.config.senderIdentityId : null, to: [{ email: deliverable.email, name: deliverable.displayName || deliverable.profileName || undefined }], variables: sendValues, idempotencyKey: compactIdempotencyKey(rawKey), actorUserId: flow.createdBy || input.actorUserId, deliveryContext: "AUTOMATION" });
+            const sendEventKey = createHash("sha256").update(`automation|${event.id}|${flow.flowId}|${node.id}|${result.message.id}`).digest("hex");
+            await prisma.engageEmailAnalyticsEvent.upsert({
+              where: { workspaceId_eventKey: { workspaceId: input.workspaceId, eventKey: sendEventKey } },
+              update: {},
+              create: {
+                workspaceId: input.workspaceId,
+                messageId: result.message.id,
+                contactId: event.contactId,
+                eventType: result.message.externalRequestSent ? "AUTOMATION_SENT" : "AUTOMATION_DRY_RUN",
+                provider: null,
+                eventKey: sendEventKey,
+                occurredAt: new Date(),
+              },
+            });
+            await backfillWorkspaceTrackingContactId({ workspaceId: input.workspaceId, messageId: result.message.id, contactId: event.contactId });
             actionCount += 1;
             results.push({ eventId: event.id, flowId: flow.flowId, nodeId: node.id, messageId: result.message.id, replayed: result.replayed });
             if (result.message.externalRequestSent) {
