@@ -1,0 +1,173 @@
+name: WhatsApp Agent Phase17 Consolidated Attestation Ready Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_live_sha:
+        description: Exact production release SHA under review
+        required: true
+        type: string
+      monitoring_run_id:
+        description: Successful Monitoring Runbook Review Package run ID
+        required: true
+        type: string
+      smoke_run_id:
+        description: Successful Smoke Rollback Readiness Review run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  prepare-consolidated-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
+      MONITORING_RUN_ID: ${{ inputs.monitoring_run_id }}
+      SMOKE_RUN_ID: ${{ inputs.smoke_run_id }}
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+
+    steps:
+      - name: Freeze exact release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$MONITORING_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$SMOKE_RUN_ID" =~ ^[0-9]+$ ]]
+          release_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/$RELEASE_BRANCH" --jq '.commit.sha')"
+          test "$release_sha" = "$EXPECTED_LIVE_SHA"
+          printf 'RELEASE_SHA=%s\n' "$release_sha" > consolidated-facts.txt
+
+      - name: Verify monitoring and runbook review artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$MONITORING_RUN_ID")"
+          test "$(jq -r '.name' <<<"$run")" = "WhatsApp Agent Phase17 Monitoring Runbook Review Package"
+          test "$(jq -r '.status' <<<"$run")" = "completed"
+          test "$(jq -r '.conclusion' <<<"$run")" = "success"
+          artifact_name="phase17-monitoring-runbook-review-$EXPECTED_LIVE_SHA"
+          artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$MONITORING_RUN_ID/artifacts?per_page=100")"
+          artifact="$(jq -c --arg n "$artifact_name" '[.artifacts[] | select(.name==$n and .expired==false)] | if length==1 then .[0] else empty end' <<<"$artifacts")"
+          test -n "$artifact"
+          id="$(jq -r '.id' <<<"$artifact")"
+          digest="$(jq -r '.digest // "unavailable"' <<<"$artifact")"
+          {
+            echo "MONITORING_REVIEW_RUN_ID=$MONITORING_RUN_ID"
+            echo "MONITORING_REVIEW_ARTIFACT_ID=$id"
+            echo "MONITORING_REVIEW_ARTIFACT_DIGEST=$digest"
+          } >> consolidated-facts.txt
+          echo "MONITORING_ARTIFACT_ID=$id" >> "$GITHUB_ENV"
+          echo "MONITORING_ARTIFACT_DIGEST=$digest" >> "$GITHUB_ENV"
+
+      - name: Verify authenticated smoke review artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SMOKE_RUN_ID")"
+          test "$(jq -r '.name' <<<"$run")" = "WhatsApp Agent Phase17 Smoke Rollback Readiness Review"
+          test "$(jq -r '.status' <<<"$run")" = "completed"
+          test "$(jq -r '.conclusion' <<<"$run")" = "success"
+          artifact_name="phase17-smoke-rollback-readiness-review-$EXPECTED_LIVE_SHA"
+          artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SMOKE_RUN_ID/artifacts?per_page=100")"
+          artifact="$(jq -c --arg n "$artifact_name" '[.artifacts[] | select(.name==$n and .expired==false)] | if length==1 then .[0] else empty end' <<<"$artifacts")"
+          test -n "$artifact"
+          id="$(jq -r '.id' <<<"$artifact")"
+          digest="$(jq -r '.digest // "unavailable"' <<<"$artifact")"
+          {
+            echo "SMOKE_REVIEW_RUN_ID=$SMOKE_RUN_ID"
+            echo "SMOKE_REVIEW_ARTIFACT_ID=$id"
+            echo "SMOKE_REVIEW_ARTIFACT_DIGEST=$digest"
+          } >> consolidated-facts.txt
+          echo "SMOKE_ARTIFACT_ID=$id" >> "$GITHUB_ENV"
+          echo "SMOKE_ARTIFACT_DIGEST=$digest" >> "$GITHUB_ENV"
+
+      - name: Build exact attestation-ready inputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p package
+          human='["PHASE17_OPERATOR_ACTOR_ID","PHASE17_OPERATOR_VERIFIED_AT","PHASE17_OPERATOR_REQUEST_ID","PHASE17_OPERATOR_ATTESTATION"]'
+
+          jq -n             --arg action "PHASE17_MONITORING_ACTIVE"             --arg liveSha "$EXPECTED_LIVE_SHA"             --arg proofRef "github-actions://$GITHUB_REPOSITORY/runs/$MONITORING_RUN_ID/artifacts/$MONITORING_ARTIFACT_ID"             --arg digest "$MONITORING_ARTIFACT_DIGEST"             --argjson human "$human"             '{
+              classification:"ATTESTATION_READY_NOT_ATTESTED",
+              action:$action,
+              liveSha:$liveSha,
+              proofRef:$proofRef,
+              artifactDigest:$digest,
+              gateMetadata:{monitoringStatus:"ACTIVE"},
+              humanFieldsRequired:$human
+            }' > package/monitoring-active-attestation-ready.json
+
+          jq -n             --arg action "PHASE17_SUPPORT_RUNBOOK_ACTIVE"             --arg liveSha "$EXPECTED_LIVE_SHA"             --arg proofRef "github-actions://$GITHUB_REPOSITORY/runs/$MONITORING_RUN_ID/artifacts/$MONITORING_ARTIFACT_ID"             --arg digest "$MONITORING_ARTIFACT_DIGEST"             --argjson human "$human"             '{
+              classification:"ATTESTATION_READY_NOT_ATTESTED",
+              action:$action,
+              liveSha:$liveSha,
+              proofRef:$proofRef,
+              artifactDigest:$digest,
+              gateMetadata:{runbookStatus:"ACTIVE"},
+              humanFieldsRequired:$human
+            }' > package/support-runbook-active-attestation-ready.json
+
+          jq -n             --arg action "PHASE17_AUTHENTICATED_SMOKE"             --arg liveSha "$EXPECTED_LIVE_SHA"             --arg proofRef "github-actions://$GITHUB_REPOSITORY/runs/$SMOKE_RUN_ID/artifacts/$SMOKE_ARTIFACT_ID"             --arg digest "$SMOKE_ARTIFACT_DIGEST"             --argjson human "$human"             '{
+              classification:"ATTESTATION_READY_NOT_ATTESTED",
+              action:$action,
+              liveSha:$liveSha,
+              proofRef:$proofRef,
+              artifactDigest:$digest,
+              gateMetadata:{result:"PASS",authenticated:true,readOnly:true,externalWritesAttempted:false},
+              humanFieldsRequired:$human
+            }' > package/authenticated-smoke-attestation-ready.json
+
+          jq -n             --arg liveSha "$EXPECTED_LIVE_SHA"             '{
+              liveSha:$liveSha,
+              rollbackRehearsal:{classification:"NOT_ATTESTATION_READY",reason:"Actual production rollback rehearsal has not been executed",resultPassMayNotBeClaimed:true},
+              scopeApproval:{classification:"HUMAN_DECISION_REQUIRED"},
+              observationWindow:{classification:"BLOCKED_UNTIL_OPERATOR_MONITORING_AND_RUNBOOK_ATTESTATIONS"}
+            }' > package/non-attestable-gates.json
+
+          cp consolidated-facts.txt package/
+          cat > package/README.txt <<EOF
+          Phase17 consolidated attestation-ready package
+          Exact live SHA: $EXPECTED_LIVE_SHA
+
+          Attestation-ready only:
+          - PHASE17_MONITORING_ACTIVE
+          - PHASE17_SUPPORT_RUNBOOK_ACTIVE
+          - PHASE17_AUTHENTICATED_SMOKE
+
+          No human actor, verification timestamp, request ID, or attestation is supplied.
+          Rollback rehearsal is not attestation-ready because no actual production rollback rehearsal was executed.
+          Scope approval remains a human/product decision.
+          Observation remains blocked until monitoring and runbook operator attestations exist.
+          No production write or WhatsApp/customer message is performed by this workflow.
+          EOF
+
+          {
+            echo "## Phase17 Consolidated Attestation-Ready Package"
+            echo
+            echo "- Exact live SHA: `$EXPECTED_LIVE_SHA`"
+            echo "- Monitoring Active: **ATTESTATION READY — NOT ATTESTED**"
+            echo "- Support Runbook Active: **ATTESTATION READY — NOT ATTESTED**"
+            echo "- Authenticated Smoke: **ATTESTATION READY — NOT ATTESTED**"
+            echo "- Rollback Rehearsal: **NOT ATTESTATION READY**"
+            echo "- External WhatsApp write: **false**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload consolidated package
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase17-consolidated-attestation-ready-${{ inputs.expected_live_sha }}
+          path: package
+          if-no-files-found: error
+          retention-days: 30
