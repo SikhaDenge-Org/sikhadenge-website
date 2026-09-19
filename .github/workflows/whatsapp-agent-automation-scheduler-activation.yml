@@ -7,6 +7,11 @@ on:
         description: Exact protected release SHA currently deployed
         required: true
         type: string
+  workflow_run:
+    workflows:
+      - "WhatsApp Agent Production Batch 1"
+    types:
+      - completed
 
 permissions:
   contents: read
@@ -19,8 +24,15 @@ jobs:
   activate:
     environment: whatsapp-agent-production
     runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'release/whatsapp-instagram-agent-flow-20260731'
+      )
     env:
-      EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
+      EXPECTED_LIVE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.expected_live_sha || github.event.workflow_run.head_sha }}
       SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
