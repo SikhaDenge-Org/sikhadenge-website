@@ -427,8 +427,7 @@ jobs:
               sha256sum --check SHA256SUMS.txt
             )
           fi
-          printf 'PASS: PRODUCTION_EVIDENCE_INTEGRITY_VERIFIED
-'
+          printf 'PASS: PRODUCTION_EVIDENCE_INTEGRITY_VERIFIED\\n'
 
       - name: Upload production evidence
         if: always()
