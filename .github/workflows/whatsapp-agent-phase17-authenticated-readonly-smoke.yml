@@ -92,9 +92,19 @@ jobs:
           test "$live_sha" = "$EXPECTED_LIVE_SHA"
           test "$dirty" = "0"
 
+          token_source="WHATSAPP_ANALYTICS_TOKEN"
           token="$(read_env WHATSAPP_ANALYTICS_TOKEN 2>/dev/null || true)"
-          if [[ -z "$token" ]]; then token="$(read_env WHATSAPP_AGENT_ANALYTICS_TOKEN 2>/dev/null || true)"; fi
-          test -n "$token"
+          if [[ -z "$token" ]]; then
+            token_source="WHATSAPP_AGENT_ANALYTICS_TOKEN"
+            token="$(read_env WHATSAPP_AGENT_ANALYTICS_TOKEN 2>/dev/null || true)"
+          fi
+          if [[ -z "$token" ]]; then
+            printf 'TOKEN_CONFIGURED=false\n'
+            printf 'TOKEN_SOURCE=none\n'
+            exit 41
+          fi
+          printf 'TOKEN_CONFIGURED=true\n'
+          printf 'TOKEN_SOURCE=%s\n' "$token_source"
 
           tmp="$(mktemp)"
           trap 'rm -f "$tmp"' EXIT
@@ -102,7 +112,11 @@ jobs:
             -H "Authorization: Bearer $token" \
             -H 'Accept: application/json' \
             "$PUBLIC_URL/api/analytics/overview")"
-          test "$http" = "200"
+          printf 'HTTP_STATUS=%s\n' "$http"
+          if [[ "$http" != "200" ]]; then
+            printf 'RESPONSE_JSON_VALID=false\n'
+            exit 42
+          fi
 
           node - "$tmp" <<'NODE'
           const fs=require('node:fs');
@@ -112,6 +126,7 @@ jobs:
           if (!body.totals || typeof body.totals !== 'object') process.exit(1);
           if (typeof body.generatedAt !== 'string' || !Number.isFinite(Date.parse(body.generatedAt))) process.exit(1);
           NODE
+          printf 'RESPONSE_JSON_VALID=true\n'
 
           pm2_state="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(String(p?.pm2_env?.status||"missing"))})')"
           test "$pm2_state" = "online"
