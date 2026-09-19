@@ -184,9 +184,28 @@ bash "$STAGE_APP/scripts/engageos-production-verify.sh"
 
 printf '===== TASK 5/5: ROLLBACK READINESS EVIDENCE =====\n'
 test -f "$BACKUP_DIR/deploy-state.txt"
-test -d "$(awk -F= '$1 == "OLD_NEXT" {sub($1 "=", ""); print; exit}' "$BACKUP_DIR/deploy-state.txt")"
+OLD_NEXT="$(awk -F= '$1 == "OLD_NEXT" {sub($1 "=", ""); print; exit}' "$BACKUP_DIR/deploy-state.txt")"
+test -n "$OLD_NEXT"
+test -d "$OLD_NEXT"
 test -f "$BACKUP_DIR/source-before.sha"
 test -f "$BACKUP_DIR/build-before.id"
+SOURCE_BEFORE_SHA="$(tr -d '\r\n' < "$BACKUP_DIR/source-before.sha")"
+BUILD_BEFORE_ID="$(tr -d '\r\n' < "$BACKUP_DIR/build-before.id")"
+test -n "$SOURCE_BEFORE_SHA"
+test -n "$BUILD_BEFORE_ID"
+cat > "$BACKUP_DIR/rollback-evidence.txt" <<EOF
+RUN_ID=$RUN_ID
+RELEASE_SHA=$RELEASE_SHA
+STATUS=PASS_ROLLBACK_READINESS
+ROLLBACK_EXECUTED=false
+OLD_NEXT=$OLD_NEXT
+SOURCE_BEFORE_SHA=$SOURCE_BEFORE_SHA
+BUILD_BEFORE_ID=$BUILD_BEFORE_ID
+VERIFIED_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+EOF
+chmod 600 "$BACKUP_DIR/rollback-evidence.txt"
+test -s "$BACKUP_DIR/rollback-evidence.txt"
+cat "$BACKUP_DIR/rollback-evidence.txt"
 printf 'PASS: ROLLBACK_ARTIFACTS_PRESERVED\n'
 
 # The application is now independently verified. Controlled-launch persistence is
