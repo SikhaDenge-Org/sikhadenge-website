@@ -97,32 +97,9 @@ jobs:
           candidate_id="$(q "SELECT \"id\" FROM \"EngageChannelConnection\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"channel\"='WHATSAPP' AND \"status\"='CONNECTED' ORDER BY \"updatedAt\" DESC LIMIT 1")"
           printf 'CONTROLLED_LAUNCH_STATE=%s\nTRANSITION_COUNT=%s\nCURRENT_WHATSAPP_CANDIDATE_ID=%s\n' "$state" "$transitions" "$candidate_id"
 
-          gate_count() {
-            local action="$1" extra="${2:-}"
-            q "SELECT COUNT(*) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"action\"='${action}' AND \"outcome\"='VERIFIED' AND COALESCE(\"entityType\",'')='CONTROLLED_LAUNCH_GOVERNANCE' AND COALESCE(\"entityId\",'')='${EXPECTED_LIVE_SHA}' AND COALESCE(\"reasonCode\",'')='OPERATOR_VERIFIED_EXACT_SHA' AND COALESCE(\"actorId\",'')<>'' AND COALESCE(\"requestId\",'')<>'' AND COALESCE(\"metadata\"->>'liveSha','')='${EXPECTED_LIVE_SHA}' AND COALESCE(\"metadata\"->>'proofRef','')<>'' AND COALESCE(\"metadata\"->>'verifiedAt','')<>'' ${extra}"
-          }
-          machine_count() {
-            local action="$1"
-            q "SELECT COUNT(*) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"action\"='${action}' AND \"outcome\"='VERIFIED' AND COALESCE(\"entityType\",'')='CONTROLLED_LAUNCH_GOVERNANCE' AND COALESCE(\"entityId\",'')='${EXPECTED_LIVE_SHA}' AND COALESCE(\"reasonCode\",'')='MACHINE_VERIFIED_EXACT_SHA' AND \"actorId\" IS NULL"
-          }
-          emit_gate() {
-            local key="$1" count="$2"
-            if [[ "$count" -gt 0 ]]; then printf '%s=PROVEN count=%s\n' "$key" "$count"; else printf '%s=UNPROVEN count=0\n' "$key"; fi
-          }
-
-          emit_gate PHASE17_CRITICAL_INCIDENT_REVIEW "$(gate_count PHASE17_CRITICAL_INCIDENT_REVIEW "AND COALESCE(\"metadata\"->>'unresolvedCriticalIncidents','')='0'")"
-          emit_gate PHASE17_DUPLICATE_SEND_REVIEW "$(gate_count PHASE17_DUPLICATE_SEND_REVIEW "AND COALESCE(\"metadata\"->>'unexplainedDuplicateSends','')='0'")"
-          emit_gate PHASE17_ROLLBACK_REHEARSAL "$(gate_count PHASE17_ROLLBACK_REHEARSAL "AND COALESCE(\"metadata\"->>'result','')='PASS'")"
-          emit_gate PHASE17_MONITORING_ACTIVE "$(gate_count PHASE17_MONITORING_ACTIVE "AND COALESCE(\"metadata\"->>'monitoringStatus','')='ACTIVE'")"
-          emit_gate PHASE17_STAGE2_SCOPE_APPROVED "$(gate_count PHASE17_STAGE2_SCOPE_APPROVED "AND COALESCE(\"metadata\"->>'candidateId','')='${candidate_id}' AND COALESCE(\"metadata\"->>'decision','')='APPROVED'")"
-          emit_gate PHASE17_AUTHENTICATED_SMOKE "$(gate_count PHASE17_AUTHENTICATED_SMOKE "AND COALESCE(\"metadata\"->>'result','')='PASS' AND COALESCE(\"metadata\"->>'authenticated','')='true' AND COALESCE(\"metadata\"->>'readOnly','')='true' AND COALESCE(\"metadata\"->>'externalWritesAttempted','')='false'")"
-          emit_gate PHASE17_SUPPORT_RUNBOOK_ACTIVE "$(gate_count PHASE17_SUPPORT_RUNBOOK_ACTIVE "AND COALESCE(\"metadata\"->>'runbookStatus','')='ACTIVE'")"
-          emit_gate PHASE17_OBSERVATION_WINDOW_COMPLETE "$(gate_count PHASE17_OBSERVATION_WINDOW_COMPLETE "AND COALESCE(\"metadata\"->>'complete','')='true'")"
-          emit_gate PHASE17_PRODUCTION_EVIDENCE_RECORDED "$(machine_count PHASE17_PRODUCTION_EVIDENCE_RECORDED)"
-          emit_gate PHASE17_POLICY_VERIFIED "$(machine_count PHASE17_POLICY_VERIFIED)"
-
-          operator_total="$(q "SELECT COUNT(DISTINCT \"action\") FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"entityId\"='${EXPECTED_LIVE_SHA}' AND \"reasonCode\"='OPERATOR_VERIFIED_EXACT_SHA' AND \"action\" IN ('PHASE17_CRITICAL_INCIDENT_REVIEW','PHASE17_DUPLICATE_SEND_REVIEW','PHASE17_ROLLBACK_REHEARSAL','PHASE17_MONITORING_ACTIVE','PHASE17_STAGE2_SCOPE_APPROVED','PHASE17_AUTHENTICATED_SMOKE','PHASE17_SUPPORT_RUNBOOK_ACTIVE','PHASE17_OBSERVATION_WINDOW_COMPLETE')")"
-          printf 'OPERATOR_GATES_RECORDED=%s/8\n' "$operator_total"
-          printf 'EXTERNAL_WRITE_SENT=false\n'
+          cd "$A"
+          PHASE17_WORKSPACE_ID="$WORKSPACE_ID" \
+          PHASE17_EXPECTED_LIVE_SHA="$EXPECTED_LIVE_SHA" \
+            npx tsx scripts/engageos-phase17-current-operator-evidence-audit.ts          printf 'EXTERNAL_WRITE_SENT=false\n'
           printf 'PASS: PHASE17_CURRENT_OPERATOR_EVIDENCE_READONLY_AUDIT\n'
           REMOTE
