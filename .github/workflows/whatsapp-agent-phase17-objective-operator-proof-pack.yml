@@ -1,0 +1,199 @@
+name: WhatsApp Agent Phase17 Objective Operator Proof Pack
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_live_sha:
+        description: Exact production release SHA to inspect
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  collect-objective-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
+      WORKSPACE_ID: engagews_default
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+
+    steps:
+      - name: Checkout governance source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Freeze exact release and runbook integrity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git fetch origin "+refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH"
+          release_sha="$(git rev-parse "refs/remotes/origin/$RELEASE_BRANCH")"
+          test "$release_sha" = "$EXPECTED_LIVE_SHA"
+          runbook_path="apps/whatsapp-agent-dashboard/docs/engageos/PHASE_17_STAGE2_SUPPORT_RUNBOOK.md"
+          git cat-file -e "$EXPECTED_LIVE_SHA:$runbook_path"
+          git show "$EXPECTED_LIVE_SHA:$runbook_path" > phase17-stage2-support-runbook.md
+          grep -q '^## Monitoring checklist' phase17-stage2-support-runbook.md
+          grep -q '^## Critical incident triage' phase17-stage2-support-runbook.md
+          grep -q '^## Duplicate-send investigation' phase17-stage2-support-runbook.md
+          grep -q '^## Rollback procedure' phase17-stage2-support-runbook.md
+          runbook_sha256="$(sha256sum phase17-stage2-support-runbook.md | awk '{print $1}')"
+          {
+            echo "EXPECTED_LIVE_SHA=$EXPECTED_LIVE_SHA"
+            echo "RELEASE_HEAD_SHA=$release_sha"
+            echo "SUPPORT_RUNBOOK_PRESENT=true"
+            echo "SUPPORT_RUNBOOK_SHA256=$runbook_sha256"
+          } > objective-proof-pack.txt
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then echo SSH_PORT=22 >> "$GITHUB_ENV"; SSH_PORT=22; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Collect exact-SHA production facts read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' WORKSPACE_ID='$WORKSPACE_ID' bash -s" <<'REMOTE' | tee -a objective-proof-pack.txt
+          set -Eeuo pipefail
+          A=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          E="$A/.env"
+
+          envv() {
+            node - "$E" "$1" <<'NODE'
+          const fs=require('node:fs'); const [file,key]=process.argv.slice(2);
+          for(const raw of fs.readFileSync(file,'utf8').split(/\r?\n/)){
+            let line=raw.trim(); if(!line||line.startsWith('#')) continue;
+            if(line.startsWith('export ')) line=line.slice(7).trim();
+            const i=line.indexOf('='); if(i<1||line.slice(0,i).trim()!==key) continue;
+            let value=line.slice(i+1).trim();
+            if(value.length>=2&&((value.startsWith('"')&&value.endsWith('"'))||(value.startsWith("'")&&value.endsWith("'")))) value=value.slice(1,-1);
+            process.stdout.write(value); process.exit(0);
+          }
+          process.exit(1);
+          NODE
+          }
+
+          live_sha="$(git -C "$A" rev-parse HEAD)"
+          dirty="$(git -C "$A" status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          pm2_state="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(String(p?.pm2_env?.status||"missing"))})')"
+          login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login || true)"
+          test "$live_sha" = "$EXPECTED_LIVE_SHA"
+          test "$dirty" = "0"
+          test "$pm2_state" = "online"
+          test "$login_http" = "200"
+          printf 'LIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\nPM2_STATE=%s\nLOGIN_HTTP=%s\n' "$live_sha" "$dirty" "$pm2_state" "$login_http"
+
+          DB="$(node "$A/scripts/prisma-postgres-cli-url.mjs" "$(envv DATABASE_URL)")"
+          q(){ psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "$1"; }
+
+          anchor="$(q "SELECT COALESCE(MAX(\"occurredAt\"), MAX(\"createdAt\")) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"action\"='PHASE17_PRODUCTION_EVIDENCE_RECORDED' AND \"entityId\"='${EXPECTED_LIVE_SHA}' AND \"outcome\"='VERIFIED'")"
+          test -n "$anchor"
+          printf 'EVIDENCE_WINDOW_STARTED_AT=%s\n' "$anchor"
+          printf 'EVIDENCE_WINDOW_ENDED_AT=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",\"externalWritesAllowed\",\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='${WORKSPACE_ID}'")"
+          active_kill_switches="$(q "SELECT COUNT(*) FROM \"EngageKillSwitch\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"active\"=true")"
+          enabled_flags="$(q "SELECT COUNT(*) FROM \"EngageFeatureFlag\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"enabled\"=true")"
+          security_failures="$(q "SELECT COUNT(*) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"occurredAt\" >= '${anchor}'::timestamptz AND UPPER(\"outcome\") IN ('FAILED','FAILURE','DENIED','ERROR','BLOCKED')")"
+          security_critical_candidates="$(q "SELECT COUNT(*) FROM \"EngageSecurityAuditEvent\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"occurredAt\" >= '${anchor}'::timestamptz AND (LOWER(COALESCE(\"reasonCode\",'')) ~ '(critical|security|auth|workspace|cross|unexpected|corrupt)' OR LOWER(\"action\") ~ '(critical|security|auth|workspace|cross|unexpected|corrupt)') AND UPPER(\"outcome\") <> 'VERIFIED'")"
+          outbound_total="$(q "SELECT COUNT(*) FROM \"WhatsAppMessage\" WHERE \"direction\"='OUTBOUND' AND \"createdAt\" >= '${anchor}'::timestamptz")"
+          outbound_failed="$(q "SELECT COUNT(*) FROM \"WhatsAppMessage\" WHERE \"direction\"='OUTBOUND' AND \"createdAt\" >= '${anchor}'::timestamptz AND \"status\"='FAILED'")"
+          duplicate_provider_ids="$(q "SELECT COUNT(*) FROM (SELECT \"metaMessageId\" FROM \"WhatsAppMessage\" WHERE \"direction\"='OUTBOUND' AND \"createdAt\" >= '${anchor}'::timestamptz AND \"metaMessageId\" IS NOT NULL GROUP BY \"metaMessageId\" HAVING COUNT(*) > 1) d")"
+          duplicate_candidate_pairs="$(q "SELECT COUNT(*) FROM \"WhatsAppMessage\" a JOIN \"WhatsAppMessage\" b ON a.\"id\" < b.\"id\" AND a.\"conversationId\"=b.\"conversationId\" AND COALESCE(a.\"text\",'')=COALESCE(b.\"text\",'') AND a.\"direction\"='OUTBOUND' AND b.\"direction\"='OUTBOUND' AND a.\"createdAt\" >= '${anchor}'::timestamptz AND b.\"createdAt\" >= '${anchor}'::timestamptz AND ABS(EXTRACT(EPOCH FROM (a.\"messageTimestamp\"-b.\"messageTimestamp\"))) <= 60 WHERE COALESCE(a.\"text\",'') <> ''")"
+          recent_transitions="$(q "SELECT COUNT(*) FROM \"EngageControlledLaunchTransition\" WHERE \"workspaceId\"='${WORKSPACE_ID}' AND \"createdAt\" >= '${anchor}'::timestamptz")"
+
+          printf 'CONTROLLED_LAUNCH_STATE=%s\n' "$state"
+          printf 'ACTIVE_KILL_SWITCH_COUNT=%s\n' "$active_kill_switches"
+          printf 'ENABLED_FEATURE_FLAG_COUNT=%s\n' "$enabled_flags"
+          printf 'SECURITY_FAILURE_EVENT_COUNT=%s\n' "$security_failures"
+          printf 'CRITICAL_INCIDENT_SIGNAL_COUNT=%s\n' "$security_critical_candidates"
+          printf 'OUTBOUND_MESSAGE_COUNT=%s\n' "$outbound_total"
+          printf 'OUTBOUND_FAILED_COUNT=%s\n' "$outbound_failed"
+          printf 'DUPLICATE_PROVIDER_ID_GROUP_COUNT=%s\n' "$duplicate_provider_ids"
+          printf 'DUPLICATE_OUTBOUND_CANDIDATE_PAIR_COUNT=%s\n' "$duplicate_candidate_pairs"
+          printf 'CONTROLLED_LAUNCH_TRANSITIONS_IN_WINDOW=%s\n' "$recent_transitions"
+          printf 'EXTERNAL_WRITE_ATTEMPTED_BY_COLLECTOR=false\n'
+          printf 'PROOF_CLASSIFICATION=REVIEW_READY_NOT_OPERATOR_ATTESTED\n'
+          REMOTE
+
+      - name: Collect monitoring workflow fact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          api="repos/$GITHUB_REPOSITORY/actions/workflows/whatsapp-agent-provider-parity-monitor.yml/runs?branch=main&per_page=10"
+          json="$(gh api "$api")"
+          latest="$(jq -c '.workflow_runs | sort_by(.created_at) | reverse | .[0] // empty' <<<"$json")"
+          if [[ -z "$latest" ]]; then
+            {
+              echo "PROVIDER_PARITY_MONITOR_RUN_FOUND=false"
+              echo "PROVIDER_PARITY_MONITOR_STATUS=UNKNOWN"
+            } | tee -a objective-proof-pack.txt
+          else
+            run_id="$(jq -r '.id' <<<"$latest")"
+            status="$(jq -r '.status' <<<"$latest")"
+            conclusion="$(jq -r '.conclusion // ""' <<<"$latest")"
+            created_at="$(jq -r '.created_at' <<<"$latest")"
+            updated_at="$(jq -r '.updated_at' <<<"$latest")"
+            {
+              echo "PROVIDER_PARITY_MONITOR_RUN_FOUND=true"
+              echo "PROVIDER_PARITY_MONITOR_RUN_ID=$run_id"
+              echo "PROVIDER_PARITY_MONITOR_STATUS=$status"
+              echo "PROVIDER_PARITY_MONITOR_CONCLUSION=$conclusion"
+              echo "PROVIDER_PARITY_MONITOR_CREATED_AT=$created_at"
+              echo "PROVIDER_PARITY_MONITOR_UPDATED_AT=$updated_at"
+            } | tee -a objective-proof-pack.txt
+          fi
+
+      - name: Publish proof summary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          {
+            echo "## Phase17 objective proof pack"
+            echo
+            sed 's/^/    /' objective-proof-pack.txt
+            echo
+            echo "Read-only evidence for human review. No operator attestation is created and no external message is sent."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload objective proof artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase17-objective-proof-${{ inputs.expected_live_sha }}
+          path: |
+            objective-proof-pack.txt
+            phase17-stage2-support-runbook.md
+          if-no-files-found: error
+          retention-days: 30
