@@ -1,0 +1,68 @@
+name: WhatsApp Agent Reliability Drill
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-reliability-drill
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+    steps:
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          port="${SSH_PORT:-22}"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$port" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Run controlled reliability drill
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          port="${SSH_PORT:-22}"
+          ssh -p "$port" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" 'bash -s' > phase20-reliability-evidence.txt <<'REMOTE'
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          cd "$APP"
+          bash scripts/engageos-production-reliability-drill.sh
+          REMOTE
+          test -s phase20-reliability-evidence.txt
+          grep -q 'PASS: PHASE20_RELIABILITY_DRILL_VERIFIED' phase20-reliability-evidence.txt
+          cat phase20-reliability-evidence.txt
+
+      - name: Upload reliability evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatsapp-agent-reliability-${{ github.run_id }}-${{ github.run_attempt }}
+          path: phase20-reliability-evidence.txt
+          if-no-files-found: error
+          retention-days: 30
+
