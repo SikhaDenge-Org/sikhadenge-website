@@ -43,10 +43,14 @@ async function validateSenderPool(workspaceId:string,ids:string[]){if(!ids.lengt
 
 async function assertCampaignKillSwitch(workspaceId:string,campaignId:string){const rows=await prisma.engageKillSwitch.findMany({where:{workspaceId,active:true,deactivatedAt:null,OR:[{scopeType:"WORKSPACE"},{scopeType:"CHANNEL",channel:"EMAIL"},{scopeType:"CAMPAIGN",campaignId}]},select:{blockedActions:true,reason:true}});for(const row of rows){const actions=stringArray(row.blockedActions,50);if(actions.includes("CAMPAIGN_EXECUTION")||actions.includes("OUTBOUND_NEW"))throw new Error(`Campaign execution is blocked by kill switch: ${row.reason}.`);}}
 
-export async function assertEmailBulkRecipientAllowed(input:{workspaceId:string;purpose:string;recipient:Recipient;frequencyCapPerDay:number;connectionId?:string|null}){
+export async function assertEmailRecipientNotSuppressed(input:{workspaceId:string;purpose:string;recipient:Recipient;connectionId?:string|null}){
   const now=new Date();
   const suppressions=await prisma.engageCustomerSuppression.findMany({where:{workspaceId:input.workspaceId,AND:[{OR:[{customerRef:null},{customerRef:input.recipient.contactId??"__none__"}]},{OR:[{channel:null},{channel:"EMAIL"}]},{OR:[{connectionId:null},...(input.connectionId?[{connectionId:input.connectionId}]:[])]},{startsAt:{lte:now}},{OR:[{expiresAt:null},{expiresAt:{gt:now}}]},{OR:[{revokedAt:null},{revokedAt:{gt:now}}]}]},select:{purposes:true,reason:true}});
   for(const suppression of suppressions){const purposes=purposeValues(suppression.purposes);if(purposes.includes("ALL")||purposes.includes(input.purpose))throw new Error(`Recipient is suppressed: ${suppression.reason}.`);}
+}
+
+export async function assertEmailBulkRecipientAllowed(input:{workspaceId:string;purpose:string;recipient:Recipient;frequencyCapPerDay:number;connectionId?:string|null}){
+  await assertEmailRecipientNotSuppressed(input);
   if(input.purpose==="MARKETING"){
     if(!input.recipient.contactId)throw new Error("Marketing recipient must map to a workspace contact.");
     const latest=await prisma.engageCustomerConsentEvent.findFirst({where:{workspaceId:input.workspaceId,customerRef:input.recipient.contactId,channel:"EMAIL",purpose:"MARKETING"},orderBy:{occurredAt:"desc"},select:{state:true}});
