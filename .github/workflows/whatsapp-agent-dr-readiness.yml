@@ -13,10 +13,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  dispatch-protected:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref_name == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Dispatch DR audit on protected release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh workflow run whatsapp-agent-dr-readiness.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref release/whatsapp-instagram-agent-flow-20260731
+          printf 'DISPATCHED_PROTECTED_RELEASE=true\n'
+
   verify:
+    if: github.event_name == 'workflow_dispatch' && github.ref_name == 'release/whatsapp-instagram-agent-flow-20260731'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: whatsapp-agent-production
+    permissions:
+      contents: read
     env:
       SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
       SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
@@ -67,4 +89,3 @@ jobs:
           path: dr-readiness-evidence.txt
           if-no-files-found: error
           retention-days: 30
-
