@@ -14,7 +14,7 @@ function enabled(value: string | undefined): boolean {
 export function messengerPolicyEnforcementEnabled(
   env: Environment = process.env,
 ): boolean {
-  return enabled(env.ENGAGEOS_MESSENGER_POLICY_ENFORCED);
+  return enabled(env.ENGAGEOS_MESSENGER_POLICY_ENFORCED) || messengerOutboundLive(env);
 }
 
 function messengerOutboundLive(env: Environment): boolean {
