@@ -1,0 +1,266 @@
+name: WhatsApp Agent Phase17 Five-Gate Recorder Preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_live_sha:
+        description: Exact production release SHA under review
+        required: true
+        type: string
+      consolidated_run_id:
+        description: Successful five-gate consolidated attestation-ready run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  recorder-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
+      CONSOLIDATED_RUN_ID: ${{ inputs.consolidated_run_id }}
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+      WORKSPACE_ID: engagews_default
+
+    steps:
+      - name: Freeze exact release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CONSOLIDATED_RUN_ID" =~ ^[0-9]+$ ]]
+          release_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/$RELEASE_BRANCH" --jq '.commit.sha')"
+          test "$release_sha" = "$EXPECTED_LIVE_SHA"
+          echo "APPROVED_RELEASE_SHA=$release_sha"
+
+      - name: Verify five-gate consolidated artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CONSOLIDATED_RUN_ID")"
+          test "$(jq -r '.name' <<<"$run")" = "WhatsApp Agent Phase17 Consolidated Attestation Ready Package"
+          test "$(jq -r '.status' <<<"$run")" = "completed"
+          test "$(jq -r '.conclusion' <<<"$run")" = "success"
+
+          artifact_name="phase17-consolidated-attestation-ready-$EXPECTED_LIVE_SHA"
+          artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CONSOLIDATED_RUN_ID/artifacts?per_page=100")"
+          artifact="$(jq -c --arg n "$artifact_name" '[.artifacts[] | select(.name==$n and .expired==false)] | if length==1 then .[0] else empty end' <<<"$artifacts")"
+          test -n "$artifact"
+          artifact_id="$(jq -r '.id' <<<"$artifact")"
+          artifact_digest="$(jq -r '.digest // "unavailable"' <<<"$artifact")"
+
+          gh run download "$CONSOLIDATED_RUN_ID" --repo "$GITHUB_REPOSITORY" -n "$artifact_name" -D consolidated
+          for f in \
+            critical-incident-attestation-ready.json \
+            duplicate-send-attestation-ready.json \
+            monitoring-active-attestation-ready.json \
+            support-runbook-active-attestation-ready.json \
+            authenticated-smoke-attestation-ready.json; do
+            test -s "consolidated/$f"
+            test "$(jq -r '.liveSha' "consolidated/$f")" = "$EXPECTED_LIVE_SHA"
+            test "$(jq -r '.classification' "consolidated/$f")" = "ATTESTATION_READY_NOT_ATTESTED"
+            test "$(jq -r '.humanFieldsRequired | length' "consolidated/$f")" = "4"
+          done
+
+          {
+            echo "CONSOLIDATED_ARTIFACT_ID=$artifact_id"
+            echo "CONSOLIDATED_ARTIFACT_DIGEST=$artifact_digest"
+          } >> "$GITHUB_ENV"
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then echo SSH_PORT=22 >> "$GITHUB_ENV"; SSH_PORT=22; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Execute five recorder dry-runs with zero mutation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          proof_ref="github-actions://$GITHUB_REPOSITORY/runs/$CONSOLIDATED_RUN_ID/artifacts/$CONSOLIDATED_ARTIFACT_ID"
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' WORKSPACE_ID='$WORKSPACE_ID' PROOF_REF='$proof_ref' PREFLIGHT_RUN_ID='$GITHUB_RUN_ID' bash -s" <<'REMOTE' | tee recorder-preflight.txt
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ENV_FILE="$APP/.env"
+
+          read_env() {
+            node - "$ENV_FILE" "$1" <<'NODE'
+          const fs=require('node:fs'); const [file,key]=process.argv.slice(2);
+          for(const raw of fs.readFileSync(file,'utf8').split(/\r?\n/)){
+            let line=raw.trim(); if(!line||line.startsWith('#')) continue;
+            if(line.startsWith('export ')) line=line.slice(7).trim();
+            const i=line.indexOf('='); if(i<1||line.slice(0,i).trim()!==key) continue;
+            let value=line.slice(i+1).trim();
+            if(value.length>=2&&((value.startsWith('"')&&value.endsWith('"'))||(value.startsWith("'")&&value.endsWith("'")))) value=value.slice(1,-1);
+            process.stdout.write(value); process.exit(0);
+          }
+          process.exit(1);
+          NODE
+          }
+
+          live_sha="$(git -C "$APP" rev-parse HEAD)"
+          dirty="$(git -C "$APP" status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          test "$live_sha" = "$EXPECTED_LIVE_SHA"
+          test "$dirty" = "0"
+          export DATABASE_URL="$(read_env DATABASE_URL)"
+
+          cd "$APP"
+
+          baseline="$(WORKSPACE_ID="$WORKSPACE_ID" node <<'NODE'
+          const {PrismaClient}=require('@prisma/client');
+          const p=new PrismaClient();
+          (async()=>{
+            const s=await p.engageControlledLaunchState.findUnique({where:{workspaceId:process.env.WORKSPACE_ID},select:{stage:true,mode:true,writePolicy:true,externalWritesAllowed:true,version:true}});
+            const n=await p.engageControlledLaunchTransition.count({where:{workspaceId:process.env.WORKSPACE_ID}});
+            if(!s) process.exit(2);
+            process.stdout.write([s.stage,s.mode,s.writePolicy,String(s.externalWritesAllowed),String(s.version),String(n)].join('|'));
+          })().finally(()=>p.$disconnect());
+          NODE
+          )"
+          test "$baseline" = "ONE_CONNECTED_ACCOUNT|SHADOW|NO_EXTERNAL_WRITES|false|2|2"
+
+          operator="$(WORKSPACE_ID="$WORKSPACE_ID" node <<'NODE'
+          const {PrismaClient}=require('@prisma/client');
+          const p=new PrismaClient();
+          (async()=>{
+            const count=await p.engageWorkspaceMembership.count({where:{workspaceId:process.env.WORKSPACE_ID,isActive:true,user:{isActive:true}}});
+            const member=await p.engageWorkspaceMembership.findFirst({where:{workspaceId:process.env.WORKSPACE_ID,isActive:true,user:{isActive:true}},select:{userId:true,role:true}});
+            if(!member || count < 1) process.exit(3);
+            process.stdout.write([String(count),member.userId,member.role].join('|'));
+          })().finally(()=>p.$disconnect());
+          NODE
+          )"
+          IFS='|' read -r eligible_count actor_id actor_role <<< "$operator"
+          test -n "$actor_id"
+          test "$eligible_count" -ge 1
+
+          count_events() {
+            WORKSPACE_ID="$WORKSPACE_ID" EXPECTED_LIVE_SHA="$EXPECTED_LIVE_SHA" node <<'NODE'
+          const {PrismaClient}=require('@prisma/client');
+          const p=new PrismaClient();
+          const actions=[
+            'PHASE17_CRITICAL_INCIDENT_REVIEW',
+            'PHASE17_DUPLICATE_SEND_REVIEW',
+            'PHASE17_MONITORING_ACTIVE',
+            'PHASE17_SUPPORT_RUNBOOK_ACTIVE',
+            'PHASE17_AUTHENTICATED_SMOKE',
+          ];
+          (async()=>{
+            const n=await p.engageSecurityAuditEvent.count({where:{
+              workspaceId:process.env.WORKSPACE_ID,
+              action:{in:actions},
+              entityId:process.env.EXPECTED_LIVE_SHA,
+              reasonCode:'OPERATOR_VERIFIED_EXACT_SHA',
+            }});
+            process.stdout.write(String(n));
+          })().finally(()=>p.$disconnect());
+          NODE
+          }
+
+          before="$(count_events)"
+          npx tsx tests/engageos-phase17-stage2-operator-evidence-policy.test.ts | grep -q 'PASS: engageos phase17 stage2 operator evidence policy'
+
+          verified_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          dry_run() {
+            action="$1"
+            metadata="$2"
+            request_id="phase17-recorder-preflight:$PREFLIGHT_RUN_ID:$action"
+            out="$(PHASE17_EXPECTED_LIVE_SHA="$EXPECTED_LIVE_SHA" \
+              PHASE17_OPERATOR_EVIDENCE_ACTION="$action" \
+              PHASE17_OPERATOR_ACTOR_ID="$actor_id" \
+              PHASE17_OPERATOR_PROOF_REF="$PROOF_REF" \
+              PHASE17_OPERATOR_VERIFIED_AT="$verified_at" \
+              PHASE17_OPERATOR_REQUEST_ID="$request_id" \
+              PHASE17_OPERATOR_METADATA_JSON="$metadata" \
+              npx tsx scripts/engageos-phase17-stage2-record-operator-evidence.ts)"
+            grep -q 'PHASE17_OPERATOR_EVIDENCE_MODE=DRY_RUN' <<<"$out"
+            grep -q 'PASS: PHASE17_OPERATOR_EVIDENCE_DRY_RUN_NO_MUTATION' <<<"$out"
+            printf 'DRY_RUN_%s=PASS\n' "$action"
+          }
+
+          dry_run PHASE17_CRITICAL_INCIDENT_REVIEW '{"unresolvedCriticalIncidents":0}'
+          dry_run PHASE17_DUPLICATE_SEND_REVIEW '{"unexplainedDuplicateSends":0}'
+          dry_run PHASE17_MONITORING_ACTIVE '{"monitoringStatus":"ACTIVE"}'
+          dry_run PHASE17_SUPPORT_RUNBOOK_ACTIVE '{"runbookStatus":"ACTIVE"}'
+          dry_run PHASE17_AUTHENTICATED_SMOKE '{"result":"PASS","authenticated":true,"readOnly":true,"externalWritesAttempted":false}'
+
+          after="$(count_events)"
+          test "$after" = "$before"
+
+          pm2_state="$(pm2 jlist 2>/dev/null | jq -r '.[] | select(.name=="sikhadenge-whatsapp-agent") | .pm2_env.status' | head -n1)"
+          login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login || true)"
+          test "$pm2_state" = "online"
+          test "$login_http" = "200"
+
+          printf 'LIVE_SHA=%s\n' "$live_sha"
+          printf 'TRACKED_DIRTY_COUNT=%s\n' "$dirty"
+          printf 'RECORDER_BASELINE=STAGE2\n'
+          printf 'ELIGIBLE_ACTIVE_OPERATOR_COUNT=%s\n' "$eligible_count"
+          printf 'SELECTED_OPERATOR_ROLE=%s\n' "$actor_role"
+          printf 'SELECTED_OPERATOR_ID_EXPOSED=false\n'
+          printf 'OPERATOR_EVENT_COUNT_BEFORE=%s\n' "$before"
+          printf 'OPERATOR_EVENT_COUNT_AFTER=%s\n' "$after"
+          printf 'RECORDER_DATABASE_MUTATION=false\n'
+          printf 'HUMAN_ATTESTATION_SUPPLIED=false\n'
+          printf 'COMMIT_PHRASE_SUPPLIED=false\n'
+          printf 'PM2_STATE=%s\n' "$pm2_state"
+          printf 'LOGIN_HTTP=%s\n' "$login_http"
+          printf 'EXTERNAL_WHATSAPP_WRITE=false\n'
+          printf 'RESULT=PASS\n'
+          printf 'PASS: PHASE17_FIVE_GATE_RECORDER_PREFLIGHT_DRY_RUN\n'
+          REMOTE
+
+      - name: Publish preflight summary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          {
+            echo "## Phase17 Five-Gate Recorder Preflight"
+            echo
+            sed 's/^/    /' recorder-preflight.txt
+            echo
+            echo "No operator evidence was committed. No human attestation or commit phrase was supplied."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload preflight evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase17-five-gate-recorder-preflight-${{ inputs.expected_live_sha }}
+          path: recorder-preflight.txt
+          if-no-files-found: error
+          retention-days: 30
