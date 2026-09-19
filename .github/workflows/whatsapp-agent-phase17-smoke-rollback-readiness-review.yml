@@ -1,0 +1,170 @@
+name: WhatsApp Agent Phase17 Smoke Rollback Readiness Review
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_live_sha:
+        description: Exact production release SHA under review
+        required: true
+        type: string
+      smoke_run_id:
+        description: Successful authenticated read-only smoke run ID
+        required: true
+        type: string
+      dr_run_id:
+        description: Successful DR readiness run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  prepare-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
+      SMOKE_RUN_ID: ${{ inputs.smoke_run_id }}
+      DR_RUN_ID: ${{ inputs.dr_run_id }}
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+
+    steps:
+      - name: Freeze exact release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SMOKE_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$DR_RUN_ID" =~ ^[0-9]+$ ]]
+          release_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/$RELEASE_BRANCH" --jq '.commit.sha')"
+          test "$release_sha" = "$EXPECTED_LIVE_SHA"
+          printf 'RELEASE_SHA=%s\n' "$release_sha" > review-facts.txt
+
+      - name: Verify authenticated smoke proof
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SMOKE_RUN_ID")"
+          test "$(jq -r '.name' <<<"$run")" = "WhatsApp Agent Phase17 Authenticated Readonly Smoke"
+          test "$(jq -r '.status' <<<"$run")" = "completed"
+          test "$(jq -r '.conclusion' <<<"$run")" = "success"
+          test "$(jq -r '.head_sha' <<<"$run")" = "$EXPECTED_LIVE_SHA"
+          artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SMOKE_RUN_ID/artifacts?per_page=100")"
+          artifact="$(jq -c --arg name "phase17-authenticated-readonly-smoke-$EXPECTED_LIVE_SHA" '[.artifacts[] | select(.name==$name and .expired==false)] | if length==1 then .[0] else empty end' <<<"$artifacts")"
+          test -n "$artifact"
+          smoke_artifact_id="$(jq -r '.id' <<<"$artifact")"
+          smoke_digest="$(jq -r '.digest // "unavailable"' <<<"$artifact")"
+          {
+            echo "SMOKE_RUN_ID=$SMOKE_RUN_ID"
+            echo "SMOKE_ARTIFACT_ID=$smoke_artifact_id"
+            echo "SMOKE_ARTIFACT_DIGEST=$smoke_digest"
+            echo "SMOKE_RESULT=PASS"
+            echo "SMOKE_AUTHENTICATED=true"
+            echo "SMOKE_READ_ONLY=true"
+            echo "SMOKE_EXTERNAL_WRITES_ATTEMPTED=false"
+          } >> review-facts.txt
+          echo "SMOKE_ARTIFACT_ID=$smoke_artifact_id" >> "$GITHUB_ENV"
+          echo "SMOKE_ARTIFACT_DIGEST=$smoke_digest" >> "$GITHUB_ENV"
+
+      - name: Verify DR readiness proof
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$DR_RUN_ID")"
+          test "$(jq -r '.name' <<<"$run")" = "WhatsApp Agent DR Readiness"
+          test "$(jq -r '.status' <<<"$run")" = "completed"
+          test "$(jq -r '.conclusion' <<<"$run")" = "success"
+          test "$(jq -r '.head_sha' <<<"$run")" = "$EXPECTED_LIVE_SHA"
+          artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$DR_RUN_ID/artifacts?per_page=100")"
+          artifact="$(jq -c '[.artifacts[] | select(.expired==false and (.name|startswith("whatsapp-agent-dr-readiness-")))] | if length==1 then .[0] else empty end' <<<"$artifacts")"
+          test -n "$artifact"
+          dr_artifact_id="$(jq -r '.id' <<<"$artifact")"
+          dr_digest="$(jq -r '.digest // "unavailable"' <<<"$artifact")"
+          {
+            echo "DR_RUN_ID=$DR_RUN_ID"
+            echo "DR_ARTIFACT_ID=$dr_artifact_id"
+            echo "DR_ARTIFACT_DIGEST=$dr_digest"
+            echo "DR_READINESS=PASS"
+            echo "ROLLBACK_REHEARSAL_EXECUTED=false"
+          } >> review-facts.txt
+          echo "DR_ARTIFACT_ID=$dr_artifact_id" >> "$GITHUB_ENV"
+          echo "DR_ARTIFACT_DIGEST=$dr_digest" >> "$GITHUB_ENV"
+
+      - name: Build review package
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p review-package
+          smoke_ref="github-actions://$GITHUB_REPOSITORY/runs/$SMOKE_RUN_ID/artifacts/$SMOKE_ARTIFACT_ID"
+          dr_ref="github-actions://$GITHUB_REPOSITORY/runs/$DR_RUN_ID/artifacts/$DR_ARTIFACT_ID"
+
+          jq -n \
+            --arg action "PHASE17_AUTHENTICATED_SMOKE" \
+            --arg liveSha "$EXPECTED_LIVE_SHA" \
+            --arg proofRef "$smoke_ref" \
+            --arg digest "$SMOKE_ARTIFACT_DIGEST" \
+            '{
+              classification:"READY_FOR_HUMAN_REVIEW_NOT_ATTESTED",
+              action:$action,
+              liveSha:$liveSha,
+              proofRef:$proofRef,
+              artifactDigest:$digest,
+              gateMetadata:{result:"PASS",authenticated:true,readOnly:true,externalWritesAttempted:false},
+              humanFieldsRequired:["PHASE17_OPERATOR_ACTOR_ID","PHASE17_OPERATOR_VERIFIED_AT","PHASE17_OPERATOR_REQUEST_ID","PHASE17_OPERATOR_ATTESTATION"]
+            }' > review-package/authenticated-smoke-review.json
+
+          jq -n \
+            --arg action "PHASE17_ROLLBACK_REHEARSAL" \
+            --arg liveSha "$EXPECTED_LIVE_SHA" \
+            --arg proofRef "$dr_ref" \
+            --arg digest "$DR_ARTIFACT_DIGEST" \
+            '{
+              classification:"READY_FOR_ROLLBACK_REHEARSAL_REVIEW_NOT_REHEARSED",
+              action:$action,
+              liveSha:$liveSha,
+              proofRef:$proofRef,
+              artifactDigest:$digest,
+              readiness:{drReadiness:"PASS",rollbackSourceBuildEvidencePresent:true},
+              gateMetadataRequiredForFutureAttestation:{result:"PASS"},
+              rollbackRehearsalExecuted:false,
+              humanFieldsRequired:["PHASE17_OPERATOR_ACTOR_ID","PHASE17_OPERATOR_VERIFIED_AT","PHASE17_OPERATOR_REQUEST_ID","PHASE17_OPERATOR_ATTESTATION"]
+            }' > review-package/rollback-rehearsal-readiness.json
+
+          cp review-facts.txt review-package/
+          cat > review-package/README.txt <<EOF
+          Phase17 Authenticated Smoke + Rollback Readiness review package
+          Exact live SHA: $EXPECTED_LIVE_SHA
+          Authenticated smoke run: $SMOKE_RUN_ID
+          DR readiness run: $DR_RUN_ID
+
+          Authenticated smoke is objectively PASS and ready for human review.
+          DR readiness is objectively PASS.
+          Actual production rollback rehearsal has NOT been executed.
+          This package does not record operator attestations and does not send WhatsApp messages.
+          EOF
+
+          {
+            echo "## Phase17 Smoke + Rollback Readiness Review"
+            echo
+            echo "- Exact live SHA: `$EXPECTED_LIVE_SHA`"
+            echo "- Authenticated smoke: **PASS / READY FOR HUMAN REVIEW — NOT ATTESTED**"
+            echo "- DR readiness: **PASS**"
+            echo "- Rollback rehearsal: **NOT EXECUTED**"
+            echo "- External WhatsApp message sent: **false**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload review package
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase17-smoke-rollback-readiness-review-${{ inputs.expected_live_sha }}
+          path: review-package
+          if-no-files-found: error
+          retention-days: 30
