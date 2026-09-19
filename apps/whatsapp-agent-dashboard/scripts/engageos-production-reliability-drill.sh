@@ -58,6 +58,9 @@ DATABASE_URL='postgresql://invalid:invalid@127.0.0.1:1/invalid?connect_timeout=1
 db_rc=$?
 set -e
 test "$db_rc" -ne 0
+grep -q 'P1001' /tmp/phase20-db-failure.out
+grep -q '127.0.0.1:1' /tmp/phase20-db-failure.out
+db_failure_sha256="$(sha256sum /tmp/phase20-db-failure.out | awk '{print $1}')"
 
 test "$(pm2_status "$PROD_NAME")" = "online"
 login_http_after="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 http://127.0.0.1:3100/login)"
@@ -67,6 +70,8 @@ printf 'PHASE20_PM2_PROBE_RECOVERY_MS=%s\n' "$pm2_recovery_ms"
 printf 'PHASE20_PM2_PROBE_RESTARTS_BEFORE=%s\n' "$before_restarts"
 printf 'PHASE20_PM2_PROBE_RESTARTS_AFTER=%s\n' "$after_restarts"
 printf 'PHASE20_DB_FAILURE_EXIT_CODE=%s\n' "$db_rc"
+printf 'PHASE20_DB_FAILURE_SIGNATURE=P1001_127.0.0.1:1\n'
+printf 'PHASE20_DB_FAILURE_OUTPUT_SHA256=%s\n' "$db_failure_sha256"
 printf 'PHASE20_PRODUCTION_LOGIN_HTTP_BEFORE=%s\n' "$login_http"
 printf 'PHASE20_PRODUCTION_LOGIN_HTTP_AFTER=%s\n' "$login_http_after"
 printf 'PASS: PM2_SYNTHETIC_CRASH_RECOVERY_VERIFIED\n'
