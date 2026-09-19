@@ -69,6 +69,10 @@ grep -Fq 'PREFLIGHT_DYNAMIC_LINEAGE_COMPATIBILITY_VERIFIED' "$batch"
 grep -Fq 'engageos-production-migrate-v2.sh' "$batch"
 grep -Fq 'engageos-production-verify.sh' "$batch"
 grep -Fq 'PASS: ROLLBACK_ARTIFACTS_PRESERVED' "$batch"
+grep -Fq 'rollback-evidence.txt' "$batch"
+grep -Fq 'STATUS=PASS_ROLLBACK_READINESS' "$batch"
+grep -Fq 'ROLLBACK_EXECUTED=false' "$batch"
+grep -Fq 'test -s "$BACKUP_DIR/rollback-evidence.txt"' "$batch"
 grep -Fq 'engageos-production-phase17-postdeploy-gate.sh' "$batch"
 
 # Stage-aware post-deploy gate owns conditional Stage1 bootstrap and exact persisted-state checks.
