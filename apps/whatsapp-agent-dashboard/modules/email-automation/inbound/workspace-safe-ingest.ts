@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db/prisma";
 import { enqueueEmailAutomationEvent, supersedePendingEmailAutomationEvents } from "../automation/event-outbox";
+import { resolveWorkspaceSafeTrackingContactId } from "../analytics/workspace-safe-attribution";
 
 function clean(value: unknown, max = 500): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -18,6 +19,65 @@ function json(value: unknown): Prisma.InputJsonValue {
 function arr(value: unknown): unknown[] { return Array.isArray(value) ? value : []; }
 function eventKey(parts: readonly string[]): string {
   return createHash("sha256").update(parts.join("|")).digest("hex");
+}
+
+function optionalNormalizedEmail(value: unknown): string | null {
+  const email = clean(value, 320).toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
+}
+
+function storedRecipientEmails(...values: unknown[]): string[] {
+  return values.flatMap((value) => {
+    if (!Array.isArray(value)) return [];
+    return value.flatMap((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+      const raw = (item as Record<string, unknown>).email;
+      const email = optionalNormalizedEmail(raw);
+      return email ? [email] : [];
+    });
+  });
+}
+
+async function resolveWorkspaceBounceTarget(input: {
+  workspaceId: string;
+  connectionId: string | null;
+  providerMessageId: string;
+  providerThreadId: string | null;
+  failedRecipient: string | null;
+}): Promise<{ id: string } | null> {
+  if (!input.connectionId) return null;
+
+  const exact = await prisma.engageEmailMessage.findFirst({
+    where: {
+      workspaceId: input.workspaceId,
+      connectionId: input.connectionId,
+      providerMessageId: input.providerMessageId,
+      externalRequestSent: true,
+      status: { in: ["SENT", "DELIVERED"] },
+    },
+    select: { id: true },
+  });
+  if (exact) return exact;
+
+  if (!input.providerThreadId) return null;
+  const threadCandidates = await prisma.engageEmailMessage.findMany({
+    where: {
+      workspaceId: input.workspaceId,
+      connectionId: input.connectionId,
+      providerThreadId: input.providerThreadId,
+      externalRequestSent: true,
+      status: { in: ["SENT", "DELIVERED"] },
+    },
+    orderBy: { sentAt: "desc" },
+    take: 20,
+    select: { id: true, toRecipients: true, ccRecipients: true, bccRecipients: true },
+  });
+  const candidates = input.failedRecipient
+    ? threadCandidates.filter((row) =>
+        storedRecipientEmails(row.toRecipients, row.ccRecipients, row.bccRecipients).includes(input.failedRecipient!),
+      )
+    : threadCandidates;
+  return candidates.length === 1 ? { id: candidates[0].id } : null;
 }
 
 async function resolveWorkspaceSafeContactId(workspaceId: string, fromAddress: string): Promise<string | null> {
@@ -72,6 +132,7 @@ export async function ingestWorkspaceSafeInboundEmail(input: {
   bodyHtml?: string;
   attachments?: unknown;
   classification?: "INBOUND" | "BOUNCE";
+  bounceRecipient?: string | null;
   receivedAt?: string;
 }) {
   const provider = clean(input.provider, 40);
@@ -86,15 +147,28 @@ export async function ingestWorkspaceSafeInboundEmail(input: {
   });
   if (prior) return { message: prior, replayed: true };
 
-  const contactId = await resolveWorkspaceSafeContactId(input.workspaceId, from);
+  const connectionId = clean(input.connectionId, 100) || null;
   const threadId = clean(input.providerThreadId, 240) || null;
   const classification = input.classification === "BOUNCE" ? "BOUNCE" : "INBOUND";
+  const bounceRecipient = classification === "BOUNCE" ? optionalNormalizedEmail(input.bounceRecipient) : null;
+  const bounceTarget = classification === "BOUNCE"
+    ? await resolveWorkspaceBounceTarget({
+        workspaceId: input.workspaceId,
+        connectionId,
+        providerMessageId,
+        providerThreadId: threadId,
+        failedRecipient: bounceRecipient,
+      })
+    : null;
+  const contactId = classification === "BOUNCE"
+    ? (bounceTarget ? await resolveWorkspaceSafeTrackingContactId({ workspaceId: input.workspaceId, messageId: bounceTarget.id }) : null)
+    : await resolveWorkspaceSafeContactId(input.workspaceId, from);
 
   return prisma.$transaction(async (tx) => {
     const stored = await tx.engageEmailInboundMessage.create({
       data: {
         workspaceId: input.workspaceId,
-        connectionId: clean(input.connectionId, 100) || null,
+        connectionId,
         provider,
         providerMessageId,
         providerThreadId: threadId,
@@ -114,21 +188,31 @@ export async function ingestWorkspaceSafeInboundEmail(input: {
     });
 
     if (classification === "BOUNCE") {
-      const sent = threadId
-        ? await tx.engageEmailMessage.findFirst({
-            where: { workspaceId: input.workspaceId, OR: [{ providerMessageId }, { providerThreadId: threadId }] },
-            orderBy: { createdAt: "desc" },
-          })
-        : await tx.engageEmailMessage.findFirst({
-            where: { workspaceId: input.workspaceId, providerMessageId },
-            orderBy: { createdAt: "desc" },
-          });
-      if (sent) {
-        await tx.engageEmailMessage.update({ where: { id: sent.id }, data: { status: "BOUNCED", lastError: "Provider reported a bounce." } });
-        await tx.engageEmailAnalyticsEvent.create({
-          data: { workspaceId: input.workspaceId, messageId: sent.id, inboundMessageId: stored.id, contactId, eventType: "BOUNCED", provider, eventKey: eventKey(["bounce", stored.id]), occurredAt: receivedAt },
+      if (bounceTarget) {
+        await tx.engageEmailMessage.update({
+          where: { id: bounceTarget.id },
+          data: { status: "BOUNCED", lastError: bounceRecipient ? `Provider reported a bounce for ${bounceRecipient}.` : "Provider reported a bounce." },
         });
-        if (contactId) await enqueueEmailAutomationEvent(tx, { workspaceId: input.workspaceId, sourceEventId: stored.id, trigger: "EMAIL_BOUNCED", contactId, payload: { inboundMessageId: stored.id, messageId: sent.id, providerMessageId } });
+        await tx.engageEmailAnalyticsEvent.create({
+          data: {
+            workspaceId: input.workspaceId,
+            messageId: bounceTarget.id,
+            inboundMessageId: stored.id,
+            contactId,
+            eventType: "BOUNCED",
+            provider,
+            eventKey: eventKey(["bounce", stored.id]),
+            metadata: bounceRecipient ? json({ failedRecipient: bounceRecipient }) : Prisma.JsonNull,
+            occurredAt: receivedAt,
+          },
+        });
+        if (contactId) await enqueueEmailAutomationEvent(tx, {
+          workspaceId: input.workspaceId,
+          sourceEventId: stored.id,
+          trigger: "EMAIL_BOUNCED",
+          contactId,
+          payload: { inboundMessageId: stored.id, messageId: bounceTarget.id, providerMessageId, failedRecipient: bounceRecipient },
+        });
       }
     } else {
       await tx.engageEmailAnalyticsEvent.create({
