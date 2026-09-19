@@ -1085,6 +1085,7 @@ model EngageEmailCampaignRecipient {
   @@unique([campaignId, email])
   @@unique([workspaceId, idempotencyKey])
   @@index([workspaceId, campaignId, status, scheduledAt])
+  @@index([workspaceId, messageId])
 }
 
 model EngageEmailSequence {
@@ -1167,4 +1168,5 @@ model EngageEmailAnalyticsEvent {
   @@index([workspaceId, eventType, occurredAt])
   @@index([workspaceId, campaignId, occurredAt])
   @@index([workspaceId, contactId, occurredAt])
+  @@index([workspaceId, messageId])
 }
