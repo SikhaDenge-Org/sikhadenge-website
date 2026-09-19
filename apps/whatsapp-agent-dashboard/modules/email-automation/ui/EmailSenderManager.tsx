@@ -35,7 +35,7 @@ export default function EmailSenderManager(){
 
   const load=useCallback(async()=>{try{setError(null);const [nextState,nextHealth]=await Promise.all([apiJson<EmailState>("/api/email/connections"),apiJson<InboxHealth>("/api/email/inbound/health").catch(()=>null)]);setState(nextState);setInboxHealth(nextHealth);}catch(e){setError(e instanceof Error?e.message:"Email state could not be loaded.");}finally{setLoading(false);}},[]);
   useEffect(()=>{void load();},[load]);
-  useEffect(()=>{if(typeof window==="undefined")return;const params=new URLSearchParams(window.location.search);if(params.get("email")==="connected"){void load().then(()=>setAction({key:"inbox-recheck",message:"Google connection returned. Inbox authorization state refreshed.",kind:"success"}));}},[load]);
+  useEffect(()=>{if(typeof window==="undefined")return;const params=new URLSearchParams(window.location.search);if(params.get("email")!=="connected")return;void (async()=>{try{const next=await apiJson<InboxHealth>("/api/email/inbound/health");setInboxHealth(next);setAction({key:"inbox-recheck",message:next.readAccess?"Google connection returned. Inbox access is authorized.":"Google connection returned, but Inbox access still needs authorization.",kind:next.readAccess?"success":"error"});}catch(e){setAction({key:"inbox-recheck",message:e instanceof Error?e.message:"Google connection returned, but Inbox authorization could not be verified.",kind:"error"});}})();},[]);
 
   const activeConnections=useMemo(()=>state?.connections.filter(c=>c.status!=="REVOKED")??[],[state]);
   const verifiedSenders=useMemo(()=>state?.senders.filter(s=>s.verificationStatus==="VERIFIED"&&s.isActive)??[],[state]);
