@@ -8,6 +8,7 @@ import {
 
 import { prisma } from "../db/prisma";
 import { enqueueEmailAutomationEvent, findActorEmailWorkspaceId, supersedePendingEmailAutomationEvents } from "../../modules/email-automation/automation/event-outbox";
+import { enqueueWhatsAppAutomationEvent, findActorWhatsAppWorkspaceId, supersedePendingWhatsAppAutomationEvents } from "../../modules/automations/application/whatsapp-automation-event-outbox";
 
 export type LeadFilters = {
   search?: string;
@@ -388,6 +389,7 @@ export async function updateLead(input: {
   const stageChanged = Boolean(nextStage && nextStage !== existing.stage);
   const followUpChanged = nextFollowUpAt !== undefined && (existing.nextFollowUpAt?.getTime() ?? null) !== (nextFollowUpAt?.getTime() ?? null);
   const emailWorkspaceId = stageChanged || followUpChanged ? await findActorEmailWorkspaceId(input.actorId) : null;
+  const whatsappWorkspaceId = stageChanged || followUpChanged ? await findActorWhatsAppWorkspaceId(input.actorId) : null;
 
   const updated = await prisma.$transaction(async (transaction) => {
     const lead = await transaction.lead.update({
@@ -444,6 +446,35 @@ export async function updateLead(input: {
           trigger: "FOLLOW_UP_DUE",
           contactId: existing.contactId,
           leadId: existing.id,
+          availableAt: nextFollowUpAt,
+          payload: { leadId: existing.id, contactId: existing.contactId, followUpAt: nextFollowUpAt.toISOString() },
+        });
+      }
+    }
+    if (whatsappWorkspaceId && nextStage && nextStage !== existing.stage) {
+      await enqueueWhatsAppAutomationEvent(transaction, {
+        workspaceId: whatsappWorkspaceId,
+        sourceEventId: `crm-lead:${existing.id}:stage:${existing.updatedAt.toISOString()}:${nextStage}`,
+        trigger: "STAGE_CHANGED",
+        conversationId: existing.conversationId,
+        contactId: existing.contactId,
+        payload: { leadId: existing.id, contactId: existing.contactId, previousStage: existing.stage, stage: nextStage },
+      });
+    }
+    if (whatsappWorkspaceId && followUpChanged) {
+      await supersedePendingWhatsAppAutomationEvents(transaction, {
+        workspaceId: whatsappWorkspaceId,
+        trigger: "FOLLOW_UP_DUE",
+        conversationId: existing.conversationId,
+        contactId: existing.contactId,
+      });
+      if (nextFollowUpAt) {
+        await enqueueWhatsAppAutomationEvent(transaction, {
+          workspaceId: whatsappWorkspaceId,
+          sourceEventId: `crm-lead:${existing.id}:follow-up:${nextFollowUpAt.toISOString()}`,
+          trigger: "FOLLOW_UP_DUE",
+          conversationId: existing.conversationId,
+          contactId: existing.contactId,
           availableAt: nextFollowUpAt,
           payload: { leadId: existing.id, contactId: existing.contactId, followUpAt: nextFollowUpAt.toISOString() },
         });
