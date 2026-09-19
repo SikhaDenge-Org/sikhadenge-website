@@ -64,7 +64,7 @@ const operatorVerified = (action: string, metadata: Record<string, unknown>) => 
 });
 
 const production = machineVerified(STAGE2_GOVERNANCE_ACTIONS.productionEvidence, {
-  source: "github-actions-production-batch1-plus-postdeploy-proof",
+  source: "github-actions-production-batch1-plus-artifact-plus-runtime-identity",
   productionRunId: "34754855602",
   productionRunNumber: "1",
   productionWorkflowConclusion: "success",
@@ -144,7 +144,7 @@ const missingProofRef = derive([{
 assert.equal(missingProofRef.supportRunbookActive, false);
 
 const malformedMachineProduction = derive([machineVerified(STAGE2_GOVERNANCE_ACTIONS.productionEvidence, {
-  source: "github-actions-production-batch1-plus-postdeploy-proof",
+  source: "github-actions-production-batch1-plus-artifact-plus-runtime-identity",
   productionRunId: "34754855602",
   productionRunNumber: "1",
   productionWorkflowConclusion: "success",
