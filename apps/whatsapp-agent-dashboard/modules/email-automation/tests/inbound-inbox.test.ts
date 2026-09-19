@@ -43,6 +43,7 @@ const gmail = readFileSync("modules/email-automation/inbound/gmail-inbound-servi
 const safeIngest = readFileSync("modules/email-automation/inbound/workspace-safe-ingest.ts", "utf8");
 const scheduler = readFileSync("modules/email-automation/automation/scheduler.ts", "utf8");
 const inboxRoute = readFileSync("app/api/email/inbound/route.ts", "utf8");
+const internalInboundRoute = readFileSync("app/api/internal/email/inbound/route.ts", "utf8");
 const threadRoute = readFileSync("app/api/email/inbound/thread/route.ts", "utf8");
 const replyRoute = readFileSync("app/api/email/inbound/reply/route.ts", "utf8");
 const attachmentRoute = readFileSync("app/api/email/inbound/[messageId]/attachments/[attachmentId]/route.ts", "utf8");
@@ -95,6 +96,9 @@ assert.match(gmail, /EMAIL_INBOUND_SYNC_ENABLED/);
 assert.match(gmail, /startHistoryId\?\.trim\(\)\s*\|\|\s*state\.historyId/);
 assert.match(gmail, /ingestWorkspaceSafeInboundEmail/);
 assert.doesNotMatch(gmail, /finalization\/platform-service/);
+assert.match(internalInboundRoute, /inbound\/workspace-safe-ingest/);
+assert.match(internalInboundRoute, /ingestWorkspaceSafeInboundEmail as ingestInboundEmail/);
+assert.doesNotMatch(internalInboundRoute, /finalization\/platform-service/);
 assert.match(scheduler, /syncWatchedGmailMailboxes/);
 assert.match(scheduler, /inboundSync/);
 

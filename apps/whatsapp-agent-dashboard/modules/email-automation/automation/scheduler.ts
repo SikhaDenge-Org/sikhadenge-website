@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { listAutomationFlows } from "@/lib/automation/automation-service";
 import { enqueueEmailAutomationEvent } from "./event-outbox";
 import { processDueEmailCampaigns } from "../campaigns/campaign-service";
-import { processDueEmailSequences } from "../finalization/platform-service";
+import { processDueEmailSequences } from "../sequences/sequence-service";
 import { syncWatchedGmailMailboxes } from "../inbound/gmail-inbound-service";
 import { getEmailRuntimePolicy } from "../application/runtime-policy";
 import { processEmailAutomationEvents } from "./dispatcher";

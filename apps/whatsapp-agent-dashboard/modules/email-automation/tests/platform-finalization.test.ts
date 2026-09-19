@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import type { EmailSenderIdentity } from "../domain/contracts";
 import { renderEmailTemplate } from "../templates/render";
 import { assertEmailTemplateDocument } from "../templates/validation";
@@ -14,4 +15,7 @@ assert.equal(microsoftEmailProviderConfigFromEnv({MICROSOFT_EMAIL_CLIENT_ID:"id"
 process.env.EMAIL_UNSUBSCRIBE_SECRET="u".repeat(32);const token=createEmailUnsubscribeToken({workspaceId:"w1",contactId:"c1",email:"User@Example.com",expiresAt:new Date(Date.now()+60000)});assert.equal(verifyEmailUnsubscribeToken(token).email,"user@example.com");assert.throws(()=>verifyEmailUnsubscribeToken(token.slice(0,-1)+(token.endsWith("a")?"b":"a")),/signature|malformed/i);
 const sender=(id:string,provider:EmailSenderIdentity["provider"],verified=true):EmailSenderIdentity=>({id,workspaceId:"w",connectionId:id+"-c",provider,fromName:id,fromEmail:id+"@example.com",replyToEmail:null,externalSenderId:null,verificationStatus:verified?"VERIFIED":"FAILED",isProviderDefault:false,isWorkspaceDefault:false,isActive:true,dailyLimit:null});
 const primary=sender("g","GOOGLE_GMAIL"),microsoft=sender("m","MICROSOFT_365"),bad=sender("bad","MICROSOFT_365",false);assert.equal(selectFailoverSender({policy:emailProviderFailoverPolicyFromEnv({} as unknown as NodeJS.ProcessEnv),primary,senders:[microsoft]}),null);const policy=emailProviderFailoverPolicyFromEnv({EMAIL_PROVIDER_FAILOVER_ENABLED:"true",EMAIL_PROVIDER_FAILOVER_ORDER:"GOOGLE_GMAIL,MICROSOFT_365"} as unknown as NodeJS.ProcessEnv);assert.equal(selectFailoverSender({policy,primary,senders:[bad,microsoft]})?.id,"m");
+const schedulerSource=readFileSync("modules/email-automation/automation/scheduler.ts","utf8");
+assert.match(schedulerSource,/processDueEmailSequences\s*\}\s*from\s*"\.\.\/sequences\/sequence-service"/);
+assert.doesNotMatch(schedulerSource,/processDueEmailSequences\s*\}\s*from\s*"\.\.\/finalization\/platform-service"/);
 console.log("email platform finalization contracts: ok");
