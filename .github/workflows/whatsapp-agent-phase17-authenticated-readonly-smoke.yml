@@ -118,7 +118,7 @@ jobs:
             exit 42
           fi
 
-          node - "$tmp" <<'NODE'
+          if node - "$tmp" <<'NODE'
           const fs=require('node:fs');
           const body=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
           if (!body || typeof body !== 'object') process.exit(1);
@@ -126,7 +126,12 @@ jobs:
           if (!body.totals || typeof body.totals !== 'object') process.exit(1);
           if (typeof body.generatedAt !== 'string' || !Number.isFinite(Date.parse(body.generatedAt))) process.exit(1);
           NODE
-          printf 'RESPONSE_JSON_VALID=true\n'
+          then
+            printf 'RESPONSE_JSON_VALID=true\n'
+          else
+            printf 'RESPONSE_JSON_VALID=false\n'
+            exit 43
+          fi
 
           pm2_state="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(String(p?.pm2_env?.status||"missing"))})')"
           test "$pm2_state" = "online"
