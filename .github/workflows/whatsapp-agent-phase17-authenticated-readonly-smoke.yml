@@ -13,6 +13,9 @@ permissions:
 
 jobs:
   authenticated-readonly-smoke:
+    concurrency:
+      group: whatsapp-agent-production
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: whatsapp-agent-production
@@ -23,13 +26,19 @@ jobs:
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
 
     steps:
-      - name: Validate exact SHA input
+      - name: Validate exact SHA against approved release tip
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
           [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          release_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/$RELEASE_BRANCH" --jq '.commit.sha')"
+          test "$release_sha" = "$EXPECTED_LIVE_SHA"
+          printf 'APPROVED_RELEASE_SHA=%s\n' "$release_sha"
 
       - name: Configure pinned production SSH
         shell: bash
