@@ -48,7 +48,7 @@ jobs:
           port="${SSH_PORT:-22}"
           ssh -p "$port" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-            "$SSH_USER@$SSH_HOST" 'bash -s' > phase20-reliability-evidence.txt <<'REMOTE'
+            "$SSH_USER@$SSH_HOST" 'bash -s' > phase20-reliability-evidence.txt 2>&1 <<'REMOTE'
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           cd "$APP"
@@ -59,10 +59,11 @@ jobs:
           cat phase20-reliability-evidence.txt
 
       - name: Upload reliability evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: whatsapp-agent-reliability-${{ github.run_id }}-${{ github.run_attempt }}
           path: phase20-reliability-evidence.txt
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
 
