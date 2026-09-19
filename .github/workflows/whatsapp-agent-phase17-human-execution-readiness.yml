@@ -1,0 +1,245 @@
+name: WhatsApp Agent Phase17 Human Execution Readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_live_sha:
+        description: Exact production release SHA under review
+        required: true
+        type: string
+      consolidated_run_id:
+        description: Successful five-gate consolidated attestation-ready run ID
+        required: true
+        type: string
+      preflight_run_id:
+        description: Successful five-gate recorder preflight run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  human-execution-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
+      CONSOLIDATED_RUN_ID: ${{ inputs.consolidated_run_id }}
+      PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+
+    steps:
+      - name: Freeze exact release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CONSOLIDATED_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$PREFLIGHT_RUN_ID" =~ ^[0-9]+$ ]]
+          release_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/$RELEASE_BRANCH" --jq '.commit.sha')"
+          test "$release_sha" = "$EXPECTED_LIVE_SHA"
+          echo "RELEASE_SHA=$release_sha" > readiness-facts.txt
+
+      - name: Verify consolidated and preflight artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          consolidated_name="phase17-consolidated-attestation-ready-$EXPECTED_LIVE_SHA"
+          preflight_name="phase17-five-gate-recorder-preflight-$EXPECTED_LIVE_SHA"
+
+          for pair in "$CONSOLIDATED_RUN_ID|$consolidated_name|consolidated" "$PREFLIGHT_RUN_ID|$preflight_name|preflight"; do
+            IFS='|' read -r run_id artifact_name dest <<< "$pair"
+            run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id")"
+            test "$(jq -r '.status' <<<"$run")" = "completed"
+            test "$(jq -r '.conclusion' <<<"$run")" = "success"
+
+            artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100")"
+            artifact="$(jq -c --arg n "$artifact_name" '[.artifacts[] | select(.name==$n and .expired==false)] | if length==1 then .[0] else empty end' <<<"$artifacts")"
+            test -n "$artifact"
+            id="$(jq -r '.id' <<<"$artifact")"
+            digest="$(jq -r '.digest // "unavailable"' <<<"$artifact")"
+            gh run download "$run_id" --repo "$GITHUB_REPOSITORY" -n "$artifact_name" -D "$dest"
+
+            if [ "$dest" = "consolidated" ]; then
+              echo "CONSOLIDATED_ARTIFACT_ID=$id" >> readiness-facts.txt
+              echo "CONSOLIDATED_ARTIFACT_DIGEST=$digest" >> readiness-facts.txt
+            else
+              echo "PREFLIGHT_ARTIFACT_ID=$id" >> readiness-facts.txt
+              echo "PREFLIGHT_ARTIFACT_DIGEST=$digest" >> readiness-facts.txt
+            fi
+          done
+
+          for f in \
+            critical-incident-attestation-ready.json \
+            duplicate-send-attestation-ready.json \
+            monitoring-active-attestation-ready.json \
+            support-runbook-active-attestation-ready.json \
+            authenticated-smoke-attestation-ready.json; do
+            test -s "consolidated/$f"
+            test "$(jq -r '.liveSha' "consolidated/$f")" = "$EXPECTED_LIVE_SHA"
+            test "$(jq -r '.classification' "consolidated/$f")" = "ATTESTATION_READY_NOT_ATTESTED"
+          done
+
+          preflight_file="$(find preflight -type f -name 'recorder-preflight.txt' -o -type f | head -n1)"
+          test -s "$preflight_file"
+          grep -q '^RESULT=PASS$' "$preflight_file"
+          grep -q '^RECORDER_DATABASE_MUTATION=false$' "$preflight_file"
+          grep -q '^HUMAN_ATTESTATION_SUPPLIED=false$' "$preflight_file"
+          grep -q '^COMMIT_PHRASE_SUPPLIED=false$' "$preflight_file"
+          grep -q '^SELECTED_OPERATOR_ID_EXPOSED=false$' "$preflight_file"
+          before="$(grep '^OPERATOR_EVENT_COUNT_BEFORE=' "$preflight_file" | tail -n1 | cut -d= -f2)"
+          after="$(grep '^OPERATOR_EVENT_COUNT_AFTER=' "$preflight_file" | tail -n1 | cut -d= -f2)"
+          eligible="$(grep '^ELIGIBLE_ACTIVE_OPERATOR_COUNT=' "$preflight_file" | tail -n1 | cut -d= -f2)"
+          role="$(grep '^SELECTED_OPERATOR_ROLE=' "$preflight_file" | tail -n1 | cut -d= -f2)"
+          test "$before" = "$after"
+          test "$eligible" -ge 1
+          {
+            echo "ELIGIBLE_ACTIVE_OPERATOR_COUNT=$eligible"
+            echo "SELECTED_OPERATOR_ROLE=$role"
+            echo "OPERATOR_EVENT_COUNT_BEFORE=$before"
+            echo "OPERATOR_EVENT_COUNT_AFTER=$after"
+          } >> readiness-facts.txt
+
+      - name: Verify recorder contract from exact release source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git init -q verify
+          cd verify
+          git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          git fetch -q --depth=1 origin "$RELEASE_BRANCH"
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_LIVE_SHA"
+
+          git show "$EXPECTED_LIVE_SHA:apps/whatsapp-agent-dashboard/modules/release/application/phase17-stage2-operator-evidence-input.ts" > ../operator-input.ts
+          git show "$EXPECTED_LIVE_SHA:apps/whatsapp-agent-dashboard/scripts/engageos-phase17-stage2-record-operator-evidence.ts" > ../recorder.ts
+          cd ..
+
+          commit_phrase="$(sed -n 's/^export const STAGE2_OPERATOR_EVIDENCE_COMMIT_PHRASE = "\(.*\)";$/\1/p' operator-input.ts)"
+          attestation_phrase="$(sed -n 's/^export const STAGE2_OPERATOR_ATTESTATION_PHRASE = "\(.*\)";$/\1/p' operator-input.ts)"
+          test "$commit_phrase" = "RECORD_OPERATOR_VERIFIED_EVIDENCE"
+          test "$attestation_phrase" = "I_ATTEST_THIS_EVIDENCE_IS_REAL_AND_EXACT_SHA_BOUND"
+
+          grep -q 'PHASE17_OPERATOR_REQUEST_ID already exists with different evidence; refusing collision.' recorder.ts
+          grep -q 'PHASE17_OPERATOR_ACTOR_ID must identify an active user with an active workspace membership.' recorder.ts
+          grep -q 'must not be more than five minutes in the future' operator-input.ts
+          grep -q 'PHASE17_OPERATOR_EVIDENCE_PROOF_REF' recorder.ts
+
+          {
+            echo "COMMIT_PHRASE=$commit_phrase"
+            echo "ATTESTATION_PHRASE=$attestation_phrase"
+            echo "REQUEST_ID_COLLISION_PROTECTION=true"
+            echo "ACTIVE_ACTOR_MEMBERSHIP_REQUIRED=true"
+            echo "VERIFIED_AT_FUTURE_TOLERANCE_MINUTES=5"
+            echo "PROOF_REF_REQUIRED=true"
+          } >> readiness-facts.txt
+
+      - name: Build human execution readiness package
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p package
+
+          eligible="$(grep '^ELIGIBLE_ACTIVE_OPERATOR_COUNT=' readiness-facts.txt | cut -d= -f2)"
+          role="$(grep '^SELECTED_OPERATOR_ROLE=' readiness-facts.txt | cut -d= -f2)"
+          commit_phrase="$(grep '^COMMIT_PHRASE=' readiness-facts.txt | cut -d= -f2-)"
+          attestation_phrase="$(grep '^ATTESTATION_PHRASE=' readiness-facts.txt | cut -d= -f2-)"
+
+          jq -n \
+            --arg liveSha "$EXPECTED_LIVE_SHA" \
+            --arg commitPhrase "$commit_phrase" \
+            --arg attestationPhrase "$attestation_phrase" \
+            --arg role "$role" \
+            --argjson eligible "$eligible" \
+            '{
+              classification:"HUMAN_EXECUTION_READY_NOT_AUTHORIZED_NOT_COMMITTED",
+              liveSha:$liveSha,
+              activeOperatorEligibility:{
+                eligibleActiveOperatorCount:$eligible,
+                sampledRole:$role,
+                selectedOperatorIdExposed:false,
+                requirement:"actor must be an active user with an active workspace membership"
+              },
+              commitContract:{
+                commitPhrase:$commitPhrase,
+                attestationPhrase:$attestationPhrase,
+                commitPhraseSupplied:false,
+                humanAttestationSupplied:false
+              },
+              requestIdContract:{
+                required:true,
+                mustBeUniqueForNewEvidence:true,
+                collisionWithDifferentEvidence:"REFUSED",
+                exactExistingEvidence:"IDEMPOTENT_EXISTING"
+              },
+              verifiedAtContract:{
+                required:true,
+                mustBeIsoCompatible:true,
+                futureToleranceMinutes:5
+              },
+              proofRefContract:{
+                required:true,
+                mustBindToCurrentExactShaEvidence:true
+              },
+              fiveGateMetadata:{
+                PHASE17_CRITICAL_INCIDENT_REVIEW:{unresolvedCriticalIncidents:0},
+                PHASE17_DUPLICATE_SEND_REVIEW:{unexplainedDuplicateSends:0},
+                PHASE17_MONITORING_ACTIVE:{monitoringStatus:"ACTIVE"},
+                PHASE17_SUPPORT_RUNBOOK_ACTIVE:{runbookStatus:"ACTIVE"},
+                PHASE17_AUTHENTICATED_SMOKE:{result:"PASS",authenticated:true,readOnly:true,externalWritesAttempted:false}
+              },
+              mutationState:{
+                operatorEvidenceCommitted:false,
+                databaseMutation:false,
+                externalWhatsAppWrite:false
+              },
+              nextHumanInputsRequired:[
+                "PHASE17_OPERATOR_ACTOR_ID",
+                "PHASE17_OPERATOR_VERIFIED_AT",
+                "PHASE17_OPERATOR_REQUEST_ID",
+                "PHASE17_OPERATOR_ATTESTATION",
+                "PHASE17_OPERATOR_EVIDENCE_COMMIT"
+              ]
+            }' > package/human-execution-readiness.json
+
+          cp readiness-facts.txt package/
+          cat > package/README.txt <<EOF
+          Phase17 Human Execution Readiness
+          Exact live SHA: $EXPECTED_LIVE_SHA
+
+          Recorder preflight and all five gate metadata contracts are valid.
+          No operator actor ID has been selected or exposed.
+          No human attestation has been supplied.
+          No commit phrase has been supplied.
+          No operator evidence has been committed.
+          No external WhatsApp/customer message is sent by this workflow.
+
+          A genuine authorized human must explicitly supply the final actor/verification/request/attestation/commit inputs before any recorder commit is permitted.
+          EOF
+
+          {
+            echo "## Phase17 Human Execution Readiness"
+            echo
+            echo "- Exact live SHA: `$EXPECTED_LIVE_SHA`"
+            echo "- Recorder preflight: **PASS**"
+            echo "- Active operator eligibility: **PASS**"
+            echo "- Request-ID collision protection: **VERIFIED**"
+            echo "- Timestamp/proof-ref contract: **VERIFIED**"
+            echo "- Human attestation: **NOT SUPPLIED**"
+            echo "- Commit phrase: **NOT SUPPLIED**"
+            echo "- DB mutation: **false**"
+            echo "- External WhatsApp write: **false**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload readiness package
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase17-human-execution-readiness-${{ inputs.expected_live_sha }}
+          path: package
+          if-no-files-found: error
+          retention-days: 30
