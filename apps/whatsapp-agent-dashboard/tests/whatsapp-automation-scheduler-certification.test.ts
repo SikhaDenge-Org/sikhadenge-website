@@ -24,6 +24,7 @@ assert.match(worker, /WHATSAPP_AUTOMATION_SCHEDULER_ENABLED=true is required/);
 assert.match(ecosystem, /WHATSAPP_AUTOMATION_SCHEDULER_ENABLED: "true"/);
 assert.match(ecosystem, /AUTOMATION_RUNTIME_ENABLED: "false"/);
 assert.match(ecosystem, /AUTOMATION_ACTIONS_ENABLED: "false"/);
+assert.match(ecosystem, /WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX: ""/);
 assert.match(ecosystem, /WHATSAPP_OUTBOUND_MODE: "disabled"/);
 assert.match(webhook, /enqueueWhatsAppAutomationEvent/);
 assert.match(webhook, /trigger: "INCOMING_KEYWORD"/);
