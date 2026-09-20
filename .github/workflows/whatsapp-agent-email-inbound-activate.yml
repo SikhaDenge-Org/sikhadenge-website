@@ -81,7 +81,7 @@ jobs:
         run: |
           set +e
           mkdir -p email-inbound-activation-evidence
-          for file_name in inbound-activation-result.txt inbound-activation.json inbound-runtime-health.json; do
+          for file_name in inbound-activation-result.txt inbound-activation.json inbound-runtime-health.json post-activation-readiness.json; do
             scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
               "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${ACTIVATION_RUN_ID}/${file_name}" "email-inbound-activation-evidence/${file_name}" >/dev/null 2>&1 || true
           done
@@ -96,9 +96,11 @@ jobs:
           result="$dir/inbound-activation-result.txt"
           activation="$dir/inbound-activation.json"
           health="$dir/inbound-runtime-health.json"
+          post="$dir/post-activation-readiness.json"
           test -s "$result"
           test -s "$activation"
           test -s "$health"
+          test -s "$post"
           grep -qx 'STATUS=PASS_EMAIL_INBOUND_ENABLED' "$result"
           jq -e --arg account "$ACTIVATION_ACCOUNT" '
             .status == "PASS" and
@@ -114,6 +116,15 @@ jobs:
             .externalWritesEnabled == false and
             .inboundSyncEnabled == true
           ' "$health" >/dev/null
+          jq -e --arg account "$ACTIVATION_ACCOUNT" '
+            .status == "READY" and
+            .activationAccount == $account and
+            .inboundSyncEnabled == true and
+            .runtimeMode == "DRY_RUN" and
+            .externalWritesEnabled == false and
+            .checks.gmailInboundReadAccess == true and
+            (.cursorReadyGmailConnections >= 1)
+          ' "$post" >/dev/null
           printf 'PASS: EMAIL_INBOUND_ACTIVATION_EVIDENCE_VERIFIED\n'
 
       - name: Publish activation summary
@@ -142,6 +153,11 @@ jobs:
               echo "- Runtime mode: \`$(jq -r '.runtimeMode // "unknown"' "$dir/inbound-runtime-health.json")\`"
               echo "- External writes: \`$(jq -r '.externalWritesEnabled // "unknown"' "$dir/inbound-runtime-health.json")\`"
               echo "- Inbound sync enabled: \`$(jq -r '.inboundSyncEnabled // "unknown"' "$dir/inbound-runtime-health.json")\`"
+            fi
+            if [[ -s "$dir/post-activation-readiness.json" ]]; then
+              echo "- Post-activation readiness: \`$(jq -r '.status // "unknown"' "$dir/post-activation-readiness.json")\`"
+              echo "- Gmail read access: \`$(jq -r '.checks.gmailInboundReadAccess // false' "$dir/post-activation-readiness.json")\`"
+              echo "- Cursor-ready Gmail connections: \`$(jq -r '.cursorReadyGmailConnections // 0' "$dir/post-activation-readiness.json")\`"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
