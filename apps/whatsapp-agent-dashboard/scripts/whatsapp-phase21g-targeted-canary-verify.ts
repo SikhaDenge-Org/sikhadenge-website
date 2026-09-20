@@ -35,6 +35,48 @@ async function main() {
   if (event.attemptCount !== 1) throw new Error(`Phase21G canary attempt count is not 1: ${event.attemptCount}`);
   if (event.lastError) throw new Error(`Phase21G canary has an unexpected error: ${event.lastError}`);
 
+  const designated = await prisma.whatsAppContact.findMany({
+    where: {
+      metadata: {
+        path: ["engageos", "canary", "designated"],
+        equals: true,
+      },
+    },
+    take: 3,
+    select: {
+      id: true,
+      metadata: true,
+      conversations: {
+        orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
+        take: 1,
+        select: {
+          id: true,
+          tags: { select: { tag: { select: { name: true } } } },
+        },
+      },
+    },
+  });
+  const eligibleDesignated = designated.filter((contact) => {
+    const metadata = record(contact.metadata);
+    const engageos = record(metadata.engageos);
+    const identity = record(engageos.whatsappIdentity);
+    const canary = record(engageos.canary);
+    const conversation = contact.conversations[0];
+    const tagNames = conversation?.tags.map((row) => row.tag.name) ?? [];
+    return identity.workspaceId === WORKSPACE_ID &&
+      canary.designated === true &&
+      canary.kind === "INTERNAL_TEST" &&
+      Boolean(conversation) &&
+      tagNames.includes("CANARY_INTERNAL_TEST");
+  });
+  if (eligibleDesignated.length !== 1) {
+    throw new Error(`Expected exactly one designated internal/test canary; found ${eligibleDesignated.length}.`);
+  }
+  const designatedCanary = eligibleDesignated[0];
+  if (event.contactId !== designatedCanary.id || event.conversationId !== designatedCanary.conversations[0]!.id) {
+    throw new Error("Phase21G canary event is not bound to the designated internal/test contact.");
+  }
+
   const flows = await listAutomationFlowsForWorkspace(WORKSPACE_ID, false);
   const flow = flows.find((item) => item.name === FLOW_NAME);
   if (!flow) throw new Error("Phase21E canary flow is missing during verification.");
@@ -81,6 +123,7 @@ async function main() {
     canaryStatus: event.status,
     canaryAttemptCount: event.attemptCount,
     runtimeStatus: payload.status,
+    designatedInternalCanaryVerified: true,
     queuedMessageCount: queued.length,
     nonCanaryMutations,
     remainingNonCanaryDue,
