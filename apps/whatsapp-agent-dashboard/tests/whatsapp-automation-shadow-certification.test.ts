@@ -47,5 +47,11 @@ for (const forbidden of [
 assert.match(source, /databaseMutationsAttempted: false/);
 assert.match(source, /externalWritesAttempted: false/);
 assert.match(source, /outboundMessagesQueued: false/);
+assert.match(source, /id: event\.id/);
+assert.match(source, /sourceEventId: event\.sourceEventId/);
+assert.match(source, /trigger: event\.trigger/);
+assert.match(source, /workspaceId: event\.workspaceId/);
+assert.equal(source.includes("workspacePresent"), false);
+assert.equal(source.includes("conversationPresent"), false);
 
 console.log("Phase21C WhatsApp shadow runtime certification: PASS");
