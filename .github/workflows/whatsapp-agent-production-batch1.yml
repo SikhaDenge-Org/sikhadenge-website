@@ -206,6 +206,45 @@ jobs:
           free_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"
           printf 'PRESTAGE_TMP_FREE_KB_AFTER_ORPHAN_CLEANUP=%s\n' "$free_kb"
           if (( free_kb < 2097152 )); then
+            printf 'INFO: PRESTAGE_LOW_SPACE_PRUNING_OBSOLETE_BUILD_SNAPSHOTS\n'
+            python3 - "$LIVE_APP" <<'PY'
+          from pathlib import Path
+          import shutil
+          import sys
+
+          live_app = Path(sys.argv[1]).resolve()
+          if live_app != Path("/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard").resolve():
+              raise SystemExit(f"refusing unexpected LIVE_APP for build snapshot cleanup: {live_app}")
+
+          retention = {
+              ".next-before-engageos-*": 2,
+              ".next-failed-engageos-*": 1,
+              ".next-stage-engageos-*": 0,
+          }
+
+          removed = 0
+          for pattern, keep in retention.items():
+              candidates = []
+              for path in live_app.glob(pattern):
+                  resolved = path.resolve()
+                  if path.is_symlink():
+                      raise SystemExit(f"refusing symlink build snapshot cleanup: {path}")
+                  if resolved.parent != live_app:
+                      raise SystemExit(f"refusing out-of-scope build snapshot cleanup: {resolved}")
+                  if path.is_dir():
+                      candidates.append(path)
+              candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+              for path in candidates[keep:]:
+                  print(f"PRESTAGE_REMOVING_OBSOLETE_BUILD_SNAPSHOT={path}")
+                  shutil.rmtree(path)
+                  removed += 1
+
+          print(f"PRESTAGE_OBSOLETE_BUILD_SNAPSHOTS_REMOVED={removed}")
+          PY
+            free_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"
+            printf 'PRESTAGE_TMP_FREE_KB_AFTER_BUILD_SNAPSHOT_CLEANUP=%s\n' "$free_kb"
+          fi
+          if (( free_kb < 2097152 )); then
             printf 'INFO: PRESTAGE_LOW_SPACE_CLEANING_NPM_CACHE\n'
             npm cache clean --force >/dev/null 2>&1 || true
             free_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"
