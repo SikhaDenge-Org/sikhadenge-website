@@ -4,7 +4,11 @@ import { executePublishedAutomation } from "@/modules/automations/application/ru
 
 const WORKSPACE_ID = "engagews_default";
 const FLOW_NAME = "WhatsApp Phase21E No-Send Canary";
-const QUALIFICATION_EVENT_ID = "phase21f-nosend-runtime-qualification-v1";
+const QUALIFICATION_EVENT_ID = process.env.PHASE21F_QUALIFICATION_EVENT_ID?.trim() ?? "";
+
+if (!QUALIFICATION_EVENT_ID) {
+  throw new Error("PHASE21F_QUALIFICATION_EVENT_ID is required.");
+}
 
 async function resolveConversationId() {
   const pending = await prisma.engageWhatsAppAutomationEvent.findFirst({
@@ -66,6 +70,9 @@ async function main() {
     },
   });
 
+  if (result.replayed) {
+    throw new Error("No-send runtime qualification replayed a prior terminal run.");
+  }
   if (result.run.status !== "COMPLETED") {
     throw new Error(`No-send runtime qualification did not complete: ${result.run.status}`);
   }
