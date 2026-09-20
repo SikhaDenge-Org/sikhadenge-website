@@ -80,6 +80,9 @@ jobs:
       - name: Test WhatsApp no-send canary provisioning
         run: npm exec -- tsx tests/whatsapp-phase21e-nosend-canary-certification.test.ts
 
+      - name: Test WhatsApp no-send runtime qualification
+        run: npm exec -- tsx tests/whatsapp-phase21f-nosend-runtime-qualification-certification.test.ts
+
       - name: Capture TypeScript diagnostics
         run: |
           set +e
