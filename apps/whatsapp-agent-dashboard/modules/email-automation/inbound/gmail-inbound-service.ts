@@ -23,6 +23,20 @@ function attachmentMetadata(payload: any): Array<{ attachmentId:string; fileName
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
+function hasActivationSender(value: unknown, activationAccount: string): boolean {
+  const emailAutomation = asRecord(asRecord(value).emailAutomation);
+  const senders = Array.isArray(emailAutomation.senderIdentities)
+    ? emailAutomation.senderIdentities
+    : [];
+  return senders.some((raw) => {
+    const sender = asRecord(raw);
+    return typeof sender.fromEmail === "string" &&
+      sender.fromEmail.trim().toLowerCase() === activationAccount &&
+      sender.verificationStatus === "VERIFIED" &&
+      sender.isActive === true;
+  });
+}
+
 function watchStateFromCapabilities(value: unknown) {
   const state = asRecord(asRecord(value).gmailInbound);
   return {
@@ -146,14 +160,25 @@ export async function syncGmailHistory(input: { workspaceId: string; connectionI
 }
 export async function syncWatchedGmailMailboxes(input: { workspaceId?: string; limit?: number } = {}) {
   if (process.env.EMAIL_INBOUND_SYNC_ENABLED !== "true") return { enabled: false, scanned: 0, synced: 0, failed: 0, results: [] as Array<Record<string, unknown>> };
+  const activationWorkspaceId = process.env.EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID?.trim() || "engagews_default";
+  const activationAccount = (process.env.EMAIL_INBOUND_ACTIVATION_ACCOUNT?.trim() || "support@sikhadenge.in").toLowerCase();
+  if (!/^[A-Za-z0-9_-]+$/.test(activationWorkspaceId)) throw new Error("EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID is invalid.");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(activationAccount)) throw new Error("EMAIL_INBOUND_ACTIVATION_ACCOUNT is invalid.");
+  if (input.workspaceId && input.workspaceId !== activationWorkspaceId) {
+    throw new Error(`Gmail inbound scheduler is pinned to workspace ${activationWorkspaceId}.`);
+  }
   const limit = Math.max(1, Math.min(50, Math.floor(input.limit ?? 20)));
   const connections = await prisma.engageChannelConnection.findMany({
-    where: { channel: "EMAIL", status: "CONNECTED", ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}) },
+    where: { workspaceId: activationWorkspaceId, channel: "EMAIL", status: "CONNECTED" },
     orderBy: { updatedAt: "asc" },
     take: limit * 3,
     select: { id: true, workspaceId: true, capabilities: true },
   });
-  const watched = connections.filter((row) => asRecord(row.capabilities).emailProvider === "GOOGLE_GMAIL" && Boolean(watchStateFromCapabilities(row.capabilities).historyId)).slice(0, limit);
+  const watched = connections.filter((row) =>
+    asRecord(row.capabilities).emailProvider === "GOOGLE_GMAIL" &&
+    hasActivationSender(row.capabilities, activationAccount) &&
+    Boolean(watchStateFromCapabilities(row.capabilities).historyId)
+  ).slice(0, limit);
   const results: Array<Record<string, unknown>> = [];
   let synced = 0, failed = 0;
   for (const connection of watched) {
@@ -166,7 +191,7 @@ export async function syncWatchedGmailMailboxes(input: { workspaceId?: string; l
       results.push({ connectionId: connection.id, workspaceId: connection.workspaceId, ok: false, error: error instanceof Error ? error.message : "Gmail inbound sync failed." });
     }
   }
-  return { enabled: true, scanned: watched.length, synced, failed, results };
+  return { enabled: true, activationWorkspaceId, activationAccount, scanned: watched.length, synced, failed, results };
 }
 export async function fetchGmailInboundAttachment(input:{workspaceId:string;inboundMessageId:string;attachmentId:string}) {
   const row=await prisma.engageEmailInboundMessage.findFirst({where:{id:input.inboundMessageId,workspaceId:input.workspaceId,provider:"GOOGLE_GMAIL"}}); if(!row||!row.connectionId) throw new Error("Gmail inbound message was not found.");
