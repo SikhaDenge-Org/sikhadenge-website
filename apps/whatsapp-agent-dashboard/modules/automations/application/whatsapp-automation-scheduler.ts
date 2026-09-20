@@ -89,10 +89,12 @@ async function resolveConversation(input: { conversationId: string | null; conta
   });
 }
 
-async function recoverStaleClaims(now: Date): Promise<number> {
+async function recoverStaleClaims(now: Date, sourceEventPrefix: string): Promise<number> {
   const cutoff = new Date(now.getTime() - STALE_CLAIM_MS);
+  const cohortWhere = sourceEventPrefix ? { sourceEventId: { startsWith: sourceEventPrefix } } : {};
   const retryable = await prisma.engageWhatsAppAutomationEvent.updateMany({
     where: {
+      ...cohortWhere,
       status: "PROCESSING",
       claimedAt: { lt: cutoff },
       attemptCount: { lt: MAX_EVENT_ATTEMPTS },
@@ -101,6 +103,7 @@ async function recoverStaleClaims(now: Date): Promise<number> {
   });
   await prisma.engageWhatsAppAutomationEvent.updateMany({
     where: {
+      ...cohortWhere,
       status: "PROCESSING",
       claimedAt: { lt: cutoff },
       attemptCount: { gte: MAX_EVENT_ATTEMPTS },
@@ -246,7 +249,7 @@ export async function runWhatsAppAutomationSchedulerCycle(input?: { now?: Date; 
   const status = getWhatsAppAutomationSchedulerStatus();
   if (!status.schedulerEnabled) return { status, paused: true, reason: "SCHEDULER_DISABLED" as const };
 
-  const recoveredClaims = await recoverStaleClaims(now);
+  const recoveredClaims = await recoverStaleClaims(now, status.eventSourcePrefix);
   if (!status.automation.runtimeEnabled || !status.automation.actionExecutionEnabled) {
     return {
       status,
