@@ -122,7 +122,7 @@ jobs:
             printf 'SCHEDULER_PM2_OPERATION=restart\n'
           else
             test -f "$LIVE_APP/node_modules/tsx/dist/cli.mjs"
-            pm2 start "$LIVE_APP/node_modules/tsx/dist/cli.mjs"               --name "$PROCESS"               --cwd "$LIVE_APP"               --interpreter /usr/bin/node               --restart-delay 3000               --max-restarts 10               --min-uptime 10s               -- scripts/whatsapp-automation-scheduler.ts
+            pm2 start "$LIVE_APP/node_modules/tsx/dist/cli.mjs"               --name "$PROCESS"               --cwd "$LIVE_APP"               --interpreter /usr/bin/node               -- scripts/whatsapp-automation-scheduler.ts
             printf 'SCHEDULER_PM2_OPERATION=start\n'
           fi
           pm2 save
