@@ -47,8 +47,15 @@ async function main() {
       id: true,
       metadata: true,
       conversations: {
+        where: {
+          tags: {
+            some: {
+              tag: { name: "CANARY_INTERNAL_TEST" },
+            },
+          },
+        },
         orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
-        take: 1,
+        take: 2,
         select: {
           id: true,
           tags: { select: { tag: { select: { name: true } } } },
@@ -61,19 +68,22 @@ async function main() {
     const engageos = record(metadata.engageos);
     const identity = record(engageos.whatsappIdentity);
     const canary = record(engageos.canary);
-    const conversation = contact.conversations[0];
-    const tagNames = conversation?.tags.map((row) => row.tag.name) ?? [];
+    const taggedConversation = contact.conversations.find((conversation) =>
+      conversation.tags.some((row) => row.tag.name === "CANARY_INTERNAL_TEST"),
+    );
     return identity.workspaceId === WORKSPACE_ID &&
       canary.designated === true &&
       canary.kind === "INTERNAL_TEST" &&
-      Boolean(conversation) &&
-      tagNames.includes("CANARY_INTERNAL_TEST");
+      Boolean(taggedConversation);
   });
   if (eligibleDesignated.length !== 1) {
     throw new Error(`Expected exactly one designated internal/test canary; found ${eligibleDesignated.length}.`);
   }
   const designatedCanary = eligibleDesignated[0];
-  if (event.contactId !== designatedCanary.id || event.conversationId !== designatedCanary.conversations[0]!.id) {
+  const taggedConversation = designatedCanary.conversations.find((conversation) =>
+    conversation.tags.some((row) => row.tag.name === "CANARY_INTERNAL_TEST"),
+  );
+  if (!taggedConversation || event.contactId !== designatedCanary.id || event.conversationId !== taggedConversation.id) {
     throw new Error("Phase21G canary event is not bound to the designated internal/test contact.");
   }
 
