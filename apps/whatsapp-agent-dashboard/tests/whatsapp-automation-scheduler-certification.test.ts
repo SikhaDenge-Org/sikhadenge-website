@@ -18,6 +18,8 @@ assert.match(scheduler, /dispatchDueCampaigns/);
 assert.match(scheduler, /WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED/);
 assert.match(scheduler, /WHATSAPP_OUTBOUND_MODE=live/);
 assert.match(scheduler, /MAX_EVENT_ATTEMPTS = 3/);
+assert.match(scheduler, /WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX/);
+assert.match(scheduler, /sourceEventId: \{ startsWith: sourceEventPrefix \}/);
 assert.match(worker, /WHATSAPP_AUTOMATION_SCHEDULER_ENABLED=true is required/);
 assert.match(ecosystem, /WHATSAPP_AUTOMATION_SCHEDULER_ENABLED: "true"/);
 assert.match(ecosystem, /AUTOMATION_RUNTIME_ENABLED: "false"/);
