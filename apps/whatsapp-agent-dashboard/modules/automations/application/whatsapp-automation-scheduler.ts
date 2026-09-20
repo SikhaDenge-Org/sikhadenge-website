@@ -257,9 +257,14 @@ export async function runWhatsAppAutomationSchedulerCycle(input?: { now?: Date; 
     };
   }
 
-  const timeTriggers = await materializeWhatsAppTimeTriggers({ now, limit });
+  const targetedEventCohort = Boolean(status.eventSourcePrefix);
+  const timeTriggers = targetedEventCohort
+    ? { skipped: true, reason: "TARGETED_EVENT_COHORT" as const }
+    : await materializeWhatsAppTimeTriggers({ now, limit });
   const automationEvents = await processDueAutomationEvents(now, limit, status.eventSourcePrefix);
-  const resumedRuns = await resumeAutomationRuns(now, limit);
+  const resumedRuns = targetedEventCohort
+    ? { skipped: true, reason: "TARGETED_EVENT_COHORT" as const }
+    : await resumeAutomationRuns(now, limit);
   const actorId = process.env.WHATSAPP_AUTOMATION_SYSTEM_ACTOR_ID?.trim() || "";
 
   let journeys: unknown = { skipped: true, reason: "JOURNEY_RUNTIME_GATED" };
