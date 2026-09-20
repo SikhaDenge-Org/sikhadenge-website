@@ -190,6 +190,13 @@ assert.match(internalInboundRoute, /ingestWorkspaceSafeInboundEmail as ingestInb
 assert.doesNotMatch(internalInboundRoute, /finalization\/platform-service/);
 assert.match(scheduler, /syncWatchedGmailMailboxes/);
 assert.match(scheduler, /inboundSync/);
+assert.match(gmail, /EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID/);
+assert.match(gmail, /EMAIL_INBOUND_ACTIVATION_ACCOUNT/);
+assert.match(gmail, /hasActivationSender\(row\.capabilities, activationAccount\)/);
+assert.match(gmail, /\(row\.displayName \?\? ""\)\.trim\(\)\.toLowerCase\(\) === activationAccount/);
+assert.doesNotMatch(gmail, /take:\s*limit \* 3/);
+assert.match(gmail, /where:\s*\{ workspaceId: activationWorkspaceId, channel: "EMAIL", status: "CONNECTED" \}/);
+assert.match(gmail, /Gmail inbound scheduler is pinned to workspace/);
 
 // OAuth scope-upgrade gate: Inbox read access is explicit and incremental, never bundled silently.
 assert.match(oauthScopes, /https:\/\/www\.googleapis\.com\/auth\/gmail\.readonly/);
