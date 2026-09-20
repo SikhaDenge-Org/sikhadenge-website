@@ -123,7 +123,7 @@ jobs:
             .runtimeMode == "DRY_RUN" and
             .externalWritesEnabled == false and
             .checks.gmailInboundReadAccess == true and
-            (.cursorReadyGmailConnections >= 1)
+            (.activationCursorReadyConnections == 1)
           ' "$post" >/dev/null
           printf 'PASS: EMAIL_INBOUND_ACTIVATION_EVIDENCE_VERIFIED\n'
 
@@ -157,7 +157,8 @@ jobs:
             if [[ -s "$dir/post-activation-readiness.json" ]]; then
               echo "- Post-activation readiness: \`$(jq -r '.status // "unknown"' "$dir/post-activation-readiness.json")\`"
               echo "- Gmail read access: \`$(jq -r '.checks.gmailInboundReadAccess // false' "$dir/post-activation-readiness.json")\`"
-              echo "- Cursor-ready Gmail connections: \`$(jq -r '.cursorReadyGmailConnections // 0' "$dir/post-activation-readiness.json")\`"
+              echo "- Activation cursor ready: \`$(jq -r '.activationCursorReadyConnections // 0' "$dir/post-activation-readiness.json")\`"
+              echo "- Cursor-ready Gmail connections (all): \`$(jq -r '.cursorReadyGmailConnections // 0' "$dir/post-activation-readiness.json")\`"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
