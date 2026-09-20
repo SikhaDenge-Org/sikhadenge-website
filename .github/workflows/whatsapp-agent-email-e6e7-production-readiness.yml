@@ -109,16 +109,24 @@ jobs:
           {
             echo "## Email E6/E7 production readiness"
             echo
-            echo "- Audited SHA: `$DEPLOYED_SHA`"
+            printf -- '- Audited SHA: `%s`\n' "$DEPLOYED_SHA"
             if [[ -s "$json" ]]; then
-              echo "- Status: **$(jq -r '.status' "$json")**"
-              echo "- Runtime: `$(jq -r '.runtime.mode' "$json")`"
-              echo "- Approved templates: `$(jq -r '.approvedTemplates' "$json")`"
-              echo "- Campaigns: `$(jq -r '.campaigns.total' "$json")`"
-              echo "- Sequences: `$(jq -r '.sequences.total' "$json")`"
-              echo "- Queue pending: `$(jq -r '.automationQueue.pending' "$json")`"
-              echo "- Queue failed: `$(jq -r '.automationQueue.failed' "$json")`"
-              echo "- Active email suppressions: `$(jq -r '.deliverability.activeEmailSuppressions' "$json")`"
+              status="$(jq -r '.status' "$json")"
+              runtime="$(jq -r '.runtime.mode' "$json")"
+              approved="$(jq -r '.approvedTemplates' "$json")"
+              campaigns="$(jq -r '.campaigns.total' "$json")"
+              sequences="$(jq -r '.sequences.total' "$json")"
+              pending="$(jq -r '.automationQueue.pending' "$json")"
+              failed="$(jq -r '.automationQueue.failed' "$json")"
+              suppressions="$(jq -r '.deliverability.activeEmailSuppressions' "$json")"
+              printf -- '- Status: **%s**\n' "$status"
+              printf -- '- Runtime: `%s`\n' "$runtime"
+              printf -- '- Approved templates: `%s`\n' "$approved"
+              printf -- '- Campaigns: `%s`\n' "$campaigns"
+              printf -- '- Sequences: `%s`\n' "$sequences"
+              printf -- '- Queue pending: `%s`\n' "$pending"
+              printf -- '- Queue failed: `%s`\n' "$failed"
+              printf -- '- Active email suppressions: `%s`\n' "$suppressions"
             else
               echo "- Status: **NO_EVIDENCE**"
             fi
