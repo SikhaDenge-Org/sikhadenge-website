@@ -9,6 +9,9 @@ assert.match(source, /nodes\[1\]\?\.type !== "END"/);
 assert.match(source, /WHATSAPP_OUTBOUND_MODE !== "disabled"/);
 assert.match(source, /WHATSAPP_OUTBOUND_KILL_SWITCH !== "on"/);
 assert.match(source, /WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED !== "false"/);
+assert.match(source, /PHASE21F_QUALIFICATION_EVENT_ID/);
+assert.match(source, /if \(result\.replayed\)/);
+assert.match(source, /replayed a prior terminal run/);
 assert.match(source, /queuedMessageIds\.length !== 0/);
 assert.match(source, /externalWhatsAppWriteSent: false/);
 
