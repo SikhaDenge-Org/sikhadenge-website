@@ -16,9 +16,11 @@ async function main() {
 
   const [
     approvedTemplates,
-    campaigns,
+    campaignTotal,
+    campaignStatusRows,
     campaignRecipientsFailed,
-    sequences,
+    sequenceTotal,
+    sequenceStatusRows,
     sequenceEnrollmentsFailed,
     automationPending,
     automationFailed,
@@ -26,18 +28,20 @@ async function main() {
     activeEmailSuppressions,
   ] = await Promise.all([
     prisma.engageEmailTemplate.count({ where: { workspaceId, status: "APPROVED" } }),
-    prisma.engageEmailCampaign.findMany({
+    prisma.engageEmailCampaign.count({ where: { workspaceId } }),
+    prisma.engageEmailCampaign.groupBy({
+      by: ["status"],
       where: { workspaceId },
-      select: { status: true },
-      take: 500,
+      _count: { _all: true },
     }),
     prisma.engageEmailCampaignRecipient.count({
       where: { workspaceId, status: "FAILED" },
     }),
-    prisma.engageEmailSequence.findMany({
+    prisma.engageEmailSequence.count({ where: { workspaceId } }),
+    prisma.engageEmailSequence.groupBy({
+      by: ["status"],
       where: { workspaceId },
-      select: { status: true },
-      take: 500,
+      _count: { _all: true },
     }),
     prisma.engageEmailSequenceEnrollment.count({
       where: { workspaceId, status: "FAILED" },
@@ -56,16 +60,19 @@ async function main() {
     prisma.engageCustomerSuppression.count({
       where: {
         workspaceId,
-        channel: "EMAIL",
         revokedAt: null,
-        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        startsAt: { lte: now },
+        AND: [
+          { OR: [{ channel: null }, { channel: "EMAIL" }] },
+          { OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
+        ],
       },
     }),
   ]);
 
-  const countBy = (values: Array<{ status: string }>) =>
-    values.reduce<Record<string, number>>((acc, row) => {
-      acc[row.status] = (acc[row.status] || 0) + 1;
+  const statusCounts = (rows: Array<{ status: string; _count: { _all: number } }>) =>
+    rows.reduce<Record<string, number>>((acc, row) => {
+      acc[row.status] = row._count._all;
       return acc;
     }, {});
 
@@ -78,12 +85,14 @@ async function main() {
     workspacePresent: Boolean(workspace),
     safeRuntime: runtimeMode === "DRY_RUN" && runtimeEnabled && automationEnabled && !externalWritesEnabled,
     approvedTemplatePresent: approvedTemplates > 0,
+    noDeadLetters: automationFailed === 0,
   };
 
   const blockers: string[] = [];
   if (!checks.workspacePresent) blockers.push("Activation workspace is missing.");
   if (!checks.safeRuntime) blockers.push("Email runtime is not in protected DRY_RUN automation mode.");
   if (!checks.approvedTemplatePresent) blockers.push("No approved email template is available.");
+  if (!checks.noDeadLetters) blockers.push(`Email automation has ${automationFailed} dead-lettered FAILED event(s).`);
 
   const output = {
     status: blockers.length ? "BLOCKED" : "READY",
@@ -96,13 +105,13 @@ async function main() {
     },
     checks,
     campaigns: {
-      total: campaigns.length,
-      byStatus: countBy(campaigns),
+      total: campaignTotal,
+      byStatus: statusCounts(campaignStatusRows),
       failedRecipients: campaignRecipientsFailed,
     },
     sequences: {
-      total: sequences.length,
-      byStatus: countBy(sequences),
+      total: sequenceTotal,
+      byStatus: statusCounts(sequenceStatusRows),
       failedEnrollments: sequenceEnrollmentsFailed,
     },
     automationQueue: {
