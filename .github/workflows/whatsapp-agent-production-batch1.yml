@@ -212,6 +212,52 @@ jobs:
             printf 'PRESTAGE_TMP_FREE_KB_AFTER_NPM_CACHE_CLEANUP=%s\n' "$free_kb"
           fi
           if (( free_kb < 2097152 )); then
+            printf 'INFO: PRESTAGE_LOW_SPACE_CLEANING_DISPOSABLE_BUILD_CACHES\n'
+            python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import shutil
+          import time
+
+          now = time.time()
+          uid = os.getuid()
+          tmp = Path("/tmp").resolve()
+          prefixes = ("npm-", "tsx-", "node-compile-cache", "v8-compile-cache")
+
+          for path in tmp.iterdir():
+              try:
+                  stat = path.lstat()
+              except FileNotFoundError:
+                  continue
+              if path.is_symlink() or stat.st_uid != uid:
+                  continue
+              if not path.name.startswith(prefixes):
+                  continue
+              if now - stat.st_mtime < 3600:
+                  continue
+              resolved = path.resolve()
+              if resolved.parent != tmp:
+                  continue
+              if resolved.is_dir():
+                  print(f"PRESTAGE_REMOVING_STALE_BUILD_CACHE={resolved.name}")
+                  shutil.rmtree(resolved)
+              elif resolved.is_file():
+                  print(f"PRESTAGE_REMOVING_STALE_BUILD_CACHE_FILE={resolved.name}")
+                  resolved.unlink()
+
+          home = Path.home().resolve()
+          for relative in (".cache/ms-playwright", ".cache/node-gyp"):
+              path = (home / relative).resolve()
+              if home not in path.parents:
+                  raise SystemExit(f"refusing out-of-home cache cleanup: {path}")
+              if path.exists() and not path.is_symlink():
+                  print(f"PRESTAGE_REMOVING_HOME_BUILD_CACHE={relative}")
+                  shutil.rmtree(path)
+          PY
+            free_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"
+            printf 'PRESTAGE_TMP_FREE_KB_AFTER_BUILD_CACHE_CLEANUP=%s\n' "$free_kb"
+          fi
+          if (( free_kb < 2097152 )); then
             printf 'FAIL: PRESTAGE_INSUFFICIENT_DISK_SPACE free_kb=%s required_kb=2097152\n' "$free_kb" >&2
             exit 36
           fi
