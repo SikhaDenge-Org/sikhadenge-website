@@ -26,11 +26,12 @@ async function main() {
   const inboundModeValid = inboundMode === "POLLING" || inboundMode === "WATCH";
   const connections = await prisma.engageChannelConnection.findMany({
     where: { workspaceId: activationWorkspaceId, channel: "EMAIL", status: "CONNECTED" },
-    select: { id: true, workspaceId: true, externalAccountId: true, capabilities: true },
+    select: { id: true, workspaceId: true, displayName: true, externalAccountId: true, capabilities: true },
     orderBy: { createdAt: "asc" },
   });
   const gmail = connections.filter((row) => asRecord(row.capabilities).emailProvider === "GOOGLE_GMAIL");
   const activationMatches = gmail.filter((connection) => {
+    if ((connection.displayName ?? "").trim().toLowerCase() !== activationAccount) return false;
     const metadata = asRecord(asRecord(connection.capabilities).emailAutomation);
     const senders = Array.isArray(metadata.senderIdentities) ? metadata.senderIdentities : [];
     return senders.some((raw) => {
@@ -108,7 +109,7 @@ async function main() {
     activationCursorReadyConnections: activationCursorReady.length,
     inboundMessages: inboundCount,
     unmatchedInboundMessages: unmatchedInboundCount,
-    gmailAccounts: gmail.map((row) => ({ workspaceId: row.workspaceId, connectionId: row.id, account: row.externalAccountId, cursorPresent: cursorReady.some((item) => item.id === row.id), syncMode: gmailInbound(row.capabilities).syncMode || null })),
+    gmailAccounts: gmail.map((row) => ({ workspaceId: row.workspaceId, connectionId: row.id, authenticatedAccount: row.displayName, account: row.externalAccountId, cursorPresent: cursorReady.some((item) => item.id === row.id), syncMode: gmailInbound(row.capabilities).syncMode || null })),
   };
   process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);
   if (!configReady) process.exitCode = 2;
