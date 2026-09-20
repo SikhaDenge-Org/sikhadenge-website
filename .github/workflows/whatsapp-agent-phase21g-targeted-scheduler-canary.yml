@@ -133,6 +133,38 @@ jobs:
           )"
           test -n "$DATABASE_URL"
 
+          cleanup_armed=false
+          restore_fail_closed() {
+            export NODE_ENV=production
+            export WHATSAPP_AUTOMATION_SCHEDULER_ENABLED=true
+            export WHATSAPP_AUTOMATION_SCHEDULER_INTERVAL_MS=5000
+            export AUTOMATION_RUNTIME_ENABLED=false
+            export AUTOMATION_ACTIONS_ENABLED=false
+            export WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX=
+            export JOURNEY_RUNTIME_ENABLED=false
+            export JOURNEY_ACTIONS_ENABLED=false
+            export WHATSAPP_CAMPAIGNS_ENABLED=false
+            export WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED=false
+            export WHATSAPP_OUTBOUND_MODE=disabled
+            export WHATSAPP_OUTBOUND_KILL_SWITCH=on
+            export INTEGRATION_EXTERNAL_WRITES_ENABLED=false
+            export AGENT_AUTO_REPLY_ENABLED=false
+            export AGENT_IMMEDIATE_DISPATCH_ENABLED=false
+            pm2 restart "$PROCESS" --update-env >/dev/null
+            pm2 save >/dev/null
+            printf 'PHASE21G_FAIL_CLOSED_ROLLBACK_APPLIED=true\n'
+          }
+          on_exit() {
+            status=$?
+            if [[ "$cleanup_armed" = "true" && "$status" -ne 0 ]]; then
+              restore_fail_closed || true
+            fi
+            exit "$status"
+          }
+          trap on_exit EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
           cd "$APP"
           npm exec -- tsx tests/whatsapp-automation-scheduler-certification.test.ts
           npm exec -- tsx tests/whatsapp-phase21g-targeted-scheduler-certification.test.ts
@@ -156,8 +188,8 @@ jobs:
           export AGENT_AUTO_REPLY_ENABLED=false
           export AGENT_IMMEDIATE_DISPATCH_ENABLED=false
 
+          cleanup_armed=true
           pm2 restart "$PROCESS" --update-env
-          pm2 save
 
           verified=false
           for attempt in $(seq 1 15); do
@@ -211,6 +243,10 @@ jobs:
           printf 'WHATSAPP_OUTBOUND_MODE=disabled\n'
           printf 'WHATSAPP_OUTBOUND_KILL_SWITCH=on\n'
           printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          cleanup_armed=false
+          trap - EXIT INT TERM
+          pm2 save
+          printf 'FAIL_CLOSED_CLEANUP_ARMED=false\n'
           printf 'ROLLBACK_CONTROLLER=WhatsApp_Automation_Scheduler_Activation\n'
           printf 'PASS: PHASE21G_TARGETED_SCHEDULER_CANARY\n'
           REMOTE
