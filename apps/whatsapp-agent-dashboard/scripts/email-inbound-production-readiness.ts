@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { prisma } from "@/lib/db/prisma";
 import { buildEmailE1Runtime } from "@/modules/email-automation/infrastructure/runtime";
 import { GmailEmailProviderAdapter } from "@/modules/email-automation/providers/gmail/gmail-adapter";
+import { GMAIL_INBOUND_SCOPES } from "@/modules/email-automation/providers/gmail/oauth-scopes";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -49,12 +50,16 @@ async function main() {
 
   let gmailInboundAccess: { ok: boolean; status: number; emailAddress?: string; historyId?: string; error: string } = { ok: false, status: 0, error: "activation account connection not uniquely resolved" };
   let gmailHistoryReadAccess: { ok: boolean; status: number; error: string } = { ok: false, status: 0, error: "Gmail profile read access is not ready." };
+  let gmailGrantedScopes: string[] = [];
+  let gmailInboundScopeGranted = false;
   if (activationMatches.length === 1) {
     try {
       const runtime = buildEmailE1Runtime();
       const adapter = runtime.providers.get("GOOGLE_GMAIL");
       if (!(adapter instanceof GmailEmailProviderAdapter)) throw new Error("Gmail provider is unavailable.");
       const connection = activationMatches[0];
+      gmailGrantedScopes = [...await adapter.getGrantedScopesForConnection(connection.workspaceId, connection.id)];
+      gmailInboundScopeGranted = GMAIL_INBOUND_SCOPES.every((scope) => gmailGrantedScopes.includes(scope));
       const token = await adapter.getAccessTokenForConnection(connection.workspaceId, connection.id);
       const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
         headers: { authorization: `Bearer ${token}` },
@@ -118,13 +123,15 @@ async function main() {
     pubSubTopic: present("GOOGLE_GMAIL_PUBSUB_TOPIC"),
     schedulerToken: (process.env.EMAIL_AUTOMATION_SCHEDULER_TOKEN?.trim().length ?? 0) >= 32,
     activationAccountConnection: activationMatches.length === 1,
+    gmailInboundScopeGranted,
     gmailInboundReadAccess: gmailInboundAccess.ok,
     gmailHistoryReadAccess: gmailHistoryReadAccess.ok,
   };
   const baseChecksReady = checks.gmailClientId && checks.gmailClientSecret && checks.gmailOauthStateSecret && checks.credentialEncryptionKey && checks.schedulerToken;
-  const configReady = baseChecksReady && inboundModeValid && gmail.length > 0 && checks.activationAccountConnection && checks.gmailInboundReadAccess && checks.gmailHistoryReadAccess && (inboundMode !== "WATCH" || checks.pubSubTopic);
+  const configReady = baseChecksReady && inboundModeValid && gmail.length > 0 && checks.activationAccountConnection && checks.gmailInboundScopeGranted && checks.gmailInboundReadAccess && checks.gmailHistoryReadAccess && (inboundMode !== "WATCH" || checks.pubSubTopic);
   const blockers = [
     ...(!checks.activationAccountConnection ? [`Expected exactly one connected Gmail connection for ${activationAccount}; found ${activationMatches.length}.`] : []),
+    ...(!checks.gmailInboundScopeGranted ? [`Gmail OAuth token for ${activationAccount} is missing required scope ${GMAIL_INBOUND_SCOPES[0]}.`] : []),
     ...(!checks.gmailInboundReadAccess ? [`Gmail inbox read access is not authorized for ${activationAccount}. Use Enable Inbox Access and approve Google read-only Gmail access.`] : []),
     ...(checks.gmailInboundReadAccess && !checks.gmailHistoryReadAccess ? [`Gmail history.list read access failed for ${activationAccount}. Polling cannot be activated until Gmail history access succeeds.`] : []),
     ...(inboundMode === "WATCH" && !checks.pubSubTopic ? ["GOOGLE_GMAIL_PUBSUB_TOPIC is required in WATCH mode."] : []),
@@ -140,6 +147,8 @@ async function main() {
     runtimeMode: process.env.EMAIL_RUNTIME_MODE?.trim() || "DISABLED",
     externalWritesEnabled: flag("EMAIL_EXTERNAL_WRITES_ENABLED"),
     checks,
+    gmailGrantedScopes,
+    requiredInboundScopes: [...GMAIL_INBOUND_SCOPES],
     gmailInboundAccess,
     gmailHistoryReadAccess,
     blockers,
