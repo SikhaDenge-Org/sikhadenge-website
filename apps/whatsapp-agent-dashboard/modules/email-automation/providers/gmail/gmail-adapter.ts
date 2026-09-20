@@ -74,6 +74,7 @@ export class GmailEmailProviderAdapter implements EmailProviderAdapter {
   async startOAuth(input: {
     workspaceId: string;
     redirectUri: string;
+    inboundEnabled?: boolean;
   }): Promise<EmailOAuthStart> {
     const state = createGmailOAuthState({
       workspaceId: input.workspaceId,
@@ -87,7 +88,7 @@ export class GmailEmailProviderAdapter implements EmailProviderAdapter {
     url.searchParams.set("access_type", "offline");
     url.searchParams.set("include_granted_scopes", "true");
     url.searchParams.set("prompt", "consent");
-    url.searchParams.set("scope", gmailScopesForPhase({ inboundEnabled: process.env.EMAIL_INBOUND_SYNC_ENABLED === "true" }).join(" "));
+    url.searchParams.set("scope", gmailScopesForPhase({ inboundEnabled: input.inboundEnabled === true }).join(" "));
     url.searchParams.set("state", state);
 
     return {
