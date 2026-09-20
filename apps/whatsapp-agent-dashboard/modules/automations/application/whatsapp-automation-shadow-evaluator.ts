@@ -251,9 +251,10 @@ export async function evaluatePendingWhatsAppAutomationEventsShadow(input?: { no
         const plan = evaluatePublishedGraphShadow(graph, {
           ...payload,
           automationEvent: {
+            id: event.id,
+            sourceEventId: event.sourceEventId,
             trigger: event.trigger,
-            workspacePresent: Boolean(event.workspaceId),
-            conversationPresent: Boolean(conversation.id),
+            workspaceId: event.workspaceId,
           },
         });
         plannedRuns += 1;
