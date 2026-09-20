@@ -42,10 +42,13 @@ export async function GET() {
       process.env.EMAIL_INBOUND_ACTIVATION_ACCOUNT?.trim() ||
       "support@sikhadenge.in"
     ).toLowerCase();
+    const activationWorkspaceId =
+      process.env.EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID?.trim() || "engagews_default";
+    const activationWorkspaceReady = access.workspaceId === activationWorkspaceId;
 
     const connections = await prisma.engageChannelConnection.findMany({
       where: {
-        workspaceId: access.workspaceId,
+        workspaceId: activationWorkspaceId,
         channel: "EMAIL",
         status: "CONNECTED",
       },
@@ -70,7 +73,9 @@ export async function GET() {
     let probeError = "";
     let authorizedConnectionId: string | null = null;
 
-    if (!(adapter instanceof GmailEmailProviderAdapter)) {
+    if (!activationWorkspaceReady) {
+      probeError = `Production Gmail inbound is pinned to workspace ${activationWorkspaceId}; current workspace is ${access.workspaceId}.`;
+    } else if (!(adapter instanceof GmailEmailProviderAdapter)) {
       probeError = "Gmail provider is unavailable.";
     } else if (activationMatches.length !== 1) {
       probeError = `Expected exactly one connected Gmail connection for ${activationAccount}; found ${activationMatches.length}.`;
@@ -78,7 +83,7 @@ export async function GET() {
       const connection = activationMatches[0];
       try {
         const token = await adapter.getAccessTokenForConnection(
-          access.workspaceId,
+          activationWorkspaceId,
           connection.id,
         );
         const response = await fetch(
@@ -110,12 +115,15 @@ export async function GET() {
     return NextResponse.json(
       {
         activationAccount,
-        activationConnectionReady: activationMatches.length === 1,
+        activationWorkspaceId,
+        currentWorkspaceId: access.workspaceId,
+        activationWorkspaceReady,
+        activationConnectionReady: activationWorkspaceReady && activationMatches.length === 1,
         gmailConnected: gmail.length > 0,
         connectedGmailConnections: gmail.length,
         matchingActivationConnections: activationMatches.length,
         readAccess,
-        readAccessStatus: readAccess ? "AUTHORIZED" : "NEEDS_AUTHORIZATION",
+        readAccessStatus: readAccess ? "AUTHORIZED" : activationWorkspaceReady ? "NEEDS_AUTHORIZATION" : "WRONG_WORKSPACE",
         statusCode,
         probeError,
         authorizedConnectionId,
