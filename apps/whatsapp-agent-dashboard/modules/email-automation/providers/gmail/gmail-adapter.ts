@@ -247,6 +247,11 @@ export class GmailEmailProviderAdapter implements EmailProviderAdapter {
 
   async getAccessTokenForConnection(workspaceId: string, connectionId: string): Promise<string> { return this.accessTokenFor(workspaceId, connectionId); }
 
+  async getGrantedScopesForConnection(workspaceId: string, connectionId: string): Promise<readonly string[]> {
+    const stored = await this.credentials.loadOAuthCredentials({ workspaceId, connectionId });
+    return stored?.scopes ?? [];
+  }
+
   private async accessTokenFor(workspaceId: string, connectionId: string): Promise<string> {
     const stored = await this.credentials.loadOAuthCredentials({ workspaceId, connectionId });
     if (!stored) throw new Error("Google OAuth credentials are unavailable.");
