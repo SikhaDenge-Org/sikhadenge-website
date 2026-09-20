@@ -127,7 +127,33 @@ jobs:
           grep -q 'WHATSAPP_OUTBOUND_KILL_SWITCH: "on"' "$LIVE_APP/ecosystem.automation-scheduler.cjs"
 
           cd "$LIVE_APP"
-          pm2 startOrReload ecosystem.automation-scheduler.cjs --only "$PROCESS" --update-env
+          export NODE_ENV=production
+          export WHATSAPP_AUTOMATION_SCHEDULER_ENABLED=true
+          export WHATSAPP_AUTOMATION_SCHEDULER_INTERVAL_MS=5000
+          export AUTOMATION_RUNTIME_ENABLED=false
+          export AUTOMATION_ACTIONS_ENABLED=false
+          export JOURNEY_RUNTIME_ENABLED=false
+          export JOURNEY_ACTIONS_ENABLED=false
+          export WHATSAPP_CAMPAIGNS_ENABLED=false
+          export WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED=false
+          export WHATSAPP_OUTBOUND_MODE=disabled
+          export WHATSAPP_OUTBOUND_KILL_SWITCH=on
+          export INTEGRATION_EXTERNAL_WRITES_ENABLED=false
+          export AGENT_AUTO_REPLY_ENABLED=false
+          export AGENT_IMMEDIATE_DISPATCH_ENABLED=false
+
+          if pm2 describe "$PROCESS" >/dev/null 2>&1; then
+            pm2 restart "$PROCESS" --update-env
+            printf 'SCHEDULER_PM2_OPERATION=restart\n'
+          else
+            test -f "$LIVE_APP/node_modules/tsx/dist/cli.mjs"
+            pm2 start "$LIVE_APP/node_modules/tsx/dist/cli.mjs" \
+              --name "$PROCESS" \
+              --cwd "$LIVE_APP" \
+              --interpreter /usr/bin/node \
+              -- scripts/whatsapp-automation-scheduler.ts
+            printf 'SCHEDULER_PM2_OPERATION=start\n'
+          fi
           pm2 save
 
           sleep 4
