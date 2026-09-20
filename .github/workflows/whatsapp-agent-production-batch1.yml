@@ -247,10 +247,14 @@ jobs:
 
           home = Path.home().resolve()
           for relative in (".cache/ms-playwright", ".cache/node-gyp"):
-              path = (home / relative).resolve()
+              candidate = home / relative
+              if candidate.is_symlink():
+                  print(f"PRESTAGE_SKIPPING_HOME_CACHE_SYMLINK={relative}")
+                  continue
+              path = candidate.resolve()
               if home not in path.parents:
                   raise SystemExit(f"refusing out-of-home cache cleanup: {path}")
-              if path.exists() and not path.is_symlink():
+              if path.exists():
                   print(f"PRESTAGE_REMOVING_HOME_BUILD_CACHE={relative}")
                   shutil.rmtree(path)
           PY
