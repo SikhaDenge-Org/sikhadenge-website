@@ -180,9 +180,13 @@ async function processAutomationEvent(eventId: string, now: Date) {
   }
 }
 
-async function processDueAutomationEvents(now: Date, limit: number) {
+async function processDueAutomationEvents(now: Date, limit: number, sourceEventPrefix: string) {
   const rows = await prisma.engageWhatsAppAutomationEvent.findMany({
-    where: { status: "PENDING", availableAt: { lte: now } },
+    where: {
+      status: "PENDING",
+      availableAt: { lte: now },
+      ...(sourceEventPrefix ? { sourceEventId: { startsWith: sourceEventPrefix } } : {}),
+    },
     orderBy: [{ availableAt: "asc" }, { createdAt: "asc" }],
     take: limit,
     select: { id: true },
@@ -232,6 +236,7 @@ export function getWhatsAppAutomationSchedulerStatus() {
     campaignsEnabled: enabled("WHATSAPP_CAMPAIGNS_ENABLED", false),
     outboundDispatchEnabled: enabled("WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED", false),
     systemActorIdConfigured: Boolean(process.env.WHATSAPP_AUTOMATION_SYSTEM_ACTOR_ID?.trim()),
+    eventSourcePrefix: process.env.WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX?.trim() || "",
   };
 }
 
@@ -253,7 +258,7 @@ export async function runWhatsAppAutomationSchedulerCycle(input?: { now?: Date; 
   }
 
   const timeTriggers = await materializeWhatsAppTimeTriggers({ now, limit });
-  const automationEvents = await processDueAutomationEvents(now, limit);
+  const automationEvents = await processDueAutomationEvents(now, limit, status.eventSourcePrefix);
   const resumedRuns = await resumeAutomationRuns(now, limit);
   const actorId = process.env.WHATSAPP_AUTOMATION_SYSTEM_ACTOR_ID?.trim() || "";
 
