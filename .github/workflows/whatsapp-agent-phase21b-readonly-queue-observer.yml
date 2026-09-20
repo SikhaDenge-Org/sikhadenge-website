@@ -159,7 +159,7 @@ jobs:
 
           DB="$(node "$APP/scripts/prisma-postgres-cli-url.mjs" "$(envv DATABASE_URL)")"
           psql "$DB" -X -v ON_ERROR_STOP=1 -At <<'SQL'
-          BEGIN TRANSACTION READ ONLY;
+          BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
           SELECT 'TOTAL_EVENTS=' || COUNT(*) FROM "EngageWhatsAppAutomationEvent";
           SELECT 'WORKSPACE_COUNT=' || COUNT(DISTINCT "workspaceId") FROM "EngageWhatsAppAutomationEvent";
           SELECT 'STATUS_COUNTS=' || COALESCE((SELECT jsonb_object_agg(status,cnt)::text FROM (SELECT "status" AS status,COUNT(*)::bigint AS cnt FROM "EngageWhatsAppAutomationEvent" GROUP BY "status") s),'{}');
@@ -189,6 +189,7 @@ jobs:
           REMOTE
 
       - name: Publish Phase21B observation summary
+        if: always()
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -201,6 +202,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Phase21B observation evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: phase21b-readonly-queue-observation-${{ inputs.expected_live_sha }}
