@@ -1,0 +1,225 @@
+name: WhatsApp Phase21G Targeted Scheduler Canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_live_sha:
+        description: Exact protected WhatsApp release SHA currently deployed
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  qualify-targeted-scheduler:
+    environment: whatsapp-agent-production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
+      PHASE21G_SOURCE_EVENT_ID: phase21g-canary:${{ github.run_id }}:${{ github.run_attempt }}:${{ inputs.expected_live_sha }}
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+
+    steps:
+      - name: Validate exact protected release SHA
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PHASE21G_SOURCE_EVENT_ID" == phase21g-canary:* ]]
+          release_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/$RELEASE_BRANCH" --jq '.commit.sha')"
+          test "$release_sha" = "$EXPECTED_LIVE_SHA"
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            SSH_PORT=22
+            printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"
+          fi
+          [[ "$SSH_HOST" =~ ^[^[:space:]/]+$ ]]
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          (( SSH_PORT >= 1 && SSH_PORT <= 65535 ))
+
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          ssh-keygen -y -f "$key" >/dev/null
+
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          test -n "$key_material"
+          if [[ "$SSH_PORT" = "22" ]]; then
+            canonical_host="$SSH_HOST"
+          else
+            canonical_host="[$SSH_HOST]:$SSH_PORT"
+          fi
+          printf '%s %s %s\n' "$canonical_host" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -F "$canonical_host" -f "$HOME/.ssh/known_hosts" >/dev/null
+
+      - name: Execute targeted scheduler canary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' PHASE21G_SOURCE_EVENT_ID='$PHASE21G_SOURCE_EVENT_ID' bash -s" <<'REMOTE' | tee phase21g-targeted-scheduler-canary.txt
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ENV_FILE="$APP/.env"
+          PROCESS=sikhadenge-whatsapp-automation-scheduler
+
+          test -f "$ENV_FILE"
+          test "$(git -C "$APP" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
+          test "$(git -C "$APP" status --porcelain --untracked-files=no | wc -l)" -eq 0
+          test -f "$APP/ecosystem.automation-scheduler.cjs"
+
+          pm2v() {
+            local key="$1"
+            pm2 jlist 2>/dev/null | node -e '
+              let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+                const [key]=process.argv.slice(1);
+                const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");
+                if(!p) process.exit(3);
+                const v=key==="status" ? p.pm2_env?.status : p.pm2_env?.[key];
+                process.stdout.write(v===undefined||v===null ? "" : String(v));
+              });
+            ' "$key"
+          }
+
+          test "$(pm2v status)" = "online"
+          test "$(pm2v AUTOMATION_RUNTIME_ENABLED)" = "false"
+          test "$(pm2v AUTOMATION_ACTIONS_ENABLED)" = "false"
+          test "$(pm2v WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)" = "false"
+          test "$(pm2v WHATSAPP_OUTBOUND_MODE)" = "disabled"
+          test "$(pm2v WHATSAPP_OUTBOUND_KILL_SWITCH)" = "on"
+
+          export DATABASE_URL="$(node - "$ENV_FILE" <<'NODE'
+          const fs=require("node:fs");
+          const [file]=process.argv.slice(2);
+          for(const raw of fs.readFileSync(file,"utf8").split(/\r?\n/)){
+            let line=raw.trim();
+            if(!line||line.startsWith("#")) continue;
+            if(line.startsWith("export ")) line=line.slice(7).trim();
+            const i=line.indexOf("=");
+            if(i<1||line.slice(0,i).trim()!=="DATABASE_URL") continue;
+            let value=line.slice(i+1).trim();
+            if(value.length>=2&&((value.startsWith('"')&&value.endsWith('"'))||(value.startsWith("'")&&value.endsWith("'")))) value=value.slice(1,-1);
+            process.stdout.write(value);
+            process.exit(0);
+          }
+          process.exit(1);
+          NODE
+          )"
+          test -n "$DATABASE_URL"
+
+          cd "$APP"
+          npm exec -- tsx tests/whatsapp-automation-scheduler-certification.test.ts
+          npm exec -- tsx tests/whatsapp-phase21g-targeted-scheduler-certification.test.ts
+          PHASE21G_SOURCE_EVENT_ID="$PHASE21G_SOURCE_EVENT_ID" \
+            npm exec -- tsx scripts/whatsapp-phase21g-targeted-canary-enqueue.ts
+
+          activation_at="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+          export NODE_ENV=production
+          export WHATSAPP_AUTOMATION_SCHEDULER_ENABLED=true
+          export WHATSAPP_AUTOMATION_SCHEDULER_INTERVAL_MS=5000
+          export AUTOMATION_RUNTIME_ENABLED=true
+          export AUTOMATION_ACTIONS_ENABLED=true
+          export WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX="$PHASE21G_SOURCE_EVENT_ID"
+          export JOURNEY_RUNTIME_ENABLED=false
+          export JOURNEY_ACTIONS_ENABLED=false
+          export WHATSAPP_CAMPAIGNS_ENABLED=false
+          export WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED=false
+          export WHATSAPP_OUTBOUND_MODE=disabled
+          export WHATSAPP_OUTBOUND_KILL_SWITCH=on
+          export INTEGRATION_EXTERNAL_WRITES_ENABLED=false
+          export AGENT_AUTO_REPLY_ENABLED=false
+          export AGENT_IMMEDIATE_DISPATCH_ENABLED=false
+
+          pm2 restart "$PROCESS" --update-env
+          pm2 save
+
+          verified=false
+          for attempt in $(seq 1 15); do
+            if PHASE21G_SOURCE_EVENT_ID="$PHASE21G_SOURCE_EVENT_ID" \
+               PHASE21G_ACTIVATION_AT="$activation_at" \
+               npm exec -- tsx scripts/whatsapp-phase21g-targeted-canary-verify.ts > /tmp/phase21g-verify.txt 2>&1; then
+              verified=true
+              break
+            fi
+            sleep 4
+          done
+          cat /tmp/phase21g-verify.txt
+          test "$verified" = "true"
+
+          scheduler_json="$(pm2 jlist)"
+          pm2_after() {
+            printf '%s' "$scheduler_json" | node -e '
+              let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+                const [key]=process.argv.slice(1);
+                const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");
+                if(!p) process.exit(3);
+                const v=key==="status" ? p.pm2_env?.status : p.pm2_env?.[key];
+                process.stdout.write(v===undefined||v===null ? "" : String(v));
+              });
+            ' "$1"
+          }
+
+          test "$(pm2_after status)" = "online"
+          test "$(pm2_after AUTOMATION_RUNTIME_ENABLED)" = "true"
+          test "$(pm2_after AUTOMATION_ACTIONS_ENABLED)" = "true"
+          test "$(pm2_after WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX)" = "$PHASE21G_SOURCE_EVENT_ID"
+          test "$(pm2_after JOURNEY_RUNTIME_ENABLED)" = "false"
+          test "$(pm2_after JOURNEY_ACTIONS_ENABLED)" = "false"
+          test "$(pm2_after WHATSAPP_CAMPAIGNS_ENABLED)" = "false"
+          test "$(pm2_after WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)" = "false"
+          test "$(pm2_after WHATSAPP_OUTBOUND_MODE)" = "disabled"
+          test "$(pm2_after WHATSAPP_OUTBOUND_KILL_SWITCH)" = "on"
+          test "$(git -C "$APP" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
+          test "$(git -C "$APP" status --porcelain --untracked-files=no | wc -l)" -eq 0
+
+          printf 'LIVE_SHA=%s\n' "$EXPECTED_LIVE_SHA"
+          printf 'SCHEDULER_PM2_STATE=online\n'
+          printf 'AUTOMATION_RUNTIME_ENABLED=true\n'
+          printf 'AUTOMATION_ACTIONS_ENABLED=true\n'
+          printf 'TARGETED_EVENT_COHORT_ENABLED=true\n'
+          printf 'TARGETED_SOURCE_EVENT_PREFIX_LOCKED=true\n'
+          printf 'JOURNEY_RUNTIME_ENABLED=false\n'
+          printf 'JOURNEY_ACTIONS_ENABLED=false\n'
+          printf 'WHATSAPP_CAMPAIGNS_ENABLED=false\n'
+          printf 'WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED=false\n'
+          printf 'WHATSAPP_OUTBOUND_MODE=disabled\n'
+          printf 'WHATSAPP_OUTBOUND_KILL_SWITCH=on\n'
+          printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          printf 'ROLLBACK_CONTROLLER=WhatsApp_Automation_Scheduler_Activation\n'
+          printf 'PASS: PHASE21G_TARGETED_SCHEDULER_CANARY\n'
+          REMOTE
+
+      - name: Upload targeted canary evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase21g-targeted-scheduler-canary-${{ inputs.expected_live_sha }}
+          path: phase21g-targeted-scheduler-canary.txt
+          if-no-files-found: error
+          retention-days: 30
