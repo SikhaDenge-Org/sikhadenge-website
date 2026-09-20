@@ -70,6 +70,9 @@ jobs:
       - name: Test WhatsApp business trigger outbox wiring
         run: npm run test:whatsapp-business-trigger-outbox
 
+      - name: Test WhatsApp read-only shadow runtime
+        run: npm exec -- tsx tests/whatsapp-automation-shadow-certification.test.ts
+
       - name: Capture TypeScript diagnostics
         run: |
           set +e
