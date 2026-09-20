@@ -47,7 +47,7 @@ async function main() {
   const inboundCount = await prisma.engageEmailInboundMessage.count();
   const unmatchedInboundCount = await prisma.engageEmailInboundMessage.count({ where: { contactId: null, classification: "INBOUND" } });
 
-  let gmailInboundAccess = { ok: false, status: 0, error: "activation account connection not uniquely resolved" };
+  let gmailInboundAccess: { ok: boolean; status: number; emailAddress?: string; error: string } = { ok: false, status: 0, error: "activation account connection not uniquely resolved" };
   if (activationMatches.length === 1) {
     try {
       const runtime = buildEmailE1Runtime();
@@ -59,10 +59,18 @@ async function main() {
         headers: { authorization: `Bearer ${token}` },
         cache: "no-store",
       });
+      const profile = response.ok ? await response.json() as { emailAddress?: string } : null;
+      const profileEmail = profile?.emailAddress?.trim().toLowerCase() || "";
+      const mailboxMatches = response.ok && profileEmail === activationAccount;
       gmailInboundAccess = {
-        ok: response.ok,
+        ok: mailboxMatches,
         status: response.status,
-        error: response.ok ? "" : `Gmail profile probe returned HTTP ${response.status}`,
+        emailAddress: profileEmail,
+        error: !response.ok
+          ? `Gmail profile probe returned HTTP ${response.status}`
+          : mailboxMatches
+            ? ""
+            : `Authenticated Gmail mailbox ${profileEmail || "unknown"} does not match activation account ${activationAccount}.`,
       };
     } catch (error) {
       gmailInboundAccess = {
