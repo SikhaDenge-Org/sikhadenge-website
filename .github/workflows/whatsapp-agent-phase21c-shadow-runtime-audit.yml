@@ -71,6 +71,8 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production"             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15             "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' bash -s" <<'REMOTE' | tee phase21c-shadow-runtime-audit.txt
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ENV_FILE="$APP/.env"
+          test -f "$ENV_FILE"
           test "$(git -C "$APP" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
           test "$(git -C "$APP" status --porcelain --untracked-files=no | wc -l)" -eq 0
           test "$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s).find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(p?.pm2_env?.status||"missing")})')" = "online"
@@ -87,6 +89,25 @@ jobs:
           test "$(pm2v WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)" = "false"
           test "$(pm2v WHATSAPP_OUTBOUND_MODE)" = "disabled"
           test "$(pm2v WHATSAPP_OUTBOUND_KILL_SWITCH)" = "on"
+
+          export DATABASE_URL="$(node - "$ENV_FILE" <<'NODE'
+          const fs=require("node:fs");
+          const [file]=process.argv.slice(2);
+          for(const raw of fs.readFileSync(file,"utf8").split(/\r?\n/)){
+            let line=raw.trim();
+            if(!line||line.startsWith("#")) continue;
+            if(line.startsWith("export ")) line=line.slice(7).trim();
+            const i=line.indexOf("=");
+            if(i<1||line.slice(0,i).trim()!=="DATABASE_URL") continue;
+            let value=line.slice(i+1).trim();
+            if(value.length>=2&&((value.startsWith('"')&&value.endsWith('"'))||(value.startsWith("'")&&value.endsWith("'")))) value=value.slice(1,-1);
+            process.stdout.write(value);
+            process.exit(0);
+          }
+          process.exit(1);
+          NODE
+          )"
+          test -n "$DATABASE_URL"
 
           cd "$APP"
           npm exec -- tsx tests/whatsapp-automation-shadow-certification.test.ts
