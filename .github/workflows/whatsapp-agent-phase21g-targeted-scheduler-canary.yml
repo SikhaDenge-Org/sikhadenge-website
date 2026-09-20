@@ -150,14 +150,41 @@ jobs:
             export INTEGRATION_EXTERNAL_WRITES_ENABLED=false
             export AGENT_AUTO_REPLY_ENABLED=false
             export AGENT_IMMEDIATE_DISPATCH_ENABLED=false
-            pm2 restart "$PROCESS" --update-env >/dev/null
-            pm2 save >/dev/null
+            pm2 restart "$PROCESS" --update-env >/dev/null || return 91
+            pm2 save >/dev/null || return 92
+            rollback_json="$(pm2 jlist)"
+            rollback_value() {
+              printf '%s' "$rollback_json" | node -e '
+                let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+                  const [key]=process.argv.slice(1);
+                  const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");
+                  if(!p) process.exit(3);
+                  const v=key==="status" ? p.pm2_env?.status : p.pm2_env?.[key];
+                  process.stdout.write(v===undefined||v===null ? "" : String(v));
+                });
+              ' "$1"
+            }
+            test "$(rollback_value status)" = "online" || return 93
+            test "$(rollback_value AUTOMATION_RUNTIME_ENABLED)" = "false" || return 94
+            test "$(rollback_value AUTOMATION_ACTIONS_ENABLED)" = "false" || return 95
+            test -z "$(rollback_value WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX)" || return 96
+            test "$(rollback_value WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)" = "false" || return 97
+            test "$(rollback_value WHATSAPP_OUTBOUND_MODE)" = "disabled" || return 98
+            test "$(rollback_value WHATSAPP_OUTBOUND_KILL_SWITCH)" = "on" || return 99
             printf 'PHASE21G_FAIL_CLOSED_ROLLBACK_APPLIED=true\n'
+            return 0
           }
           on_exit() {
             status=$?
             if [[ "$cleanup_armed" = "true" && "$status" -ne 0 ]]; then
-              restore_fail_closed || true
+              trap - EXIT INT TERM
+              if restore_fail_closed; then
+                exit "$status"
+              else
+                rollback_status=$?
+                printf 'PHASE21G_FAIL_CLOSED_ROLLBACK_FAILED=%s\n' "$rollback_status" >&2
+                exit 97
+              fi
             fi
             exit "$status"
           }
@@ -243,9 +270,9 @@ jobs:
           printf 'WHATSAPP_OUTBOUND_MODE=disabled\n'
           printf 'WHATSAPP_OUTBOUND_KILL_SWITCH=on\n'
           printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          pm2 save
           cleanup_armed=false
           trap - EXIT INT TERM
-          pm2 save
           printf 'FAIL_CLOSED_CLEANUP_ARMED=false\n'
           printf 'ROLLBACK_CONTROLLER=WhatsApp_Automation_Scheduler_Activation\n'
           printf 'PASS: PHASE21G_TARGETED_SCHEDULER_CANARY\n'
