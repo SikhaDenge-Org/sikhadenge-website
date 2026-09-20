@@ -10,6 +10,7 @@ import {
 
 const ACCESS_TOKEN_KIND = "ACCESS_TOKEN";
 const REFRESH_TOKEN_KIND = "REFRESH_TOKEN";
+const OAUTH_SCOPES_KIND = "OAUTH_SCOPES";
 
 export type EmailCredentialCryptoConfig = {
   key: Buffer;
@@ -72,6 +73,32 @@ export class PrismaEmailCredentialVault implements EmailCredentialVaultPort {
       },
     });
 
+    const scopes = encryptEmailCredential({
+      plaintext: JSON.stringify([...new Set(input.credentials.scopes)]),
+      key: this.crypto.key,
+      keyVersion: this.crypto.keyVersion,
+    });
+    await prisma.engageConnectionCredential.upsert({
+      where: {
+        connectionId_kind: {
+          connectionId: input.connectionId,
+          kind: OAUTH_SCOPES_KIND,
+        },
+      },
+      create: {
+        workspaceId: input.workspaceId,
+        connectionId: input.connectionId,
+        kind: OAUTH_SCOPES_KIND,
+        ...scopes,
+        expiresAt: null,
+      },
+      update: {
+        workspaceId: input.workspaceId,
+        ...scopes,
+        expiresAt: null,
+      },
+    });
+
     if (input.credentials.refreshToken) {
       const refresh = encryptEmailCredential({
         plaintext: input.credentials.refreshToken,
@@ -110,12 +137,34 @@ export class PrismaEmailCredentialVault implements EmailCredentialVaultPort {
       where: {
         workspaceId: input.workspaceId,
         connectionId: input.connectionId,
-        kind: { in: [ACCESS_TOKEN_KIND, REFRESH_TOKEN_KIND] },
+        kind: { in: [ACCESS_TOKEN_KIND, REFRESH_TOKEN_KIND, OAUTH_SCOPES_KIND] },
       },
     });
     const access = records.find((record) => record.kind === ACCESS_TOKEN_KIND);
     if (!access) return null;
     const refresh = records.find((record) => record.kind === REFRESH_TOKEN_KIND);
+    const scopeRecord = records.find((record) => record.kind === OAUTH_SCOPES_KIND);
+    let scopes: string[] = [];
+    if (scopeRecord) {
+      try {
+        const decoded = decryptEmailCredential({
+          encrypted: {
+            algorithm: scopeRecord.algorithm as "AES_256_GCM",
+            keyVersion: scopeRecord.keyVersion,
+            initializationVector: scopeRecord.initializationVector,
+            authenticationTag: scopeRecord.authenticationTag,
+            ciphertext: scopeRecord.ciphertext,
+          },
+          key: this.crypto.key,
+        });
+        const parsed = JSON.parse(decoded) as unknown;
+        scopes = Array.isArray(parsed)
+          ? parsed.filter((scope): scope is string => typeof scope === "string" && scope.length > 0)
+          : [];
+      } catch {
+        scopes = [];
+      }
+    }
 
     return {
       accessToken: decryptEmailCredential({
@@ -141,7 +190,7 @@ export class PrismaEmailCredentialVault implements EmailCredentialVaultPort {
           })
         : null,
       expiresAt: access.expiresAt,
-      scopes: [],
+      scopes,
     };
   }
 
@@ -176,7 +225,7 @@ export class PrismaEmailCredentialVault implements EmailCredentialVaultPort {
       where: {
         workspaceId: input.workspaceId,
         connectionId: input.connectionId,
-        kind: { in: [ACCESS_TOKEN_KIND, REFRESH_TOKEN_KIND] },
+        kind: { in: [ACCESS_TOKEN_KIND, REFRESH_TOKEN_KIND, OAUTH_SCOPES_KIND] },
       },
     });
   }
