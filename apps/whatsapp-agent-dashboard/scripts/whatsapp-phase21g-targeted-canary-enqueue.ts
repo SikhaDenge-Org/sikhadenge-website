@@ -27,6 +27,13 @@ async function resolveDesignatedCanaryConversation() {
       id: true,
       metadata: true,
       conversations: {
+        where: {
+          tags: {
+            some: {
+              tag: { name: TAG_NAME },
+            },
+          },
+        },
         orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
         take: 2,
         select: {
@@ -42,14 +49,14 @@ async function resolveDesignatedCanaryConversation() {
     const engageos = rec(metadata.engageos);
     const identity = rec(engageos.whatsappIdentity);
     const canary = rec(engageos.canary);
-    const conversation = contact.conversations[0];
-    const tagNames = conversation?.tags.map((row) => row.tag.name) ?? [];
+    const taggedConversation = contact.conversations.find((conversation) =>
+      conversation.tags.some((row) => row.tag.name === TAG_NAME),
+    );
     return (
       identity.workspaceId === WORKSPACE_ID &&
       canary.designated === true &&
       canary.kind === "INTERNAL_TEST" &&
-      Boolean(conversation) &&
-      tagNames.includes(TAG_NAME)
+      Boolean(taggedConversation)
     );
   });
 
@@ -59,7 +66,9 @@ async function resolveDesignatedCanaryConversation() {
 
   return {
     contactId: eligible[0].id,
-    conversationId: eligible[0].conversations[0]!.id,
+    conversationId: eligible[0].conversations.find((conversation) =>
+      conversation.tags.some((row) => row.tag.name === TAG_NAME),
+    )!.id,
   };
 }
 
