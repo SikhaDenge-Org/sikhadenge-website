@@ -79,19 +79,27 @@ async function main() {
       };
 
       if (gmailInboundAccess.ok) {
-        const historyUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/history");
-        historyUrl.searchParams.set("startHistoryId", profileHistoryId);
-        historyUrl.searchParams.set("historyTypes", "messageAdded");
-        historyUrl.searchParams.set("maxResults", "1");
-        const historyResponse = await fetch(historyUrl, {
-          headers: { authorization: `Bearer ${token}` },
-          cache: "no-store",
-        });
-        gmailHistoryReadAccess = {
-          ok: historyResponse.ok,
-          status: historyResponse.status,
-          error: historyResponse.ok ? "" : `Gmail history.list probe returned HTTP ${historyResponse.status}`,
-        };
+        try {
+          const historyUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/history");
+          historyUrl.searchParams.set("startHistoryId", profileHistoryId);
+          historyUrl.searchParams.set("historyTypes", "messageAdded");
+          historyUrl.searchParams.set("maxResults", "1");
+          const historyResponse = await fetch(historyUrl, {
+            headers: { authorization: `Bearer ${token}` },
+            cache: "no-store",
+          });
+          gmailHistoryReadAccess = {
+            ok: historyResponse.ok,
+            status: historyResponse.status,
+            error: historyResponse.ok ? "" : `Gmail history.list probe returned HTTP ${historyResponse.status}`,
+          };
+        } catch (error) {
+          gmailHistoryReadAccess = {
+            ok: false,
+            status: 0,
+            error: error instanceof Error ? `Gmail history.list probe failed: ${error.message}` : "Gmail history.list probe failed.",
+          };
+        }
       }
     } catch (error) {
       gmailInboundAccess = {
