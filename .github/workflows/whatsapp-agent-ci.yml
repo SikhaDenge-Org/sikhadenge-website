@@ -66,6 +66,9 @@ jobs:
       - name: Test human conversation and learning flow
         run: npm run test:agent
 
+      - name: Test WhatsApp business trigger outbox wiring
+        run: npm run test:whatsapp-business-trigger-outbox
+
       - name: Capture TypeScript diagnostics
         run: |
           set +e

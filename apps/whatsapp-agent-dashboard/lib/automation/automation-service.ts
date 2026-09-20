@@ -210,6 +210,13 @@ export function validateAutomationFlow(flow: Pick<AutomationFlow, "name" | "node
       if (!Number.isFinite(minutes) || minutes < 1 || minutes > 10_080) {
         errors.push("Schedule trigger interval must be between 1 and 10,080 minutes.");
       }
+      if (!clean(config.tag, 100)) {
+        errors.push("Schedule trigger requires a bounded audience tag.");
+      }
+      warnings.push("Scheduled automation is capped at 100 conversations per tagged audience.");
+    }
+    if (node.type === "WEBHOOK" && !clean(config.secretLabel, 120)) {
+      errors.push("Webhook trigger requires an event label.");
     }
     if (node.type === "NO_REPLY") {
       const minutes = Number(config.waitMinutes);
@@ -289,6 +296,14 @@ export async function listAutomationFlows(limit = MAX_FLOWS) {
     where: { eventType: FLOW_EVENT_TYPE },
     orderBy: { receivedAt: "desc" },
     take: Math.max(1, Math.min(MAX_FLOWS, Math.floor(limit))),
+  });
+  return events.map((event) => parseFlow(event.payload)).filter((flow): flow is AutomationFlow => Boolean(flow));
+}
+
+export async function listAutomationFlowsForRuntime() {
+  const events = await prisma.webhookEvent.findMany({
+    where: { eventType: FLOW_EVENT_TYPE },
+    orderBy: { receivedAt: "asc" },
   });
   return events.map((event) => parseFlow(event.payload)).filter((flow): flow is AutomationFlow => Boolean(flow));
 }

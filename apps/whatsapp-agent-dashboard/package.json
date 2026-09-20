@@ -92,7 +92,8 @@
     "test:disaster-recovery": "tsx tests/disaster-recovery-qualification.test.ts",
     "test:reliability-failure-injection": "tsx tests/reliability-failure-injection-certification.test.ts",
     "worker:whatsapp-automation": "tsx scripts/whatsapp-automation-scheduler.ts",
-    "test:whatsapp-automation-scheduler": "tsx tests/whatsapp-automation-scheduler-certification.test.ts"
+    "test:whatsapp-automation-scheduler": "tsx tests/whatsapp-automation-scheduler-certification.test.ts",
+    "test:whatsapp-business-trigger-outbox": "tsx tests/whatsapp-business-trigger-outbox-certification.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.12.0",

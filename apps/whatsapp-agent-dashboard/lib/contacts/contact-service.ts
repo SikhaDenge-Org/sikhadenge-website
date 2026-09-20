@@ -13,6 +13,7 @@ import { prisma } from "../db/prisma";
 import { projectCustomer360 } from "../../modules/customers/application/customer-merge-runtime";
 import { readLegacyWhatsAppMappingMetadata } from "../../modules/channels/whatsapp/application/legacy-identity-mapping";
 import { enqueueEmailAutomationEvent, findActorEmailWorkspaceId } from "../../modules/email-automation/automation/event-outbox";
+import { enqueueWhatsAppAutomationEvent, findActorWhatsAppWorkspaceId } from "../../modules/automations/application/whatsapp-automation-event-outbox";
 
 type ContactInput = {
   name: string;
@@ -280,6 +281,7 @@ export async function createContact(input: ContactInput, actorId: string) {
   const assignedToId = await validateAssignee(input.assignedToId);
   const tagNames = normalizeTags(input.tags);
   const emailWorkspaceId = await findActorEmailWorkspaceId(actorId);
+  const whatsappWorkspaceId = await findActorWhatsAppWorkspaceId(actorId);
   const existing = await prisma.whatsAppContact.findFirst({
     where: { OR: [{ phone }, { waId }] },
     select: { id: true },
@@ -346,6 +348,27 @@ export async function createContact(input: ContactInput, actorId: string) {
         relatedTriggers: ["CONTACT_CREATED"],
         contactId: contact.id,
         leadId: lead.id,
+        payload: {
+          contactId: contact.id,
+          leadId: lead.id,
+          name,
+          email: contact.email,
+          phone: contact.phone,
+          source: clean(input.source, 120) || "CRM_MANUAL",
+          interestedCourse: clean(input.interestedCourse, 180),
+          consentStatus,
+        },
+      });
+    }
+
+    if (whatsappWorkspaceId) {
+      await enqueueWhatsAppAutomationEvent(tx, {
+        workspaceId: whatsappWorkspaceId,
+        sourceEventId: `crm-contact:${contact.id}`,
+        trigger: "NEW_LEAD",
+        relatedTriggers: ["CONTACT_CREATED"],
+        conversationId: conversation.id,
+        contactId: contact.id,
         payload: {
           contactId: contact.id,
           leadId: lead.id,
@@ -467,6 +490,7 @@ export async function updateContact(
   const addedTagNames = tagNames ? tagNames.filter((tagName) => !previousTagNames.has(tagName.toLocaleLowerCase("en-IN"))) : [];
   const addedTagKeys = new Set(addedTagNames.map((tagName) => tagName.toLocaleLowerCase("en-IN")));
   const emailWorkspaceId = stageChanged || addedTagNames.length ? await findActorEmailWorkspaceId(actorId) : null;
+  const whatsappWorkspaceId = stageChanged || addedTagNames.length ? await findActorWhatsAppWorkspaceId(actorId) : null;
   const tagOperationId = addedTagNames.length ? randomUUID() : null;
 
   await prisma.$transaction(async (tx) => {
@@ -560,6 +584,17 @@ export async function updateContact(
       });
     }
 
+    if (whatsappWorkspaceId && current.lead && requestedStage && requestedStage !== current.lead.stage) {
+      await enqueueWhatsAppAutomationEvent(tx, {
+        workspaceId: whatsappWorkspaceId,
+        sourceEventId: `crm-contact:${contactId}:lead-stage:${current.lead.updatedAt.toISOString()}:${requestedStage}`,
+        trigger: "STAGE_CHANGED",
+        conversationId: conversation.id,
+        contactId,
+        payload: { leadId: current.lead.id, contactId, previousStage: current.lead.stage, stage: requestedStage },
+      });
+    }
+
     if (tagNames) {
       await tx.conversationTagLink.deleteMany({ where: { conversationId: conversation.id } });
       for (const tagName of tagNames) {
@@ -578,6 +613,16 @@ export async function updateContact(
             trigger: "TAG_ADDED",
             contactId,
             leadId: current.lead?.id ?? null,
+            payload: { contactId, conversationId: conversation.id, tagId: tag.id, tagName },
+          });
+        }
+        if (whatsappWorkspaceId && tagOperationId && addedTagKeys.has(tagName.toLocaleLowerCase("en-IN"))) {
+          await enqueueWhatsAppAutomationEvent(tx, {
+            workspaceId: whatsappWorkspaceId,
+            sourceEventId: `crm-contact-tags:${contactId}:${tagOperationId}:${tag.id}`,
+            trigger: "TAG_ADDED",
+            conversationId: conversation.id,
+            contactId,
             payload: { contactId, conversationId: conversation.id, tagId: tag.id, tagName },
           });
         }

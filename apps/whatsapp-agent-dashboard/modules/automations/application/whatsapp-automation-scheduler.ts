@@ -5,6 +5,7 @@ import { dispatchDueCampaigns } from "@/lib/campaigns/campaign-service";
 import { prisma } from "@/lib/db/prisma";
 import { dispatchQueuedOutboundBatch } from "@/lib/outbound/outbound-service";
 import { executePublishedAutomation } from "@/modules/automations/application/runtime-executor";
+import { materializeWhatsAppTimeTriggers } from "@/modules/automations/application/whatsapp-time-trigger-materializer";
 import { processDueJourneys, getJourneyRuntimeStatus } from "@/modules/journeys/application/journey-persistence-runtime";
 import type { WhatsAppAutomationTrigger } from "@/modules/automations/application/whatsapp-automation-event-outbox";
 
@@ -45,11 +46,27 @@ function triggerMatches(input: {
   const accepted = new Set([input.eventTrigger, ...input.related].map((item) => item.trim().toUpperCase()));
   const flowTrigger = input.flowTrigger.trim().toUpperCase();
   if (!accepted.has(flowTrigger)) return false;
-  if (flowTrigger !== "INCOMING_KEYWORD") return true;
-  const keyword = clean(input.flowConfig.keyword, 200).toLocaleLowerCase("en-IN");
-  if (!keyword) return false;
-  const text = clean(input.payload.text, 4096).toLocaleLowerCase("en-IN");
-  return text.includes(keyword);
+
+  if (flowTrigger === "INCOMING_KEYWORD") {
+    const keyword = clean(input.flowConfig.keyword, 200).toLocaleLowerCase("en-IN");
+    if (!keyword) return false;
+    const text = clean(input.payload.text, 4096).toLocaleLowerCase("en-IN");
+    return text.includes(keyword);
+  }
+
+  if (flowTrigger === "STAGE_CHANGED") {
+    const expected = clean(input.flowConfig.stage, 50).toUpperCase();
+    const actual = clean(input.payload.stage, 50).toUpperCase();
+    return Boolean(expected && actual && expected === actual);
+  }
+
+  if (flowTrigger === "TAG_ADDED") {
+    const expected = clean(input.flowConfig.tag, 100).toLocaleLowerCase("en-IN");
+    const actual = clean(input.payload.tagName ?? input.payload.tag, 100).toLocaleLowerCase("en-IN");
+    return Boolean(expected && actual && expected === actual);
+  }
+
+  return true;
 }
 
 async function resolveConversation(input: { conversationId: string | null; contactId: string | null }) {
@@ -106,10 +123,14 @@ async function processAutomationEvent(eventId: string, now: Date) {
     const conversation = await resolveConversation({ conversationId: event.conversationId, contactId: event.contactId });
     if (!conversation) throw new Error("WhatsApp automation event has no resolvable conversation.");
     const payload = record(event.payload);
+    const targetFlowId = clean(payload.targetFlowId, 120);
+    const targetFlowVersion = Number(payload.targetFlowVersion);
     const flows = (await listAutomationFlowsForWorkspace(event.workspaceId, true)).filter((flow) => flow.status === "ACTIVE");
     let matched = 0;
     let executed = 0;
     for (const flow of flows) {
+      if (targetFlowId && flow.flowId !== targetFlowId) continue;
+      if (targetFlowId && Number.isFinite(targetFlowVersion) && flow.version !== targetFlowVersion) continue;
       const trigger = flow.nodes.find((node) => node.kind === "TRIGGER");
       if (!trigger) continue;
       if (!triggerMatches({
@@ -231,6 +252,7 @@ export async function runWhatsAppAutomationSchedulerCycle(input?: { now?: Date; 
     };
   }
 
+  const timeTriggers = await materializeWhatsAppTimeTriggers({ now, limit });
   const automationEvents = await processDueAutomationEvents(now, limit);
   const resumedRuns = await resumeAutomationRuns(now, limit);
   const actorId = process.env.WHATSAPP_AUTOMATION_SYSTEM_ACTOR_ID?.trim() || "";
@@ -255,5 +277,5 @@ export async function runWhatsAppAutomationSchedulerCycle(input?: { now?: Date; 
     outbound = await dispatchQueuedOutboundBatch(limit);
   }
 
-  return { status, paused: false, recoveredClaims, automationEvents, resumedRuns, journeys, campaigns, outbound };
+  return { status, paused: false, recoveredClaims, timeTriggers, automationEvents, resumedRuns, journeys, campaigns, outbound };
 }
