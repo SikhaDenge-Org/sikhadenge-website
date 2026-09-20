@@ -40,6 +40,7 @@ async function main() {
     });
   });
   const cursorReady = gmail.filter((row) => typeof gmailInbound(row.capabilities).historyId === "string" && String(gmailInbound(row.capabilities).historyId).trim());
+  const activationCursorReady = activationMatches.filter((row) => typeof gmailInbound(row.capabilities).historyId === "string" && String(gmailInbound(row.capabilities).historyId).trim());
   const inboundCount = await prisma.engageEmailInboundMessage.count();
   const unmatchedInboundCount = await prisma.engageEmailInboundMessage.count({ where: { contactId: null, classification: "INBOUND" } });
 
@@ -101,6 +102,7 @@ async function main() {
     connectedEmailConnections: connections.length,
     connectedGmailConnections: gmail.length,
     cursorReadyGmailConnections: cursorReady.length,
+    activationCursorReadyConnections: activationCursorReady.length,
     inboundMessages: inboundCount,
     unmatchedInboundMessages: unmatchedInboundCount,
     gmailAccounts: gmail.map((row) => ({ workspaceId: row.workspaceId, connectionId: row.id, account: row.externalAccountId, cursorPresent: cursorReady.some((item) => item.id === row.id), syncMode: gmailInbound(row.capabilities).syncMode || null })),
