@@ -171,10 +171,10 @@ export async function syncWatchedGmailMailboxes(input: { workspaceId?: string; l
   const connections = await prisma.engageChannelConnection.findMany({
     where: { workspaceId: activationWorkspaceId, channel: "EMAIL", status: "CONNECTED" },
     orderBy: { updatedAt: "asc" },
-    take: limit * 3,
-    select: { id: true, workspaceId: true, capabilities: true },
+    select: { id: true, workspaceId: true, displayName: true, capabilities: true },
   });
   const watched = connections.filter((row) =>
+    row.displayName.trim().toLowerCase() === activationAccount &&
     asRecord(row.capabilities).emailProvider === "GOOGLE_GMAIL" &&
     hasActivationSender(row.capabilities, activationAccount) &&
     Boolean(watchStateFromCapabilities(row.capabilities).historyId)
