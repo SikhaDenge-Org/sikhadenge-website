@@ -26,6 +26,7 @@ jobs:
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
+      QUALIFICATION_EVENT_ID: phase21f-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.expected_live_sha }}
       RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
 
     steps:
@@ -66,7 +67,7 @@ jobs:
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
-            "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' bash -s" <<'REMOTE' | tee phase21f-nosend-runtime-qualification.txt
+            "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' PHASE21F_QUALIFICATION_EVENT_ID='$QUALIFICATION_EVENT_ID' bash -s" <<'REMOTE' | tee phase21f-nosend-runtime-qualification.txt
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           ENV_FILE="$APP/.env"
@@ -110,6 +111,7 @@ jobs:
           WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED=false \
           WHATSAPP_OUTBOUND_MODE=disabled \
           WHATSAPP_OUTBOUND_KILL_SWITCH=on \
+          PHASE21F_QUALIFICATION_EVENT_ID="$PHASE21F_QUALIFICATION_EVENT_ID" \
           npm exec -- tsx scripts/whatsapp-phase21f-nosend-runtime-qualification.ts
 
           scheduler_json_after="$(pm2 jlist)"
