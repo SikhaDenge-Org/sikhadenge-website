@@ -56,7 +56,7 @@ export default function EmailSenderManager(){
     <div className={styles.statusRail}>
       <span className={activeConnections.length?styles.connectedPill:styles.neutralPill}>● {activeConnections.length?"Connected":"Not connected"}</span>
       <span className={styles.protectedPill}>🛡 Protected OAuth</span>
-      {primaryConnection?.provider==="GOOGLE_GMAIL"?<button type="button" onClick={()=>void enableInboxAccess()} disabled={action?.kind==="working"}>Enable Inbox Access</button>:null}
+      {primaryConnection?.provider==="GOOGLE_GMAIL"?<button type="button" onClick={()=>void enableInboxAccess()} disabled={action?.kind==="working"||inboxHealth?.activationWorkspaceReady===false} title={inboxHealth?.activationWorkspaceReady===false?`Switch to ${inboxHealth.activationWorkspaceId} to authorize Inbox access.`:undefined}>Enable Inbox Access</button>:null}
       <button className={styles.primaryButton} type="button" onClick={()=>void connectGoogle()}><span className={styles.googleMark}>G</span>{activeConnections.length?"Add another account":"Connect Google account"}</button>
     </div>
 
@@ -67,7 +67,7 @@ export default function EmailSenderManager(){
       <span className={styles.inboxAccessStatus}>{inboxHealth?.readAccess?"AUTHORIZED":inboxHealth&&!inboxHealth.activationWorkspaceReady?"WRONG WORKSPACE":"NEEDS AUTHORIZATION"}</span>
       <div className={styles.inboxAccessActions}>
         <button type="button" onClick={()=>void recheckInboxAccess()} disabled={action?.kind==="working"}>{action?.key==="inbox-recheck"&&action.kind==="working"?"Checking…":"Recheck Inbox Access"}</button>
-        {!inboxHealth?.readAccess?<button type="button" onClick={()=>void enableInboxAccess()} disabled={action?.kind==="working"}>{action?.key==="inbox-access"&&action.kind==="working"?"Opening Google…":"Enable Inbox Access"}</button>:null}
+        {!inboxHealth?.readAccess&&inboxHealth?.activationWorkspaceReady!==false?<button type="button" onClick={()=>void enableInboxAccess()} disabled={action?.kind==="working"}>{action?.key==="inbox-access"&&action.kind==="working"?"Opening Google…":"Enable Inbox Access"}</button>:null}
       </div>
     </div>:null}
 
