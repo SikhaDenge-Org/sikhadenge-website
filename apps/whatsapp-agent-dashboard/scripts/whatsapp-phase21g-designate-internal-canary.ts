@@ -63,6 +63,31 @@ async function main() {
   const conversation = contact.conversations[0];
   if (!conversation) throw new Error("Contact has no WhatsApp conversation.");
 
+  const existingDistinctCanary = await prisma.whatsAppContact.findFirst({
+    where: {
+      id: { not: contact.id },
+      metadata: {
+        path: ["engageos", "canary", "designated"],
+        equals: true,
+      },
+    },
+    select: { id: true },
+  });
+  if (existingDistinctCanary) {
+    throw new Error("A different production WhatsApp canary is already designated.");
+  }
+
+  const existingDistinctCanaryTag = await prisma.conversationTagLink.findFirst({
+    where: {
+      tag: { name: TAG_NAME },
+      conversation: { contactId: { not: contact.id } },
+    },
+    select: { conversationId: true },
+  });
+  if (existingDistinctCanaryTag) {
+    throw new Error("A different production WhatsApp contact already owns the canary tag.");
+  }
+
   const membership = await prisma.engageWorkspaceMembership.findFirst({
     where: {
       workspaceId: WORKSPACE_ID,
