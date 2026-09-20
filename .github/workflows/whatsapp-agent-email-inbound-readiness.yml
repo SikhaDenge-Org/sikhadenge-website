@@ -31,12 +31,14 @@ jobs:
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       DEPLOYED_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.deployed_sha || github.event.before }}
       AUDIT_RUN_ID: email-inbound-readiness-${{ github.run_id }}-${{ github.run_attempt }}
+      ACTIVATION_WORKSPACE_ID: engagews_default
     steps:
       - name: Validate trigger and production secrets
         shell: bash
         run: |
           set -Eeuo pipefail
           [[ "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ACTIVATION_WORKSPACE_ID" == "engagews_default" ]]
           missing=0
           for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
             [[ -n "${!variable_name:-}" ]] || { echo "Missing production secret: $variable_name" >&2; missing=1; }
@@ -63,7 +65,7 @@ jobs:
         run: |
           set -o pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" \
-            "DEPLOYED_SHA='$DEPLOYED_SHA' RUN_ID='$AUDIT_RUN_ID' bash -s" <<'REMOTE' | tee email-inbound-readiness.log
+            "DEPLOYED_SHA='$DEPLOYED_SHA' RUN_ID='$AUDIT_RUN_ID' WORKSPACE_ID='$ACTIVATION_WORKSPACE_ID' bash -s" <<'REMOTE' | tee email-inbound-readiness.log
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           BACKUP=/root/sikhadenge-backups/$RUN_ID
@@ -75,7 +77,7 @@ jobs:
           source "$APP/.env"
           set +a
           set +e
-          EXPECTED_RELEASE_SHA="$DEPLOYED_SHA" npx tsx scripts/email-inbound-production-readiness.ts | tee "$BACKUP/inbound-readiness.json"
+          EXPECTED_RELEASE_SHA="$DEPLOYED_SHA" EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID="$WORKSPACE_ID" npx tsx scripts/email-inbound-production-readiness.ts | tee "$BACKUP/inbound-readiness.json"
           code=${PIPESTATUS[0]}
           set -e
           printf 'EXIT_CODE=%s\n' "$code" > "$BACKUP/inbound-readiness-result.txt"
@@ -109,6 +111,7 @@ jobs:
             if [[ -f "$json_file" ]]; then
               status="$(jq -r '.status // "UNKNOWN"' "$json_file")"
               account="$(jq -r '.activationAccount // "unknown"' "$json_file")"
+              workspace="$(jq -r '.activationWorkspaceId // "unknown"' "$json_file")"
               mode="$(jq -r '.inboundMode // "unknown"' "$json_file")"
               runtime="$(jq -r '.runtimeMode // "unknown"' "$json_file")"
               sync="$(jq -r '.inboundSyncEnabled // false' "$json_file")"
@@ -116,6 +119,7 @@ jobs:
               cursor="$(jq -r '.cursorReadyGmailConnections // 0' "$json_file")"
               echo "- Status: **$status**"
               echo "- Activation account: \`$account\`"
+              echo "- Activation workspace: \`$workspace\`"
               echo "- Inbound mode: \`$mode\`"
               echo "- Runtime mode: \`$runtime\`"
               echo "- Inbound sync enabled: \`$sync\`"

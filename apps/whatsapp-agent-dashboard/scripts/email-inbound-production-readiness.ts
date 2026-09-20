@@ -15,15 +15,17 @@ type Sender = { fromEmail?: unknown; verificationStatus?: unknown; isActive?: un
 async function main() {
   const expected = process.env.EXPECTED_RELEASE_SHA?.trim() || "";
   const activationAccount = (process.env.EMAIL_INBOUND_ACTIVATION_ACCOUNT?.trim() || "support@sikhadenge.in").toLowerCase();
+  const activationWorkspaceId = process.env.EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID?.trim() || "engagews_default";
   if (!/^[0-9a-f]{40}$/.test(expected)) throw new Error("EXPECTED_RELEASE_SHA is required.");
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(activationAccount)) throw new Error("EMAIL_INBOUND_ACTIVATION_ACCOUNT is invalid.");
+  if (!/^[A-Za-z0-9_-]+$/.test(activationWorkspaceId)) throw new Error("EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID is invalid.");
   const current = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   if (current !== expected) throw new Error("Deployed git SHA does not match EXPECTED_RELEASE_SHA.");
 
   const inboundMode = (process.env.EMAIL_GMAIL_INBOUND_MODE?.trim().toUpperCase() || "POLLING");
   const inboundModeValid = inboundMode === "POLLING" || inboundMode === "WATCH";
   const connections = await prisma.engageChannelConnection.findMany({
-    where: { channel: "EMAIL", status: "CONNECTED" },
+    where: { workspaceId: activationWorkspaceId, channel: "EMAIL", status: "CONNECTED" },
     select: { id: true, workspaceId: true, externalAccountId: true, capabilities: true },
     orderBy: { createdAt: "asc" },
   });
@@ -91,6 +93,7 @@ async function main() {
     status: configReady ? "READY" : "BLOCKED",
     deployedSha: current,
     activationAccount,
+    activationWorkspaceId,
     inboundMode,
     inboundModeValid,
     inboundSyncEnabled: flag("EMAIL_INBOUND_SYNC_ENABLED"),

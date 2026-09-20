@@ -32,6 +32,7 @@ jobs:
       DEPLOYED_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.deployed_sha || github.event.before }}
       ACTIVATION_RUN_ID: email-inbound-activate-${{ github.run_id }}-${{ github.run_attempt }}
       ACTIVATION_ACCOUNT: support@sikhadenge.in
+      ACTIVATION_WORKSPACE_ID: engagews_default
     steps:
       - name: Validate trigger and production secrets
         shell: bash
@@ -39,6 +40,7 @@ jobs:
           set -Eeuo pipefail
           [[ "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$ACTIVATION_ACCOUNT" == "support@sikhadenge.in" ]]
+          [[ "$ACTIVATION_WORKSPACE_ID" == "engagews_default" ]]
           missing=0
           for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
             [[ -n "${!variable_name:-}" ]] || { echo "Missing production secret: $variable_name" >&2; missing=1; }
@@ -65,14 +67,14 @@ jobs:
         run: |
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" \
-            "DEPLOYED_SHA='$DEPLOYED_SHA' RUN_ID='$ACTIVATION_RUN_ID' ACCOUNT='$ACTIVATION_ACCOUNT' bash -s" <<'REMOTE' | tee email-inbound-activation.log
+            "DEPLOYED_SHA='$DEPLOYED_SHA' RUN_ID='$ACTIVATION_RUN_ID' ACCOUNT='$ACTIVATION_ACCOUNT' WORKSPACE_ID='$ACTIVATION_WORKSPACE_ID' bash -s" <<'REMOTE' | tee email-inbound-activation.log
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           test "$(id -u)" = "0"
           cd "$APP"
           test "$(git rev-parse HEAD)" = "$DEPLOYED_SHA"
           APPLY=1 LIVE_APP="$APP" ENV_FILE="$APP/.env" EXPECTED_RELEASE_SHA="$DEPLOYED_SHA" RUN_ID="$RUN_ID" \
-            EMAIL_INBOUND_ACTIVATION_ACCOUNT="$ACCOUNT" bash scripts/email-inbound-production-activate.sh
+            EMAIL_INBOUND_ACTIVATION_ACCOUNT="$ACCOUNT" EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID="$WORKSPACE_ID" bash scripts/email-inbound-production-activate.sh
           REMOTE
 
       - name: Collect protected activation evidence
@@ -102,9 +104,11 @@ jobs:
           test -s "$health"
           test -s "$post"
           grep -qx 'STATUS=PASS_EMAIL_INBOUND_ENABLED' "$result"
-          jq -e --arg account "$ACTIVATION_ACCOUNT" '
+          jq -e --arg account "$ACTIVATION_ACCOUNT" --arg workspace "$ACTIVATION_WORKSPACE_ID" '
             .status == "PASS" and
             .account == $account and
+            .activationWorkspaceId == $workspace and
+            .workspaceId == $workspace and
             (.initialization.persisted == true) and
             (.initialization.historyId | type == "string" and length > 0) and
             (.sync.discovered | type == "number") and
@@ -116,9 +120,10 @@ jobs:
             .externalWritesEnabled == false and
             .inboundSyncEnabled == true
           ' "$health" >/dev/null
-          jq -e --arg account "$ACTIVATION_ACCOUNT" '
+          jq -e --arg account "$ACTIVATION_ACCOUNT" --arg workspace "$ACTIVATION_WORKSPACE_ID" '
             .status == "READY" and
             .activationAccount == $account and
+            .activationWorkspaceId == $workspace and
             .inboundSyncEnabled == true and
             .runtimeMode == "DRY_RUN" and
             .externalWritesEnabled == false and
@@ -138,6 +143,7 @@ jobs:
             echo
             echo "- Target SHA: \`$DEPLOYED_SHA\`"
             echo "- Activation account: \`$ACTIVATION_ACCOUNT\`"
+            echo "- Activation workspace: \`$ACTIVATION_WORKSPACE_ID\`"
             if [[ -s "$dir/inbound-activation-result.txt" ]]; then
               echo "- Result: \`$(tr '\n' ' ' < "$dir/inbound-activation-result.txt" | sed 's/[[:space:]]*$//')\`"
             else
