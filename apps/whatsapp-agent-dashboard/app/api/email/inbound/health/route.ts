@@ -46,6 +46,30 @@ export async function GET() {
       process.env.EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID?.trim() || "engagews_default";
     const activationWorkspaceReady = access.workspaceId === activationWorkspaceId;
 
+    if (!activationWorkspaceReady) {
+      return NextResponse.json(
+        {
+          activationAccount,
+          activationWorkspaceId,
+          currentWorkspaceId: access.workspaceId,
+          activationWorkspaceReady: false,
+          activationConnectionReady: false,
+          gmailConnected: false,
+          connectedGmailConnections: 0,
+          matchingActivationConnections: 0,
+          readAccess: false,
+          readAccessStatus: "WRONG_WORKSPACE",
+          statusCode: 0,
+          probeError: `Production Gmail inbound is pinned to workspace ${activationWorkspaceId}; current workspace is ${access.workspaceId}.`,
+          authorizedConnectionId: null,
+          inboundSyncEnabled: process.env.EMAIL_INBOUND_SYNC_ENABLED === "true",
+          inboundMode: process.env.EMAIL_GMAIL_INBOUND_MODE?.trim().toUpperCase() || "POLLING",
+          cursorReadyConnections: 0,
+        },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
     const connections = await prisma.engageChannelConnection.findMany({
       where: {
         workspaceId: activationWorkspaceId,
@@ -73,9 +97,7 @@ export async function GET() {
     let probeError = "";
     let authorizedConnectionId: string | null = null;
 
-    if (!activationWorkspaceReady) {
-      probeError = `Production Gmail inbound is pinned to workspace ${activationWorkspaceId}; current workspace is ${access.workspaceId}.`;
-    } else if (!(adapter instanceof GmailEmailProviderAdapter)) {
+    if (!(adapter instanceof GmailEmailProviderAdapter)) {
       probeError = "Gmail provider is unavailable.";
     } else if (activationMatches.length !== 1) {
       probeError = `Expected exactly one connected Gmail connection for ${activationAccount}; found ${activationMatches.length}.`;
