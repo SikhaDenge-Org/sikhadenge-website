@@ -77,6 +77,9 @@ jobs:
       - name: Test WhatsApp automation flow coverage audit
         run: npm exec -- tsx tests/whatsapp-automation-flow-coverage-certification.test.ts
 
+      - name: Test WhatsApp no-send canary provisioning
+        run: npm exec -- tsx tests/whatsapp-phase21e-nosend-canary-certification.test.ts
+
       - name: Capture TypeScript diagnostics
         run: |
           set +e
