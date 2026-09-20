@@ -24,6 +24,8 @@ jobs:
       SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
     steps:
       - name: Validate input and secrets
         shell: bash
@@ -31,20 +33,21 @@ jobs:
           set -euo pipefail
           [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test -n "$SSH_HOST"
-          test -n "$SSH_PORT"
           test -n "$SSH_USER"
-          test -n "${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}"
-          test -n "${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}"
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$SSH_HOST_KEY"
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            SSH_PORT=22
+            printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"
+          fi
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          (( SSH_PORT >= 1 && SSH_PORT <= 65535 ))
 
       - name: Configure pinned SSH identity
         shell: bash
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
-          SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
         run: |
-          set -Eeuo pipefail
+          set -euo pipefail
           install -d -m 700 "$HOME/.ssh"
-
           private_key_file="$HOME/.ssh/whatsapp-production"
           if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
             printf '%s\n' "$SSH_PRIVATE_KEY" > "$private_key_file"
@@ -52,25 +55,16 @@ jobs:
             printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$private_key_file"
           fi
           chmod 600 "$private_key_file"
-
+          ssh-keygen -y -f "$private_key_file" >/dev/null
           [[ "$SSH_HOST" =~ ^[^[:space:]/]+$ ]]
           [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
           (( SSH_PORT >= 1 && SSH_PORT <= 65535 ))
-
           read -r _ supplied_key_type supplied_key_material _ <<< "$SSH_HOST_KEY"
           test "$supplied_key_type" = "ssh-ed25519"
           test -n "$supplied_key_material"
-          printf '%s %s\n' "$supplied_key_type" "$supplied_key_material" |
-            ssh-keygen -lf - -E sha256 >/dev/null
-
           canonical_host="[$SSH_HOST]:$SSH_PORT"
-          printf '%s %s %s\n'             "$canonical_host"             "$supplied_key_type"             "$supplied_key_material" > "$HOME/.ssh/known_hosts"
+          printf '%s %s %s\n' "$canonical_host" "$supplied_key_type" "$supplied_key_material" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
-
-          ssh-keygen -y -f "$private_key_file" >/dev/null
-          ssh-keygen -F "$canonical_host" -f "$HOME/.ssh/known_hosts" >/dev/null
-          printf 'PASS: PINNED_HOST_KEY_CANONICALIZED\n'
-          printf 'PASS: SSH_IDENTITY_CONFIGURED\n'
 
       - name: Activate fail-closed scheduler
         shell: bash
