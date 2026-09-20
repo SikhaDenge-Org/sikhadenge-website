@@ -38,6 +38,7 @@ export async function POST(request: Request) {
       workspaceId: access.workspaceId,
       provider: "GOOGLE_GMAIL",
       redirectUri: emailOAuthRedirectUri(),
+      inboundEnabled: enableInbound,
     });
 
     const authorizationUrl = new URL(oauth.authorizationUrl);
