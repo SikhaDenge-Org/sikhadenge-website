@@ -22,6 +22,7 @@ export const PUBLIC_API_SCOPES:
     "contacts.write",
     "messages.send",
     "analytics.read",
+    "automations.trigger",
   ];
 
 export const PUBLIC_API_SECRET_PREFIX =

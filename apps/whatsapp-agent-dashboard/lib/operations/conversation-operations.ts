@@ -9,6 +9,7 @@ import {
 
 import { prisma } from "../db/prisma";
 import { enqueueEmailAutomationEvent, findActorEmailWorkspaceId, supersedePendingEmailAutomationEvents } from "../../modules/email-automation/automation/event-outbox";
+import { enqueueWhatsAppAutomationEvent, findActorWhatsAppWorkspaceId, supersedePendingWhatsAppAutomationEvents } from "../../modules/automations/application/whatsapp-automation-event-outbox";
 import {
   priorityBand,
   queuePriorityScore,
@@ -264,6 +265,7 @@ export async function scheduleLeadFollowUp(input: {
   const reason = cleanReason(input.reason);
   const followUpChanged = (lead.nextFollowUpAt?.getTime() ?? null) !== (input.followUpAt?.getTime() ?? null);
   const emailWorkspaceId = followUpChanged ? await findActorEmailWorkspaceId(input.actor.id) : null;
+  const whatsappWorkspaceId = followUpChanged ? await findActorWhatsAppWorkspaceId(input.actor.id) : null;
   return prisma.$transaction(async (transaction) => {
     const updated = await transaction.lead.update({
       where: { id: lead.id },
@@ -307,6 +309,25 @@ export async function scheduleLeadFollowUp(input: {
           trigger: "FOLLOW_UP_DUE",
           contactId: lead.contactId,
           leadId: lead.id,
+          availableAt: input.followUpAt,
+          payload: { leadId: lead.id, contactId: lead.contactId, followUpAt: input.followUpAt.toISOString(), reason },
+        });
+      }
+    }
+    if (whatsappWorkspaceId && followUpChanged) {
+      await supersedePendingWhatsAppAutomationEvents(transaction, {
+        workspaceId: whatsappWorkspaceId,
+        trigger: "FOLLOW_UP_DUE",
+        conversationId: input.conversationId,
+        contactId: lead.contactId,
+      });
+      if (input.followUpAt) {
+        await enqueueWhatsAppAutomationEvent(transaction, {
+          workspaceId: whatsappWorkspaceId,
+          sourceEventId: `lead-follow-up:${lead.id}:${input.followUpAt.toISOString()}`,
+          trigger: "FOLLOW_UP_DUE",
+          conversationId: input.conversationId,
+          contactId: lead.contactId,
           availableAt: input.followUpAt,
           payload: { leadId: lead.id, contactId: lead.contactId, followUpAt: input.followUpAt.toISOString(), reason },
         });
@@ -389,6 +410,7 @@ export async function replaceConversationTags(input: {
   const previousTagNames = new Set(conversation.tags.map(({ tag }) => tag.name.toLocaleLowerCase("en-IN")));
   const addedTagNames = new Set(normalized.filter((tag) => !previousTagNames.has(tag.name.toLocaleLowerCase("en-IN"))).map((tag) => tag.name.toLocaleLowerCase("en-IN")));
   const emailWorkspaceId = addedTagNames.size ? await findActorEmailWorkspaceId(input.actor.id) : null;
+  const whatsappWorkspaceId = addedTagNames.size ? await findActorWhatsAppWorkspaceId(input.actor.id) : null;
   const operationId = addedTagNames.size ? randomUUID() : null;
 
   return prisma.$transaction(async (transaction) => {
@@ -421,6 +443,19 @@ export async function replaceConversationTags(input: {
           workspaceId: emailWorkspaceId,
           sourceEventId: `conversation-tags:${conversation.id}:${operationId}:${tag.id}`,
           trigger: "TAG_ADDED",
+          contactId: conversation.contactId,
+          payload: { conversationId: conversation.id, contactId: conversation.contactId, tagId: tag.id, tagName: tag.name, tagColor: tag.color },
+        });
+      }
+    }
+
+    if (whatsappWorkspaceId && operationId) {
+      for (const tag of tagRecords.filter((item) => addedTagNames.has(item.name.toLocaleLowerCase("en-IN")))) {
+        await enqueueWhatsAppAutomationEvent(transaction, {
+          workspaceId: whatsappWorkspaceId,
+          sourceEventId: `conversation-tags:${conversation.id}:${operationId}:${tag.id}`,
+          trigger: "TAG_ADDED",
+          conversationId: conversation.id,
           contactId: conversation.contactId,
           payload: { conversationId: conversation.id, contactId: conversation.contactId, tagId: tag.id, tagName: tag.name, tagColor: tag.color },
         });
