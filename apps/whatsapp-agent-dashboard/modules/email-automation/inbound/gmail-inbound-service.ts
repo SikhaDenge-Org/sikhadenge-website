@@ -174,7 +174,7 @@ export async function syncWatchedGmailMailboxes(input: { workspaceId?: string; l
     select: { id: true, workspaceId: true, displayName: true, capabilities: true },
   });
   const watched = connections.filter((row) =>
-    row.displayName.trim().toLowerCase() === activationAccount &&
+    (row.displayName ?? "").trim().toLowerCase() === activationAccount &&
     asRecord(row.capabilities).emailProvider === "GOOGLE_GMAIL" &&
     hasActivationSender(row.capabilities, activationAccount) &&
     Boolean(watchStateFromCapabilities(row.capabilities).historyId)
