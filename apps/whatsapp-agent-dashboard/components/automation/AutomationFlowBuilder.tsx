@@ -111,7 +111,7 @@ function configField(type: string) {
   if (type === "SCHEDULE") return { key: "intervalMinutes", label: "Run every (minutes)", placeholder: "1440" };
   if (type === "NO_REPLY") return { key: "waitMinutes", label: "No reply wait (minutes)", placeholder: "1440" };
   if (type === "APPOINTMENT_REMINDER") return { key: "reminderMinutesBefore", label: "Minutes before appointment", placeholder: "60" };
-  if (type === "WEBHOOK") return { key: "secretLabel", label: "Webhook label", placeholder: "Website lead form" };
+  if (type === "WEBHOOK") return { key: "secretLabel", label: "Webhook event label", placeholder: "website-lead-form" };
   if (type === "TAG_ADDED" || type === "ADD_TAG" || type === "REMOVE_TAG") return { key: "tag", label: "Tag", placeholder: "Hot Lead" };
   if (type === "STAGE_CHANGED" || type === "UPDATE_STAGE") return { key: "stage", label: "Lead stage", placeholder: "QUALIFIED" };
   if (type === "SEND_TEXT" || type === "ASK_QUESTION") return { key: "text", label: "Message text", placeholder: "Type the approved message…" };
@@ -380,6 +380,9 @@ export default function AutomationFlowBuilder() {
                         <label className="wide"><span>Approved email template</span><select value={String(node.config.templateId ?? "")} onChange={(event) => { const template = emailTemplates.find((item) => item.id === event.target.value); updateNode(index, { config: { ...node.config, templateId: event.target.value, templateVersionId: template?.approvedVersionId ?? "" } }); }}><option value="">Select approved template</option>{emailTemplates.map((template) => <option key={template.id} value={template.id}>{template.name} - v{template.currentVersion}</option>)}</select></label>
                         <label className="wide"><span>Sender identity</span><select value={String(node.config.senderIdentityId ?? "")} onChange={(event) => updateConfig(index, "senderIdentityId", event.target.value)}><option value="">Use template/workspace default</option>{emailSenders.map((sender) => <option key={sender.id} value={sender.id}>{sender.fromName || sender.fromEmail} &lt;{sender.fromEmail}&gt;{sender.isWorkspaceDefault ? " - default" : ""}</option>)}</select></label>
                         {!emailTemplates.length ? <div className="automation-node-note wide">No approved Email templates are available. Approve a template in Email Control Center first.</div> : null}
+                      </> : node.type === "SCHEDULE" ? <>
+                        <label className="wide"><span>Run every (minutes)</span><input value={String(node.config.intervalMinutes ?? "")} placeholder="1440" onChange={(event) => updateConfig(index, "intervalMinutes", event.target.value)} /></label>
+                        <label className="wide"><span>Audience tag (max 100 conversations)</span><input value={String(node.config.tag ?? "")} placeholder="Scheduled Follow-up" onChange={(event) => updateConfig(index, "tag", event.target.value)} /></label>
                       </> : field ? <label className="wide"><span>{field.label}</span><input value={String(node.config[field.key] ?? "")} placeholder={field.placeholder} onChange={(event) => updateConfig(index, field.key, event.target.value)} /></label> : <div className="automation-node-note">No additional configuration required.</div>}
                     </div>
                   </div>

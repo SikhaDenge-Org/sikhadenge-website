@@ -238,7 +238,8 @@ export type PublicApiScope =
   | "contacts.read"
   | "contacts.write"
   | "messages.send"
-  | "analytics.read";
+  | "analytics.read"
+  | "automations.trigger";
 
 export function apiKeyAllows(
   grantedScopes:
