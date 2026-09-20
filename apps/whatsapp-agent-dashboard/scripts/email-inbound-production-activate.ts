@@ -55,17 +55,31 @@ async function main() {
     cache: "no-store",
   });
   if (!profileResponse.ok) throw new Error(`Gmail profile verification failed with HTTP ${profileResponse.status}.`);
-  const profile = await profileResponse.json() as { emailAddress?: string };
+  const profile = await profileResponse.json() as { emailAddress?: string; historyId?: string };
   const authenticatedAccount = profile.emailAddress?.trim().toLowerCase() || "";
+  const profileHistoryId = profile.historyId?.trim() || "";
   if (authenticatedAccount !== allowedAccount) {
     throw new Error(`Authenticated Gmail mailbox ${authenticatedAccount || "unknown"} does not match activation account ${allowedAccount}.`);
+  }
+  if (!profileHistoryId) throw new Error("Gmail profile did not include a historyId.");
+
+  const historyUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/history");
+  historyUrl.searchParams.set("startHistoryId", profileHistoryId);
+  historyUrl.searchParams.set("historyTypes", "messageAdded");
+  historyUrl.searchParams.set("maxResults", "1");
+  const historyResponse = await fetch(historyUrl, {
+    headers: { authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!historyResponse.ok) {
+    throw new Error(`Gmail history.list verification failed with HTTP ${historyResponse.status}.`);
   }
 
   const initialization = inboundMode === "WATCH"
     ? await startGmailMailboxWatch({ workspaceId: connection.workspaceId, connectionId: connection.id })
     : await bootstrapGmailHistoryCursor({ workspaceId: connection.workspaceId, connectionId: connection.id });
   const sync = await syncGmailHistory({ workspaceId: connection.workspaceId, connectionId: connection.id });
-  process.stdout.write(`${JSON.stringify({ status: "PASS", account: allowedAccount, activationWorkspaceId, inboundMode, workspaceId: connection.workspaceId, connectionId: connection.id, authenticatedAccount, initialization: { historyId: initialization.historyId, expiration: initialization.expiration, persisted: initialization.persisted, mode: initialization.mode, cursorInitializedAt: initialization.cursorInitializedAt }, sync: { discovered: sync.discovered, imported: sync.imported, replayed: sync.replayed, nextHistoryId: sync.nextHistoryId } }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify({ status: "PASS", account: allowedAccount, activationWorkspaceId, inboundMode, workspaceId: connection.workspaceId, connectionId: connection.id, authenticatedAccount, historyReadVerified: true, initialization: { historyId: initialization.historyId, expiration: initialization.expiration, persisted: initialization.persisted, mode: initialization.mode, cursorInitializedAt: initialization.cursorInitializedAt }, sync: { discovered: sync.discovered, imported: sync.imported, replayed: sync.replayed, nextHistoryId: sync.nextHistoryId } }, null, 2)}\n`);
 }
 
 main().catch((error) => {
