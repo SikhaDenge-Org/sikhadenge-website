@@ -145,7 +145,30 @@ jobs:
           test "$kill_before" = "on"
 
           git -C "$REPO" fetch --no-tags origin "$TARGET_RELEASE_SHA"
+          git -C "$REPO" cat-file -e "$CURRENT_LIVE_SHA^{commit}"
+          git -C "$REPO" cat-file -e "$TARGET_RELEASE_SHA^{commit}"
           git -C "$REPO" merge-base --is-ancestor "$CURRENT_LIVE_SHA" "$TARGET_RELEASE_SHA"
+
+          mapfile -t changed_paths < <(git -C "$REPO" diff --name-only "$CURRENT_LIVE_SHA" "$TARGET_RELEASE_SHA")
+          test "${#changed_paths[@]}" -gt 0
+          for path in "${changed_paths[@]}"; do
+            case "$path" in
+              .github/workflows/*|apps/whatsapp-agent-dashboard/scripts/*|apps/whatsapp-agent-dashboard/tests/*) ;;
+              *)
+                printf 'REMOTE_RUNTIME_RISK_PATH=%s\n' "$path" >&2
+                exit 51
+                ;;
+            esac
+            case "$path" in
+              */package.json|*/package-lock.json|*/prisma/*|*/migrations/*|*/app/*|*/lib/*|*/modules/*|*/components/*)
+                printf 'REMOTE_RUNTIME_RISK_DENYLIST_PATH=%s\n' "$path" >&2
+                exit 52
+                ;;
+            esac
+          done
+          printf 'REMOTE_COMPLETE_DIFF_ALLOWLIST_PASS=true\n'
+          printf 'REMOTE_CHANGED_FILE_COUNT=%s\n' "${#changed_paths[@]}"
+
           git -C "$REPO" reset --hard "$TARGET_RELEASE_SHA"
 
           after_sha="$(git -C "$APP" rev-parse HEAD)"
