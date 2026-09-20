@@ -10,6 +10,7 @@ RUN_ID="${RUN_ID:-email-inbound-activate-$(date -u +%Y%m%dT%H%M%SZ)}"
 BACKUP_ROOT="${BACKUP_ROOT:-/root/sikhadenge-backups}"
 BACKUP_DIR="$BACKUP_ROOT/$RUN_ID"
 ACTIVATION_ACCOUNT="${EMAIL_INBOUND_ACTIVATION_ACCOUNT:-}"
+ACTIVATION_WORKSPACE_ID="${EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID:-engagews_default}"
 BASE_URL="${EMAIL_AUTOMATION_SCHEDULER_BASE_URL:-http://127.0.0.1:3100}"
 INBOUND_MODE=""
 
@@ -32,6 +33,7 @@ sync_pm2_inbound_env(){
 
 [[ -n "$EXPECTED_RELEASE_SHA" ]] || fail "EXPECTED_RELEASE_SHA is required"
 [[ "$ACTIVATION_ACCOUNT" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] || fail "EMAIL_INBOUND_ACTIVATION_ACCOUNT is required"
+[[ "$ACTIVATION_WORKSPACE_ID" =~ ^[A-Za-z0-9_-]+$ ]] || fail "EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID is invalid"
 [[ -f "$ENV_FILE" ]] || fail "ENV_FILE not found"
 cd "$LIVE_APP"
 [[ "$(git rev-parse HEAD 2>/dev/null || true)" == "$EXPECTED_RELEASE_SHA" ]] || fail "git SHA mismatch"
@@ -39,7 +41,7 @@ INBOUND_MODE="${EMAIL_GMAIL_INBOUND_MODE:-$(read_env_value EMAIL_GMAIL_INBOUND_M
 INBOUND_MODE="${INBOUND_MODE:-POLLING}"
 INBOUND_MODE="$(printf '%s' "$INBOUND_MODE" | tr '[:lower:]' '[:upper:]')"
 [[ "$INBOUND_MODE" == "POLLING" || "$INBOUND_MODE" == "WATCH" ]] || fail "EMAIL_GMAIL_INBOUND_MODE must be POLLING or WATCH"
-printf 'EMAIL_INBOUND_ACTIVATION_PLAN\nAPPLY=%s\nACCOUNT=%s\nMODE=%s\nSEND_RUNTIME_MUST_REMAIN=DRY_RUN\nEXTERNAL_WRITES_MUST_REMAIN=false\n' "$APPLY" "$ACTIVATION_ACCOUNT" "$INBOUND_MODE"
+printf 'EMAIL_INBOUND_ACTIVATION_PLAN\nAPPLY=%s\nACCOUNT=%s\nWORKSPACE_ID=%s\nMODE=%s\nSEND_RUNTIME_MUST_REMAIN=DRY_RUN\nEXTERNAL_WRITES_MUST_REMAIN=false\n' "$APPLY" "$ACTIVATION_ACCOUNT" "$ACTIVATION_WORKSPACE_ID" "$INBOUND_MODE"
 [[ "$APPLY" == "1" ]] || { printf 'INFO: preview only\n'; exit 0; }
 [[ "$(id -u)" == "0" ]] || fail "APPLY=1 requires root"
 install -d -m 700 "$BACKUP_DIR"
@@ -75,7 +77,7 @@ set +a
 if [[ "$INBOUND_MODE" == "WATCH" && -z "${GOOGLE_GMAIL_PUBSUB_TOPIC:-}" ]]; then fail "GOOGLE_GMAIL_PUBSUB_TOPIC is required in WATCH mode"; fi
 
 stage="verify-inbound-oauth-access"
-EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" EMAIL_INBOUND_ACTIVATION_ACCOUNT="$ACTIVATION_ACCOUNT" EMAIL_GMAIL_INBOUND_MODE="$INBOUND_MODE" \
+EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" EMAIL_INBOUND_ACTIVATION_ACCOUNT="$ACTIVATION_ACCOUNT" EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID="$ACTIVATION_WORKSPACE_ID" EMAIL_GMAIL_INBOUND_MODE="$INBOUND_MODE" \
   npx tsx scripts/email-inbound-production-readiness.ts | tee "$BACKUP_DIR/pre-activation-readiness.json"
 
 stage="enable-inbound-flag"
@@ -97,14 +99,14 @@ const fs=require('node:fs');const h=JSON.parse(fs.readFileSync(process.argv[2],'
 NODE
 
 stage="initialize-cursor-and-first-sync"
-EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" EMAIL_INBOUND_ACTIVATION_ACCOUNT="$ACTIVATION_ACCOUNT" EMAIL_GMAIL_INBOUND_MODE="$INBOUND_MODE" \
+EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" EMAIL_INBOUND_ACTIVATION_ACCOUNT="$ACTIVATION_ACCOUNT" EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID="$ACTIVATION_WORKSPACE_ID" EMAIL_GMAIL_INBOUND_MODE="$INBOUND_MODE" \
   npx tsx scripts/email-inbound-production-activate.ts | tee "$BACKUP_DIR/inbound-activation.json"
 
 stage="post-activation-readiness"
-EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" EMAIL_INBOUND_ACTIVATION_ACCOUNT="$ACTIVATION_ACCOUNT" EMAIL_GMAIL_INBOUND_MODE="$INBOUND_MODE" \
+EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA" EMAIL_INBOUND_ACTIVATION_ACCOUNT="$ACTIVATION_ACCOUNT" EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID="$ACTIVATION_WORKSPACE_ID" EMAIL_GMAIL_INBOUND_MODE="$INBOUND_MODE" \
   npx tsx scripts/email-inbound-production-readiness.ts | tee "$BACKUP_DIR/post-activation-readiness.json"
-node - "$BACKUP_DIR/post-activation-readiness.json" "$ACTIVATION_ACCOUNT" <<'NODE'
-const fs=require('node:fs');const [file,account]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(file,'utf8'));if(r.status!=='READY')throw new Error('post-activation readiness is not READY');if(r.activationAccount!==account)throw new Error('activation account drifted');if(r.inboundSyncEnabled!==true)throw new Error('inbound sync is not enabled');if(r.runtimeMode!=='DRY_RUN')throw new Error('send runtime drifted from DRY_RUN');if(r.externalWritesEnabled!==false)throw new Error('external writes drifted enabled');if(!r.checks?.gmailInboundReadAccess)throw new Error('Gmail read access is not authorized');if((r.activationCursorReadyConnections??0)!==1)throw new Error('activation Gmail cursor is not uniquely persisted');
+node - "$BACKUP_DIR/post-activation-readiness.json" "$ACTIVATION_ACCOUNT" "$ACTIVATION_WORKSPACE_ID" <<'NODE'
+const fs=require('node:fs');const [file,account,workspace]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(file,'utf8'));if(r.status!=='READY')throw new Error('post-activation readiness is not READY');if(r.activationAccount!==account)throw new Error('activation account drifted');if(r.activationWorkspaceId!==workspace)throw new Error('activation workspace drifted');if(r.inboundSyncEnabled!==true)throw new Error('inbound sync is not enabled');if(r.runtimeMode!=='DRY_RUN')throw new Error('send runtime drifted from DRY_RUN');if(r.externalWritesEnabled!==false)throw new Error('external writes drifted enabled');if(!r.checks?.gmailInboundReadAccess)throw new Error('Gmail read access is not authorized');if((r.activationCursorReadyConnections??0)!==1)throw new Error('activation Gmail cursor is not uniquely persisted');
 NODE
 
 stage="verify-scheduler"
