@@ -1,0 +1,193 @@
+name: WhatsApp Non-runtime Source Alignment
+
+on:
+  workflow_dispatch:
+    inputs:
+      current_live_sha:
+        description: Exact currently deployed production source SHA
+        required: true
+        type: string
+      target_release_sha:
+        description: Exact protected WhatsApp release SHA to align source checkout to
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  align-source:
+    concurrency:
+      group: whatsapp-agent-production
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: whatsapp-agent-production
+    env:
+      CURRENT_LIVE_SHA: ${{ inputs.current_live_sha }}
+      TARGET_RELEASE_SHA: ${{ inputs.target_release_sha }}
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+    steps:
+      - name: Validate release and non-runtime diff
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$CURRENT_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$TARGET_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          release_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/$RELEASE_BRANCH" --jq '.commit.sha')"
+          test "$release_sha" = "$TARGET_RELEASE_SHA"
+
+          compare_json="$(gh api "repos/$GITHUB_REPOSITORY/compare/$CURRENT_LIVE_SHA...$TARGET_RELEASE_SHA")"
+          status="$(jq -r '.status' <<<"$compare_json")"
+          test "$status" = "ahead"
+
+          jq -r '.files[].filename' <<<"$compare_json" > changed-files.txt
+          test -s changed-files.txt
+          while IFS= read -r path; do
+            case "$path" in
+              .github/workflows/*|apps/whatsapp-agent-dashboard/scripts/*|apps/whatsapp-agent-dashboard/tests/*) ;;
+              *)
+                printf 'RUNTIME_RISK_PATH=%s\n' "$path" >&2
+                exit 41
+                ;;
+            esac
+          done < changed-files.txt
+
+          if grep -Eq '(^|/)(package\.json|package-lock\.json|prisma/|migrations/|app/|lib/|modules/|components/)' changed-files.txt; then
+            echo 'RUNTIME_RISK_DENYLIST_MATCH=true' >&2
+            exit 42
+          fi
+
+          printf 'SOURCE_ALIGNMENT_ALLOWLIST_PASS=true\n'
+          printf 'CHANGED_FILE_COUNT=%s\n' "$(wc -l < changed-files.txt | tr -d ' ')"
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            SSH_PORT=22
+            printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"
+          fi
+          [[ "$SSH_HOST" =~ ^[^[:space:]/]+$ ]]
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          (( SSH_PORT >= 1 && SSH_PORT <= 65535 ))
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          ssh-keygen -y -f "$key" >/dev/null
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          test -n "$key_material"
+          if [[ "$SSH_PORT" = "22" ]]; then
+            canonical_host="$SSH_HOST"
+          else
+            canonical_host="[$SSH_HOST]:$SSH_PORT"
+          fi
+          printf '%s %s %s\n' "$canonical_host" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Align production source without runtime restart
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production"             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15             "$SSH_USER@$SSH_HOST" "CURRENT_LIVE_SHA='$CURRENT_LIVE_SHA' TARGET_RELEASE_SHA='$TARGET_RELEASE_SHA' bash -s" <<'REMOTE' | tee source-alignment-evidence.txt
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          REPO=/var/www/sikhadenge-whatsapp-agent/source
+
+          pm2v() {
+            local process_name="$1"
+            local key="$2"
+            pm2 jlist 2>/dev/null | node -e '
+              let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+                const [name,key]=process.argv.slice(1);
+                const p=JSON.parse(s||"[]").find(x=>x.name===name);
+                if(!p) process.exit(3);
+                const v=key==="status" ? p.pm2_env?.status : p.pm2_env?.[key];
+                process.stdout.write(v===undefined||v===null ? "" : String(v));
+              });
+            ' "$process_name" "$key"
+          }
+
+          before_sha="$(git -C "$APP" rev-parse HEAD)"
+          test "$before_sha" = "$CURRENT_LIVE_SHA"
+          test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
+
+          app_before="$(pm2v sikhadenge-whatsapp-agent status)"
+          scheduler_before="$(pm2v sikhadenge-whatsapp-automation-scheduler status)"
+          runtime_before="$(pm2v sikhadenge-whatsapp-automation-scheduler AUTOMATION_RUNTIME_ENABLED)"
+          actions_before="$(pm2v sikhadenge-whatsapp-automation-scheduler AUTOMATION_ACTIONS_ENABLED)"
+          dispatch_before="$(pm2v sikhadenge-whatsapp-automation-scheduler WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)"
+          mode_before="$(pm2v sikhadenge-whatsapp-automation-scheduler WHATSAPP_OUTBOUND_MODE)"
+          kill_before="$(pm2v sikhadenge-whatsapp-automation-scheduler WHATSAPP_OUTBOUND_KILL_SWITCH)"
+
+          test "$app_before" = "online"
+          test "$scheduler_before" = "online"
+          test "$runtime_before" = "false"
+          test "$actions_before" = "false"
+          test "$dispatch_before" = "false"
+          test "$mode_before" = "disabled"
+          test "$kill_before" = "on"
+
+          git -C "$REPO" fetch --no-tags origin "$TARGET_RELEASE_SHA"
+          git -C "$REPO" merge-base --is-ancestor "$CURRENT_LIVE_SHA" "$TARGET_RELEASE_SHA"
+          git -C "$REPO" reset --hard "$TARGET_RELEASE_SHA"
+
+          after_sha="$(git -C "$APP" rev-parse HEAD)"
+          test "$after_sha" = "$TARGET_RELEASE_SHA"
+          test -z "$(git -C "$REPO" status --porcelain --untracked-files=no)"
+
+          app_after="$(pm2v sikhadenge-whatsapp-agent status)"
+          scheduler_after="$(pm2v sikhadenge-whatsapp-automation-scheduler status)"
+          runtime_after="$(pm2v sikhadenge-whatsapp-automation-scheduler AUTOMATION_RUNTIME_ENABLED)"
+          actions_after="$(pm2v sikhadenge-whatsapp-automation-scheduler AUTOMATION_ACTIONS_ENABLED)"
+          dispatch_after="$(pm2v sikhadenge-whatsapp-automation-scheduler WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)"
+          mode_after="$(pm2v sikhadenge-whatsapp-automation-scheduler WHATSAPP_OUTBOUND_MODE)"
+          kill_after="$(pm2v sikhadenge-whatsapp-automation-scheduler WHATSAPP_OUTBOUND_KILL_SWITCH)"
+
+          test "$app_after" = "online"
+          test "$scheduler_after" = "online"
+          test "$runtime_after" = "false"
+          test "$actions_after" = "false"
+          test "$dispatch_after" = "false"
+          test "$mode_after" = "disabled"
+          test "$kill_after" = "on"
+
+          printf 'BEFORE_SHA=%s\n' "$before_sha"
+          printf 'AFTER_SHA=%s\n' "$after_sha"
+          printf 'APP_PM2_STATE=%s\n' "$app_after"
+          printf 'SCHEDULER_PM2_STATE=%s\n' "$scheduler_after"
+          printf 'AUTOMATION_RUNTIME_ENABLED=%s\n' "$runtime_after"
+          printf 'AUTOMATION_ACTIONS_ENABLED=%s\n' "$actions_after"
+          printf 'WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED=%s\n' "$dispatch_after"
+          printf 'WHATSAPP_OUTBOUND_MODE=%s\n' "$mode_after"
+          printf 'WHATSAPP_OUTBOUND_KILL_SWITCH=%s\n' "$kill_after"
+          printf 'PM2_RESTART_PERFORMED=false\n'
+          printf 'BUILD_PERFORMED=false\n'
+          printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          printf 'PASS: NONRUNTIME_SOURCE_ALIGNMENT\n'
+          REMOTE
+
+      - name: Upload source alignment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatsapp-nonruntime-source-alignment-${{ inputs.target_release_sha }}
+          path: source-alignment-evidence.txt
+          if-no-files-found: error
+          retention-days: 30
