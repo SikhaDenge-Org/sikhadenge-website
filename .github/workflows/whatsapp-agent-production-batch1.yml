@@ -125,7 +125,11 @@ jobs:
           printf '%s %s\n' "$supplied_key_type" "$supplied_key_material" |
             ssh-keygen -lf - -E sha256 >/dev/null
 
-          canonical_host="[$SSH_HOST]:$SSH_PORT"
+          if [[ "$SSH_PORT" = "22" ]]; then
+            canonical_host="$SSH_HOST"
+          else
+            canonical_host="[$SSH_HOST]:$SSH_PORT"
+          fi
           printf '%s %s %s\n' \
             "$canonical_host" \
             "$supplied_key_type" \
