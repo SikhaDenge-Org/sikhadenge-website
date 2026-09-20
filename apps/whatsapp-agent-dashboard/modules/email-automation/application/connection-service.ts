@@ -25,10 +25,12 @@ export class EmailConnectionService {
     workspaceId: string;
     provider: EmailProvider;
     redirectUri: string;
+    inboundEnabled?: boolean;
   }) {
     return this.deps.providers.get(input.provider).startOAuth({
       workspaceId: input.workspaceId,
       redirectUri: input.redirectUri,
+      inboundEnabled: input.inboundEnabled,
     });
   }
 

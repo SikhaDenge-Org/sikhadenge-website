@@ -18,11 +18,27 @@ export async function POST(request: Request) {
     const access = await requireEmailManagerAccess();
     const payload = (await request.json().catch(() => ({}))) as { enableInbound?: unknown };
     const enableInbound = payload.enableInbound === true;
+    const activationWorkspaceId =
+      process.env.EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID?.trim() || "engagews_default";
+
+    if (enableInbound && access.workspaceId !== activationWorkspaceId) {
+      return NextResponse.json(
+        {
+          error: `Inbox access can only be authorized from the production activation workspace ${activationWorkspaceId}.`,
+          code: "EMAIL_INBOUND_WRONG_WORKSPACE",
+          activationWorkspaceId,
+          currentWorkspaceId: access.workspaceId,
+        },
+        { status: 409, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
     const runtime = buildEmailE1Runtime();
     const oauth = await runtime.service.startOAuth({
       workspaceId: access.workspaceId,
       provider: "GOOGLE_GMAIL",
       redirectUri: emailOAuthRedirectUri(),
+      inboundEnabled: enableInbound,
     });
 
     const authorizationUrl = new URL(oauth.authorizationUrl);
