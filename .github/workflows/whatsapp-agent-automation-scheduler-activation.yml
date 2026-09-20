@@ -31,10 +31,12 @@ jobs:
           set -euo pipefail
           [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test -n "$SSH_HOST"
-          test -n "$SSH_PORT"
           test -n "$SSH_USER"
           test -n "${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}"
           test -n "${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}"
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"
+          fi
 
       - name: Configure pinned SSH identity
         shell: bash
@@ -63,8 +65,12 @@ jobs:
           printf '%s %s\n' "$supplied_key_type" "$supplied_key_material" |
             ssh-keygen -lf - -E sha256 >/dev/null
 
-          canonical_host="[$SSH_HOST]:$SSH_PORT"
-          printf '%s %s %s\n'             "$canonical_host"             "$supplied_key_type"             "$supplied_key_material" > "$HOME/.ssh/known_hosts"
+          if [[ "$SSH_PORT" = "22" ]]; then
+            canonical_host="$SSH_HOST"
+          else
+            canonical_host="[$SSH_HOST]:$SSH_PORT"
+          fi
+          printf '%s %s %s\n' "$canonical_host" "$supplied_key_type" "$supplied_key_material" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
 
           ssh-keygen -y -f "$private_key_file" >/dev/null
