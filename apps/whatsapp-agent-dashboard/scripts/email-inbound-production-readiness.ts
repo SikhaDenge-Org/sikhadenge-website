@@ -47,7 +47,8 @@ async function main() {
   const inboundCount = await prisma.engageEmailInboundMessage.count();
   const unmatchedInboundCount = await prisma.engageEmailInboundMessage.count({ where: { contactId: null, classification: "INBOUND" } });
 
-  let gmailInboundAccess: { ok: boolean; status: number; emailAddress?: string; error: string } = { ok: false, status: 0, error: "activation account connection not uniquely resolved" };
+  let gmailInboundAccess: { ok: boolean; status: number; emailAddress?: string; historyId?: string; error: string } = { ok: false, status: 0, error: "activation account connection not uniquely resolved" };
+  let gmailHistoryReadAccess: { ok: boolean; status: number; error: string } = { ok: false, status: 0, error: "Gmail profile read access is not ready." };
   if (activationMatches.length === 1) {
     try {
       const runtime = buildEmailE1Runtime();
@@ -59,19 +60,39 @@ async function main() {
         headers: { authorization: `Bearer ${token}` },
         cache: "no-store",
       });
-      const profile = response.ok ? await response.json() as { emailAddress?: string } : null;
+      const profile = response.ok ? await response.json() as { emailAddress?: string; historyId?: string } : null;
       const profileEmail = profile?.emailAddress?.trim().toLowerCase() || "";
-      const mailboxMatches = response.ok && profileEmail === activationAccount;
+      const profileHistoryId = profile?.historyId?.trim() || "";
+      const mailboxMatches = response.ok && profileEmail === activationAccount && Boolean(profileHistoryId);
       gmailInboundAccess = {
         ok: mailboxMatches,
         status: response.status,
         emailAddress: profileEmail,
+        historyId: profileHistoryId,
         error: !response.ok
           ? `Gmail profile probe returned HTTP ${response.status}`
-          : mailboxMatches
-            ? ""
-            : `Authenticated Gmail mailbox ${profileEmail || "unknown"} does not match activation account ${activationAccount}.`,
+          : profileEmail !== activationAccount
+            ? `Authenticated Gmail mailbox ${profileEmail || "unknown"} does not match activation account ${activationAccount}.`
+            : !profileHistoryId
+              ? "Gmail profile did not include a historyId."
+              : "",
       };
+
+      if (gmailInboundAccess.ok) {
+        const historyUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/history");
+        historyUrl.searchParams.set("startHistoryId", profileHistoryId);
+        historyUrl.searchParams.set("historyTypes", "messageAdded");
+        historyUrl.searchParams.set("maxResults", "1");
+        const historyResponse = await fetch(historyUrl, {
+          headers: { authorization: `Bearer ${token}` },
+          cache: "no-store",
+        });
+        gmailHistoryReadAccess = {
+          ok: historyResponse.ok,
+          status: historyResponse.status,
+          error: historyResponse.ok ? "" : `Gmail history.list probe returned HTTP ${historyResponse.status}`,
+        };
+      }
     } catch (error) {
       gmailInboundAccess = {
         ok: false,
@@ -90,12 +111,14 @@ async function main() {
     schedulerToken: (process.env.EMAIL_AUTOMATION_SCHEDULER_TOKEN?.trim().length ?? 0) >= 32,
     activationAccountConnection: activationMatches.length === 1,
     gmailInboundReadAccess: gmailInboundAccess.ok,
+    gmailHistoryReadAccess: gmailHistoryReadAccess.ok,
   };
   const baseChecksReady = checks.gmailClientId && checks.gmailClientSecret && checks.gmailOauthStateSecret && checks.credentialEncryptionKey && checks.schedulerToken;
-  const configReady = baseChecksReady && inboundModeValid && gmail.length > 0 && checks.activationAccountConnection && checks.gmailInboundReadAccess && (inboundMode !== "WATCH" || checks.pubSubTopic);
+  const configReady = baseChecksReady && inboundModeValid && gmail.length > 0 && checks.activationAccountConnection && checks.gmailInboundReadAccess && checks.gmailHistoryReadAccess && (inboundMode !== "WATCH" || checks.pubSubTopic);
   const blockers = [
     ...(!checks.activationAccountConnection ? [`Expected exactly one connected Gmail connection for ${activationAccount}; found ${activationMatches.length}.`] : []),
     ...(!checks.gmailInboundReadAccess ? [`Gmail inbox read access is not authorized for ${activationAccount}. Use Enable Inbox Access and approve Google read-only Gmail access.`] : []),
+    ...(checks.gmailInboundReadAccess && !checks.gmailHistoryReadAccess ? [`Gmail history.list read access failed for ${activationAccount}. Polling cannot be activated until Gmail history access succeeds.`] : []),
     ...(inboundMode === "WATCH" && !checks.pubSubTopic ? ["GOOGLE_GMAIL_PUBSUB_TOPIC is required in WATCH mode."] : []),
   ];
   const evidence = {
@@ -110,6 +133,7 @@ async function main() {
     externalWritesEnabled: flag("EMAIL_EXTERNAL_WRITES_ENABLED"),
     checks,
     gmailInboundAccess,
+    gmailHistoryReadAccess,
     blockers,
     connectedEmailConnections: connections.length,
     connectedGmailConnections: gmail.length,
