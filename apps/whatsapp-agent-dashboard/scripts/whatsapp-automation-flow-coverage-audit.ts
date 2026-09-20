@@ -1,18 +1,20 @@
 import {
   AUTOMATION_TRIGGER_TYPES,
-  listAutomationFlows,
+  listAutomationFlowsForRuntime,
   validateAutomationFlow,
 } from "@/lib/automation/automation-service";
 import { prisma } from "@/lib/db/prisma";
 
 async function main() {
-  const flows = await listAutomationFlows();
+  const flows = await listAutomationFlowsForRuntime();
   const statusCounts: Record<string, number> = {};
   const triggerCoverage: Record<string, { active: number; published: number; executable: number }> =
     Object.fromEntries(AUTOMATION_TRIGGER_TYPES.map((trigger) => [trigger, { active: 0, published: 0, executable: 0 }]));
 
   const activeActionTypes: Record<string, number> = {};
   const activeWorkspaceKeys = new Set<string>();
+  const executableWorkspaceTriggerKeys = new Set<string>();
+  const legacyExecutableTriggers = new Set<string>();
   let activeFlows = 0;
   let activeValidFlows = 0;
   let activePublishedFlows = 0;
@@ -60,20 +62,35 @@ async function main() {
     if (validation.valid) {
       activeExecutableFlows += 1;
       if (coverage) coverage.executable += 1;
+      if (flow.workspaceId) {
+        executableWorkspaceTriggerKeys.add(`${flow.workspaceId}::${trigger.type}`);
+      } else {
+        legacyExecutableTriggers.add(trigger.type);
+      }
     }
   }
 
-  const pendingByTriggerRows = await prisma.engageWhatsAppAutomationEvent.groupBy({
-    by: ["trigger"],
+  const pendingWorkspaceTriggerRows = await prisma.engageWhatsAppAutomationEvent.groupBy({
+    by: ["workspaceId", "trigger"],
     where: { status: "PENDING", availableAt: { lte: new Date() } },
     _count: { _all: true },
   });
-  const pendingByTrigger = Object.fromEntries(
-    pendingByTriggerRows.map((row) => [row.trigger, row._count._all]),
-  );
 
-  const uncoveredDueTriggers = Object.entries(pendingByTrigger)
-    .filter(([trigger, count]) => count > 0 && (triggerCoverage[trigger]?.executable ?? 0) === 0)
+  const pendingByTrigger: Record<string, number> = {};
+  const uncoveredDueByTrigger: Record<string, number> = {};
+  let uncoveredDueWorkspaceTriggerGroups = 0;
+  for (const row of pendingWorkspaceTriggerRows) {
+    pendingByTrigger[row.trigger] = (pendingByTrigger[row.trigger] ?? 0) + row._count._all;
+    const covered =
+      legacyExecutableTriggers.has(row.trigger) ||
+      executableWorkspaceTriggerKeys.has(`${row.workspaceId}::${row.trigger}`);
+    if (!covered) {
+      uncoveredDueWorkspaceTriggerGroups += 1;
+      uncoveredDueByTrigger[row.trigger] = (uncoveredDueByTrigger[row.trigger] ?? 0) + row._count._all;
+    }
+  }
+
+  const uncoveredDueTriggers = Object.entries(uncoveredDueByTrigger)
     .map(([trigger, count]) => ({ trigger, pendingDue: count }));
 
   process.stdout.write(`${JSON.stringify({
@@ -92,6 +109,9 @@ async function main() {
     activeActionTypes,
     pendingByTrigger,
     uncoveredDueTriggers,
+    uncoveredDueWorkspaceTriggerGroups,
+    executableWorkspaceTriggerGroups: executableWorkspaceTriggerKeys.size,
+    legacyExecutableTriggerCount: legacyExecutableTriggers.size,
     databaseMutationsAttempted: false,
     externalWritesAttempted: false,
     outboundMessagesQueued: false,
