@@ -18,7 +18,7 @@ export class Microsoft365EmailProviderAdapter implements EmailProviderAdapter {
   constructor(private readonly config: MicrosoftEmailProviderConfig, private readonly credentials: EmailCredentialVaultPort, private readonly now: () => Date = () => new Date()) {}
   private authBase(): string { return `https://login.microsoftonline.com/${encodeURIComponent(this.config.tenantId)}/oauth2/v2.0`; }
 
-  async startOAuth(input: { workspaceId: string; redirectUri: string }): Promise<EmailOAuthStart> {
+  async startOAuth(input: { workspaceId: string; redirectUri: string; inboundEnabled?: boolean }): Promise<EmailOAuthStart> {
     const state = createMicrosoftOAuthState({ workspaceId: input.workspaceId, secret: this.config.oauthStateSecret, now: this.now().getTime() });
     const url = new URL(`${this.authBase()}/authorize`);
     url.searchParams.set("client_id", this.config.clientId); url.searchParams.set("response_type", "code"); url.searchParams.set("redirect_uri", input.redirectUri); url.searchParams.set("response_mode", "query");
