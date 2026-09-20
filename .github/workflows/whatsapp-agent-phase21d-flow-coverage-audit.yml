@@ -1,0 +1,122 @@
+name: WhatsApp Phase21D Flow Coverage Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_live_sha:
+        description: Exact protected WhatsApp release SHA currently deployed
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  flow-coverage:
+    concurrency:
+      group: whatsapp-agent-production
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+
+    steps:
+      - name: Validate exact SHA against protected release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          release_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/$RELEASE_BRANCH" --jq '.commit.sha')"
+          test "$release_sha" = "$EXPECTED_LIVE_SHA"
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            SSH_PORT=22
+            printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"
+          fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          ssh-keygen -y -f "$key" >/dev/null
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          if [[ "$SSH_PORT" = "22" ]]; then canonical_host="$SSH_HOST"; else canonical_host="[$SSH_HOST]:$SSH_PORT"; fi
+          printf '%s %s %s\n' "$canonical_host" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -F "$canonical_host" -f "$HOME/.ssh/known_hosts" >/dev/null
+
+      - name: Run production flow coverage audit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production"             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15             "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' bash -s" <<'REMOTE' | tee phase21d-flow-coverage-audit.txt
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ENV_FILE="$APP/.env"
+          test -f "$ENV_FILE"
+          test "$(git -C "$APP" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
+          test "$(git -C "$APP" status --porcelain --untracked-files=no | wc -l)" -eq 0
+
+          scheduler_json="$(pm2 jlist)"
+          pm2v() {
+            printf '%s' "$scheduler_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const [k]=process.argv.slice(1);const p=JSON.parse(s).find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.[k]??""))})' "$1"
+          }
+          test "$(pm2v AUTOMATION_RUNTIME_ENABLED)" = "false"
+          test "$(pm2v AUTOMATION_ACTIONS_ENABLED)" = "false"
+          test "$(pm2v WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)" = "false"
+          test "$(pm2v WHATSAPP_OUTBOUND_MODE)" = "disabled"
+          test "$(pm2v WHATSAPP_OUTBOUND_KILL_SWITCH)" = "on"
+
+          export DATABASE_URL="$(node - "$ENV_FILE" <<'NODE'
+          const fs=require("node:fs");
+          const [file]=process.argv.slice(2);
+          for(const raw of fs.readFileSync(file,"utf8").split(/\r?\n/)){
+            let line=raw.trim();
+            if(!line||line.startsWith("#")) continue;
+            if(line.startsWith("export ")) line=line.slice(7).trim();
+            const i=line.indexOf("=");
+            if(i<1||line.slice(0,i).trim()!=="DATABASE_URL") continue;
+            let value=line.slice(i+1).trim();
+            if(value.length>=2&&((value.startsWith('"')&&value.endsWith('"'))||(value.startsWith("'")&&value.endsWith("'")))) value=value.slice(1,-1);
+            process.stdout.write(value);
+            process.exit(0);
+          }
+          process.exit(1);
+          NODE
+          )"
+          test -n "$DATABASE_URL"
+
+          cd "$APP"
+          npm exec -- tsx tests/whatsapp-automation-flow-coverage-certification.test.ts
+          npm exec -- tsx scripts/whatsapp-automation-flow-coverage-audit.ts
+          printf 'RUNTIME_FLAGS_MUTATED=false\n'
+          printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          REMOTE
+
+      - name: Upload flow coverage evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase21d-flow-coverage-audit-${{ inputs.expected_live_sha }}
+          path: phase21d-flow-coverage-audit.txt
+          if-no-files-found: error
+          retention-days: 30

@@ -73,6 +73,9 @@ jobs:
       - name: Test WhatsApp read-only shadow runtime
         run: npm exec -- tsx tests/whatsapp-automation-shadow-certification.test.ts
 
+      - name: Test WhatsApp automation flow coverage audit
+        run: npm exec -- tsx tests/whatsapp-automation-flow-coverage-certification.test.ts
+
       - name: Capture TypeScript diagnostics
         run: |
           set +e
