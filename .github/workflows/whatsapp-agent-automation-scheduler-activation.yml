@@ -62,7 +62,11 @@ jobs:
           read -r _ supplied_key_type supplied_key_material _ <<< "$SSH_HOST_KEY"
           test "$supplied_key_type" = "ssh-ed25519"
           test -n "$supplied_key_material"
-          canonical_host="[$SSH_HOST]:$SSH_PORT"
+          if [[ "$SSH_PORT" = "22" ]]; then
+            canonical_host="$SSH_HOST"
+          else
+            canonical_host="[$SSH_HOST]:$SSH_PORT"
+          fi
           printf '%s %s %s\n' "$canonical_host" "$supplied_key_type" "$supplied_key_material" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
 
