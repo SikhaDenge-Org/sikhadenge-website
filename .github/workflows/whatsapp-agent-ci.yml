@@ -86,6 +86,9 @@ jobs:
       - name: Test explicit WhatsApp canary designation
         run: npm exec -- tsx tests/whatsapp-phase21g-explicit-canary-designation-certification.test.ts
 
+      - name: Test targeted designated scheduler canary
+        run: npm exec -- tsx tests/whatsapp-phase21g-targeted-scheduler-certification.test.ts
+
       - name: Capture TypeScript diagnostics
         run: |
           set +e
