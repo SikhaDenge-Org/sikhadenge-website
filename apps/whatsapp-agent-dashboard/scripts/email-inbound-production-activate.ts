@@ -27,11 +27,12 @@ async function main() {
 
   const connections = await prisma.engageChannelConnection.findMany({
     where: { workspaceId: activationWorkspaceId, channel: "EMAIL", status: "CONNECTED" },
-    select: { id: true, workspaceId: true, externalAccountId: true, capabilities: true },
+    select: { id: true, workspaceId: true, displayName: true, externalAccountId: true, capabilities: true },
   });
   const matches = connections.flatMap((connection) => {
     const capabilities = asRecord(connection.capabilities);
     if (capabilities.emailProvider !== "GOOGLE_GMAIL") return [];
+    if ((connection.displayName ?? "").trim().toLowerCase() !== allowedAccount) return [];
     const metadata = asRecord(capabilities.emailAutomation);
     const senders = Array.isArray(metadata.senderIdentities) ? metadata.senderIdentities : [];
     const allowed = senders.some((raw) => {
@@ -47,7 +48,7 @@ async function main() {
     ? await startGmailMailboxWatch({ workspaceId: connection.workspaceId, connectionId: connection.id })
     : await bootstrapGmailHistoryCursor({ workspaceId: connection.workspaceId, connectionId: connection.id });
   const sync = await syncGmailHistory({ workspaceId: connection.workspaceId, connectionId: connection.id });
-  process.stdout.write(`${JSON.stringify({ status: "PASS", account: allowedAccount, activationWorkspaceId, inboundMode, workspaceId: connection.workspaceId, connectionId: connection.id, initialization: { historyId: initialization.historyId, expiration: initialization.expiration, persisted: initialization.persisted, mode: initialization.mode, cursorInitializedAt: initialization.cursorInitializedAt }, sync: { discovered: sync.discovered, imported: sync.imported, replayed: sync.replayed, nextHistoryId: sync.nextHistoryId } }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify({ status: "PASS", account: allowedAccount, activationWorkspaceId, inboundMode, workspaceId: connection.workspaceId, connectionId: connection.id, authenticatedAccount: connection.displayName, initialization: { historyId: initialization.historyId, expiration: initialization.expiration, persisted: initialization.persisted, mode: initialization.mode, cursorInitializedAt: initialization.cursorInitializedAt }, sync: { discovered: sync.discovered, imported: sync.imported, replayed: sync.replayed, nextHistoryId: sync.nextHistoryId } }, null, 2)}\n`);
 }
 
 main().catch((error) => {
