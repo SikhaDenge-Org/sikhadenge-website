@@ -21,6 +21,12 @@ for (const forbidden of [
 assert.match(source, /READ_ONLY_FLOW_COVERAGE/);
 assert.match(source, /activeExecutableFlows/);
 assert.match(source, /uncoveredDueTriggers/);
+assert.match(source, /listAutomationFlowsForRuntime/);
+assert.equal(source.includes("listAutomationFlows()"), false);
+assert.match(source, /by: \["workspaceId", "trigger"\]/);
+assert.match(source, /legacyExecutableTriggers/);
+assert.match(source, /executableWorkspaceTriggerKeys/);
+assert.match(source, /uncoveredDueWorkspaceTriggerGroups/);
 assert.match(source, /databaseMutationsAttempted: false/);
 assert.match(source, /externalWritesAttempted: false/);
 assert.match(source, /outboundMessagesQueued: false/);
