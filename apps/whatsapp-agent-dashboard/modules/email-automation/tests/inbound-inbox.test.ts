@@ -193,7 +193,7 @@ assert.match(scheduler, /inboundSync/);
 assert.match(gmail, /EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID/);
 assert.match(gmail, /EMAIL_INBOUND_ACTIVATION_ACCOUNT/);
 assert.match(gmail, /hasActivationSender\(row\.capabilities, activationAccount\)/);
-assert.match(gmail, /row\.displayName\.trim\(\)\.toLowerCase\(\) === activationAccount/);
+assert.match(gmail, /\(row\.displayName \?\? ""\)\.trim\(\)\.toLowerCase\(\) === activationAccount/);
 assert.doesNotMatch(gmail, /take:\s*limit \* 3/);
 assert.match(gmail, /where:\s*\{ workspaceId: activationWorkspaceId, channel: "EMAIL", status: "CONNECTED" \}/);
 assert.match(gmail, /Gmail inbound scheduler is pinned to workspace/);
