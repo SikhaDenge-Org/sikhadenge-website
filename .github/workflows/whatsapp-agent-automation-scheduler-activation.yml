@@ -151,6 +151,9 @@ jobs:
               --name "$PROCESS" \
               --cwd "$LIVE_APP" \
               --interpreter /usr/bin/node \
+              --restart-delay 3000 \
+              --max-restarts 10 \
+              --min-uptime 10s \
               -- scripts/whatsapp-automation-scheduler.ts
             printf 'SCHEDULER_PM2_OPERATION=start\n'
           fi
