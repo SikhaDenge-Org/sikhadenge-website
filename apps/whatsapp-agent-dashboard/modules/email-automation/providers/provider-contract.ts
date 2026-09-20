@@ -56,7 +56,7 @@ export interface EmailCredentialVaultPort {
 
 export interface EmailProviderAdapter {
   readonly provider: EmailProvider;
-  startOAuth(input: { workspaceId: string; redirectUri: string }): Promise<EmailOAuthStart>;
+  startOAuth(input: { workspaceId: string; redirectUri: string; inboundEnabled?: boolean }): Promise<EmailOAuthStart>;
   completeOAuth(input: EmailOAuthCallback & { workspaceId: string; redirectUri: string }): Promise<{
     externalAccountId: string;
     displayName: string;
