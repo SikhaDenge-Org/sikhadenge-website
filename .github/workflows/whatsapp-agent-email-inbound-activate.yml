@@ -87,6 +87,64 @@ jobs:
           done
           chmod -R go-rwx email-inbound-activation-evidence 2>/dev/null || true
 
+      - name: Verify activation evidence integrity
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          dir="email-inbound-activation-evidence"
+          result="$dir/inbound-activation-result.txt"
+          activation="$dir/inbound-activation.json"
+          health="$dir/inbound-runtime-health.json"
+          test -s "$result"
+          test -s "$activation"
+          test -s "$health"
+          grep -qx 'STATUS=PASS_EMAIL_INBOUND_ENABLED' "$result"
+          jq -e --arg account "$ACTIVATION_ACCOUNT" '
+            .status == "PASS" and
+            .account == $account and
+            (.initialization.persisted == true) and
+            (.initialization.historyId | type == "string" and length > 0) and
+            (.sync.discovered | type == "number") and
+            (.sync.imported | type == "number") and
+            (.sync.replayed | type == "number")
+          ' "$activation" >/dev/null
+          jq -e '
+            .runtimeMode == "DRY_RUN" and
+            .externalWritesEnabled == false and
+            .inboundSyncEnabled == true
+          ' "$health" >/dev/null
+          printf 'PASS: EMAIL_INBOUND_ACTIVATION_EVIDENCE_VERIFIED\n'
+
+      - name: Publish activation summary
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          dir="email-inbound-activation-evidence"
+          {
+            echo "## Email inbound production activation"
+            echo
+            echo "- Target SHA: \`$DEPLOYED_SHA\`"
+            echo "- Activation account: \`$ACTIVATION_ACCOUNT\`"
+            if [[ -s "$dir/inbound-activation-result.txt" ]]; then
+              echo "- Result: \`$(tr '\n' ' ' < "$dir/inbound-activation-result.txt" | sed 's/[[:space:]]*$//')\`"
+            else
+              echo "- Result: \`NO_EVIDENCE\`"
+            fi
+            if [[ -s "$dir/inbound-activation.json" ]]; then
+              echo "- Mode: \`$(jq -r '.inboundMode // "unknown"' "$dir/inbound-activation.json")\`"
+              echo "- Cursor persisted: \`$(jq -r '.initialization.persisted // false' "$dir/inbound-activation.json")\`"
+              echo "- Imported: \`$(jq -r '.sync.imported // 0' "$dir/inbound-activation.json")\`"
+              echo "- Replayed: \`$(jq -r '.sync.replayed // 0' "$dir/inbound-activation.json")\`"
+            fi
+            if [[ -s "$dir/inbound-runtime-health.json" ]]; then
+              echo "- Runtime mode: \`$(jq -r '.runtimeMode // "unknown"' "$dir/inbound-runtime-health.json")\`"
+              echo "- External writes: \`$(jq -r '.externalWritesEnabled // "unknown"' "$dir/inbound-runtime-health.json")\`"
+              echo "- Inbound sync enabled: \`$(jq -r '.inboundSyncEnabled // "unknown"' "$dir/inbound-runtime-health.json")\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload protected activation evidence
         if: always()
         uses: actions/upload-artifact@v4
