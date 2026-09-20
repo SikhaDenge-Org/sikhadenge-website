@@ -1,0 +1,211 @@
+name: WhatsApp Phase21B Readonly Queue Observer
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_live_sha:
+        description: Exact production release SHA to observe
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  observe-phase21b:
+    concurrency:
+      group: whatsapp-agent-production
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
+
+    steps:
+      - name: Validate exact SHA against protected release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          release_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/$RELEASE_BRANCH" --jq '.commit.sha')"
+          test "$release_sha" = "$EXPECTED_LIVE_SHA"
+          printf 'APPROVED_RELEASE_SHA=%s\n' "$release_sha"
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            SSH_PORT=22
+            printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"
+          fi
+          [[ "$SSH_HOST" =~ ^[^[:space:]/]+$ ]]
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          (( SSH_PORT >= 1 && SSH_PORT <= 65535 ))
+
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          ssh-keygen -y -f "$key" >/dev/null
+
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          test -n "$key_material"
+          if [[ "$SSH_PORT" = "22" ]]; then
+            canonical_host="$SSH_HOST"
+          else
+            canonical_host="[$SSH_HOST]:$SSH_PORT"
+          fi
+          printf '%s %s %s\n' "$canonical_host" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -F "$canonical_host" -f "$HOME/.ssh/known_hosts" >/dev/null
+
+      - name: Observe Phase21B production queue read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' bash -s" <<'REMOTE' | tee phase21b-readonly-queue-observation.txt
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ENV_FILE="$APP/.env"
+
+          envv() {
+            node - "$ENV_FILE" "$1" <<'NODE'
+          const fs=require("node:fs"); const [file,key]=process.argv.slice(2);
+          for(const raw of fs.readFileSync(file,"utf8").split(/\r?\n/)){
+            let line=raw.trim(); if(!line||line.startsWith("#")) continue;
+            if(line.startsWith("export ")) line=line.slice(7).trim();
+            const i=line.indexOf("="); if(i<1||line.slice(0,i).trim()!==key) continue;
+            let value=line.slice(i+1).trim();
+            if(value.length>=2&&((value.startsWith('"')&&value.endsWith('"'))||(value.startsWith("'")&&value.endsWith("'")))) value=value.slice(1,-1);
+            process.stdout.write(value); process.exit(0);
+          }
+          process.exit(1);
+          NODE
+          }
+
+          pm2_value() {
+            local process_name="$1"
+            local key="$2"
+            pm2 jlist 2>/dev/null | node -e '
+              let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
+                const [name,key]=process.argv.slice(1);
+                const p=JSON.parse(s||"[]").find(x=>x.name===name);
+                if(!p) process.exit(3);
+                const v=key==="status" ? p.pm2_env?.status : p.pm2_env?.[key];
+                process.stdout.write(v===undefined||v===null ? "" : String(v));
+              });
+            ' "$process_name" "$key"
+          }
+
+          live_sha="$(git -C "$APP" rev-parse HEAD)"
+          dirty="$(git -C "$APP" status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          app_state="$(pm2_value sikhadenge-whatsapp-agent status)"
+          scheduler_state="$(pm2_value sikhadenge-whatsapp-automation-scheduler status)"
+          scheduler_enabled="$(pm2_value sikhadenge-whatsapp-automation-scheduler WHATSAPP_AUTOMATION_SCHEDULER_ENABLED)"
+          automation_runtime="$(pm2_value sikhadenge-whatsapp-automation-scheduler AUTOMATION_RUNTIME_ENABLED)"
+          automation_actions="$(pm2_value sikhadenge-whatsapp-automation-scheduler AUTOMATION_ACTIONS_ENABLED)"
+          journey_runtime="$(pm2_value sikhadenge-whatsapp-automation-scheduler JOURNEY_RUNTIME_ENABLED)"
+          journey_actions="$(pm2_value sikhadenge-whatsapp-automation-scheduler JOURNEY_ACTIONS_ENABLED)"
+          campaigns="$(pm2_value sikhadenge-whatsapp-automation-scheduler WHATSAPP_CAMPAIGNS_ENABLED)"
+          outbound_dispatch="$(pm2_value sikhadenge-whatsapp-automation-scheduler WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)"
+          outbound_mode="$(pm2_value sikhadenge-whatsapp-automation-scheduler WHATSAPP_OUTBOUND_MODE)"
+          kill_switch="$(pm2_value sikhadenge-whatsapp-automation-scheduler WHATSAPP_OUTBOUND_KILL_SWITCH)"
+
+          printf 'LIVE_SHA=%s\n' "$live_sha"
+          printf 'TRACKED_DIRTY_COUNT=%s\n' "$dirty"
+          printf 'APP_PM2_STATE=%s\n' "$app_state"
+          printf 'SCHEDULER_PM2_STATE=%s\n' "$scheduler_state"
+          printf 'SCHEDULER_ENABLED=%s\n' "$scheduler_enabled"
+          printf 'AUTOMATION_RUNTIME_ENABLED=%s\n' "$automation_runtime"
+          printf 'AUTOMATION_ACTIONS_ENABLED=%s\n' "$automation_actions"
+          printf 'JOURNEY_RUNTIME_ENABLED=%s\n' "$journey_runtime"
+          printf 'JOURNEY_ACTIONS_ENABLED=%s\n' "$journey_actions"
+          printf 'WHATSAPP_CAMPAIGNS_ENABLED=%s\n' "$campaigns"
+          printf 'WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED=%s\n' "$outbound_dispatch"
+          printf 'WHATSAPP_OUTBOUND_MODE=%s\n' "$outbound_mode"
+          printf 'WHATSAPP_OUTBOUND_KILL_SWITCH=%s\n' "$kill_switch"
+
+          test "$live_sha" = "$EXPECTED_LIVE_SHA"
+          test "$dirty" = "0"
+          test "$app_state" = "online"
+          test "$scheduler_state" = "online"
+          test "$scheduler_enabled" = "true"
+          test "$automation_runtime" = "false"
+          test "$automation_actions" = "false"
+          test "$journey_runtime" = "false"
+          test "$journey_actions" = "false"
+          test "$campaigns" = "false"
+          test "$outbound_dispatch" = "false"
+          test "$outbound_mode" = "disabled"
+          test "$kill_switch" = "on"
+
+          DB="$(node "$APP/scripts/prisma-postgres-cli-url.mjs" "$(envv DATABASE_URL)")"
+          psql "$DB" -X -v ON_ERROR_STOP=1 -At <<'SQL'
+          BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
+          SELECT 'TOTAL_EVENTS=' || COUNT(*) FROM "EngageWhatsAppAutomationEvent";
+          SELECT 'WORKSPACE_COUNT=' || COUNT(DISTINCT "workspaceId") FROM "EngageWhatsAppAutomationEvent";
+          SELECT 'STATUS_COUNTS=' || COALESCE((SELECT jsonb_object_agg(status,cnt)::text FROM (SELECT "status" AS status,COUNT(*)::bigint AS cnt FROM "EngageWhatsAppAutomationEvent" GROUP BY "status") s),'{}');
+          SELECT 'TRIGGER_COUNTS=' || COALESCE((SELECT jsonb_object_agg(trigger,cnt)::text FROM (SELECT "trigger" AS trigger,COUNT(*)::bigint AS cnt FROM "EngageWhatsAppAutomationEvent" GROUP BY "trigger") t),'{}');
+          SELECT 'PENDING_DUE_COUNT=' || COUNT(*) FROM "EngageWhatsAppAutomationEvent" WHERE "status"='PENDING' AND "availableAt"<=NOW();
+          SELECT 'PENDING_FUTURE_COUNT=' || COUNT(*) FROM "EngageWhatsAppAutomationEvent" WHERE "status"='PENDING' AND "availableAt">NOW();
+          SELECT 'STALE_PROCESSING_COUNT=' || COUNT(*) FROM "EngageWhatsAppAutomationEvent" WHERE "status"='PROCESSING' AND "claimedAt"<NOW()-INTERVAL '5 minutes';
+          SELECT 'FAILED_COUNT=' || COUNT(*) FROM "EngageWhatsAppAutomationEvent" WHERE "status"='FAILED';
+          SELECT 'FAILED_RETRY_LIMIT_COUNT=' || COUNT(*) FROM "EngageWhatsAppAutomationEvent" WHERE "status"='FAILED' AND "attemptCount">=3;
+          SELECT 'RECENT_24H_COUNT=' || COUNT(*) FROM "EngageWhatsAppAutomationEvent" WHERE "createdAt">=NOW()-INTERVAL '24 hours';
+          SELECT 'OLDEST_DUE_AGE_SECONDS=' || COALESCE(EXTRACT(EPOCH FROM (NOW()-MIN("availableAt")))::bigint,0) FROM "EngageWhatsAppAutomationEvent" WHERE "status"='PENDING' AND "availableAt"<=NOW();
+          SELECT 'DUPLICATE_WORKSPACE_EVENTKEY_GROUPS=' || COUNT(*) FROM (SELECT "workspaceId","eventKey" FROM "EngageWhatsAppAutomationEvent" GROUP BY "workspaceId","eventKey" HAVING COUNT(*)>1) d;
+          SELECT 'DUPLICATE_SOURCE_TRIGGER_GROUPS=' || COUNT(*) FROM (SELECT "workspaceId","sourceEventId","trigger" FROM "EngageWhatsAppAutomationEvent" GROUP BY "workspaceId","sourceEventId","trigger" HAVING COUNT(*)>1) d;
+          SELECT 'ORPHAN_CONTACT_EVENTS=' || COUNT(*) FROM "EngageWhatsAppAutomationEvent" e WHERE e."contactId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "WhatsAppContact" c WHERE c."id"=e."contactId");
+          SELECT 'ORPHAN_CONVERSATION_EVENTS=' || COUNT(*) FROM "EngageWhatsAppAutomationEvent" e WHERE e."conversationId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "WhatsAppConversation" c WHERE c."id"=e."conversationId");
+          SELECT 'LATEST_EVENT_AT=' || COALESCE(MAX("createdAt")::text,'none') FROM "EngageWhatsAppAutomationEvent";
+          COMMIT;
+          SQL
+
+          cd "$APP"
+          npm run test:whatsapp-business-trigger-outbox
+          printf 'READ_ONLY_DB_TRANSACTION=true\n'
+          printf 'PAYLOAD_VALUES_EMITTED=false\n'
+          printf 'EXTERNAL_WRITES_ATTEMPTED=false\n'
+          printf 'RESULT=PASS\n'
+          printf 'PASS: PHASE21B_READONLY_QUEUE_OBSERVER\n'
+          REMOTE
+
+      - name: Publish Phase21B observation summary
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          {
+            echo "## Phase21B read-only queue observation"
+            echo
+            sed 's/^/    /' phase21b-readonly-queue-observation.txt
+            echo
+            echo "Aggregate queue evidence only. No event payloads, contact identifiers, database mutations, runtime flag changes, or outbound messages are permitted by this workflow."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Phase21B observation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase21b-readonly-queue-observation-${{ inputs.expected_live_sha }}
+          path: phase21b-readonly-queue-observation.txt
+          if-no-files-found: error
+          retention-days: 30
