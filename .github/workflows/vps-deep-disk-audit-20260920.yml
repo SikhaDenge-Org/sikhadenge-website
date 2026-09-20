@@ -1,0 +1,122 @@
+name: VPS Deep Disk Audit 2026-09-20
+
+on:
+  push:
+    paths:
+      - ".github/workflows/vps-deep-disk-audit-20260920.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: [self-hosted, Linux, X64, sikhadenge-ci]
+    timeout-minutes: 45
+    steps:
+      - name: Deep read-only disk audit on srv1232861
+        shell: bash
+        run: |
+          set -u
+          OUT="$RUNNER_TEMP/vps-deep-disk-audit.txt"
+          exec > >(tee "$OUT") 2>&1
+
+          echo "===== IDENTITY ====="
+          date -u
+          hostname
+          hostname -f || true
+          id
+          echo
+
+          echo "===== FILESYSTEM ====="
+          df -hT /
+          df -B1 /
+          df -ih /
+          echo
+
+          echo "===== TOP LEVEL BYTES ====="
+          sudo -n du -x -B1 -d 1 / 2>/dev/null | sort -n | tail -40 || true
+          echo
+
+          echo "===== KEY TREES DEPTH 2 ====="
+          for p in /var /opt /home /root /tmp /usr; do
+            if [ -d "$p" ]; then
+              echo "--- $p"
+              sudo -n du -x -B1 -d 2 "$p" 2>/dev/null | sort -n | tail -80 || true
+            fi
+          done
+          echo
+
+          echo "===== WEB / APP / BACKUP / LOG TREES DEPTH 3 ====="
+          for p in /var/www /opt /var/backups /var/log /var/lib/docker /var/lib/postgresql; do
+            if [ -d "$p" ]; then
+              echo "--- $p"
+              sudo -n du -x -B1 -d 3 "$p" 2>/dev/null | sort -n | tail -120 || true
+            fi
+          done
+          echo
+
+          echo "===== NEXT BUILD DIRECTORIES ====="
+          sudo -n find /var/www /opt -xdev -type d -name .next -prune -print0 2>/dev/null |
+            while IFS= read -r -d '' d; do
+              sudo -n du -x -B1 -s "$d" 2>/dev/null
+            done | sort -nr | head -100 || true
+          echo
+
+          echo "===== NODE_MODULES DIRECTORIES ====="
+          sudo -n find /var/www /opt -xdev -type d -name node_modules -prune -print0 2>/dev/null |
+            while IFS= read -r -d '' d; do
+              sudo -n du -x -B1 -s "$d" 2>/dev/null
+            done | sort -nr | head -100 || true
+          echo
+
+          echo "===== LARGE FILES > 250 MiB ====="
+          sudo -n find / -xdev -type f -size +250M -printf '%s\t%p\n' 2>/dev/null |
+            sort -nr | head -150 || true
+          echo
+
+          echo "===== DELETED-BUT-OPEN FILES ====="
+          sudo -n lsof +L1 2>/dev/null | head -200 || true
+          echo
+
+          echo "===== DOCKER SUMMARY ====="
+          sudo -n docker system df -v 2>/dev/null || docker system df -v 2>/dev/null || true
+          echo
+
+          echo "===== DOCKER VOLUMES BYTES ====="
+          if command -v docker >/dev/null 2>&1; then
+            for v in $(sudo -n docker volume ls -q 2>/dev/null || docker volume ls -q 2>/dev/null); do
+              mp=$(sudo -n docker volume inspect -f '{{ .Mountpoint }}' "$v" 2>/dev/null || true)
+              if [ -n "$mp" ] && [ -d "$mp" ]; then
+                b=$(sudo -n du -x -B1 -s "$mp" 2>/dev/null | awk '{print $1}')
+                printf '%s\t%s\t%s\n' "${b:-0}" "$v" "$mp"
+              fi
+            done | sort -nr | head -100
+          fi
+          echo
+
+          echo "===== POSTGRES DATABASE SIZES ====="
+          if command -v psql >/dev/null 2>&1; then
+            sudo -n -u postgres psql -Atc "SELECT pg_database_size(datname), datname FROM pg_database WHERE datistemplate = false ORDER BY pg_database_size(datname) DESC;" 2>/dev/null || true
+          fi
+          echo
+
+          echo "===== JOURNAL ====="
+          sudo -n journalctl --disk-usage 2>/dev/null || true
+          echo
+
+          echo "===== APT CACHE ====="
+          sudo -n du -x -B1 -s /var/cache/apt /var/lib/apt/lists 2>/dev/null || true
+          echo
+
+          echo "===== FINAL FILESYSTEM ====="
+          df -hT /
+          df -B1 /
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: vps-deep-disk-audit-20260920
+          path: ${{ runner.temp }}/vps-deep-disk-audit.txt
+          if-no-files-found: warn
+          retention-days: 3
