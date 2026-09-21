@@ -37,6 +37,7 @@ async function main() {
           id: true,
           status: true,
           agentMode: true,
+          source: true,
           serviceWindowExpiresAt: true,
         },
       },
@@ -63,7 +64,11 @@ async function main() {
     throw new Error("Contact WhatsApp connection is not operational.");
   }
 
-  const existingConversation = contact.conversations[0] ?? null;
+  const existingConversation =
+    contact.conversations.find((conversation) => {
+      const source = conversation.source?.trim().toLowerCase() || "whatsapp";
+      return source === "whatsapp";
+    }) ?? null;
 
   const existingDistinctCanary = await prisma.whatsAppContact.findFirst({
     where: {
@@ -127,6 +132,7 @@ async function main() {
         id: true,
         status: true,
         agentMode: true,
+        source: true,
         serviceWindowExpiresAt: true,
       },
     });
