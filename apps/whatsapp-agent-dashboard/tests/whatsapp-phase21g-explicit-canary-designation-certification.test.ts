@@ -11,6 +11,12 @@ assert.match(source, /role: \{ in: \["ADMIN", "MANAGER", "COUNSELOR"\] \}/);
 assert.match(source, /user: \{ isActive: true \}/);
 assert.equal(source.includes("operator email binding"), false);
 assert.match(source, /CANARY_INTERNAL_TEST/);
+assert.match(source, /whatsAppConversation\.create/);
+assert.match(source, /source: "whatsapp"/);
+assert.match(source, /conversationCreated/);
+assert.match(source, /conversation\.source\?\.trim\(\)\.toLowerCase\(\) \|\| "whatsapp"/);
+assert.match(source, /serviceWindowProvisioned: false/);
+assert.match(source, /Provisioned canary conversation must not contain any messages/);
 assert.match(source, /workspaceId !== WORKSPACE_ID/);
 assert.match(source, /connection\.channel !== "WHATSAPP"/);
 assert.match(source, /externalWhatsAppWriteSent: false/);
@@ -19,6 +25,7 @@ assert.match(source, /runtimeFlagsMutated: false/);
 
 for (const forbidden of [
   "queueOutboundMessage",
+  "whatsAppMessage.create",
   "dispatchQueuedOutboundBatch",
   "SEND_TEXT",
   "SEND_TEMPLATE",

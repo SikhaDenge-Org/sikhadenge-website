@@ -196,14 +196,17 @@ jobs:
              AND ec.channel = 'WHATSAPP'
              AND ec.status IN ('CONNECTED','DEGRADED')
             WHERE c.\"waId\" = '$PHASE21G_CANARY_WA_ID'
-              AND c.\"metadata\" #>> '{engageos,whatsappIdentity,workspaceId}' = 'engagews_default'
-              AND EXISTS (
-                SELECT 1 FROM \"WhatsAppConversation\" wc
-                WHERE wc.\"contactId\" = c.id
-                  AND lower(coalesce(wc.source,'whatsapp')) = 'whatsapp'
-              );")"
+              AND c.\"metadata\" #>> '{engageos,whatsappIdentity,workspaceId}' = 'engagews_default';")"
           printf 'VERIFIED_CANARY_CONTACT_COUNT=%s\n' "$canary_contact_count"
           test "$canary_contact_count" = "1"
+
+          existing_conversation_count="$(psql "$DB" -X -v ON_ERROR_STOP=1 -At -c "
+            SELECT COUNT(*)
+            FROM \"WhatsAppConversation\" wc
+            JOIN \"WhatsAppContact\" c ON c.id = wc.\"contactId\"
+            WHERE c.\"waId\" = '$PHASE21G_CANARY_WA_ID'
+              AND lower(coalesce(wc.source,'whatsapp')) = 'whatsapp';")"
+          printf 'EXISTING_CANARY_CONVERSATION_COUNT=%s\n' "$existing_conversation_count"
 
           PHASE21G_CANARY_WA_ID="$PHASE21G_CANARY_WA_ID" \
           PHASE21G_VERIFIED_CANARY_WA_ID="$PHASE21G_VERIFIED_CANARY_WA_ID" \
@@ -222,6 +225,7 @@ jobs:
                 JOIN \"ConversationTagLink\" ctl ON ctl.\"conversationId\" = wc.id
                 JOIN \"ConversationTag\" ct ON ct.id = ctl.\"tagId\"
                 WHERE wc.\"contactId\" = c.id
+                  AND lower(coalesce(wc.source,'whatsapp')) = 'whatsapp'
                   AND ct.name = 'CANARY_INTERNAL_TEST'
               );")"
           printf 'DESIGNATED_CANARY_POSTCONDITION_COUNT=%s\n' "$designation_count"
