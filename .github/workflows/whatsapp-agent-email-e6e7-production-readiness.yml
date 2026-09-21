@@ -79,14 +79,37 @@ jobs:
           BACKUP=/root/sikhadenge-backups/$RUN_ID
           test "$(id -u)" = "0"
           cd "$APP"
+          install -d -m 700 "$BACKUP"
+          IDENTITY_LOG="$BACKUP/runtime-identity.log"
+          : > "$IDENTITY_LOG"
+          chmod 600 "$IDENTITY_LOG"
+          exec > >(tee -a "$IDENTITY_LOG") 2>&1
+
           DEPLOYED_SHA="$(git rev-parse HEAD)"
           [[ "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
           if [[ -n "${REQUESTED_DEPLOYED_SHA:-}" ]]; then
             test "$DEPLOYED_SHA" = "$REQUESTED_DEPLOYED_SHA"
           fi
 
-          latest_evidence="$(find /root/sikhadenge-backups -mindepth 2 -maxdepth 2 -type f -name post-deploy-evidence.txt -path '/root/sikhadenge-backups/github-*/*' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)"
-          test -n "$latest_evidence"
+          latest_evidence=""
+          latest_mtime=0
+          evidence_count=0
+          shopt -s nullglob
+          for candidate in /root/sikhadenge-backups/github-*/post-deploy-evidence.txt; do
+            evidence_count=$((evidence_count + 1))
+            candidate_mtime="$(stat -c %Y "$candidate" 2>/dev/null || printf '0')"
+            if [[ "$candidate_mtime" =~ ^[0-9]+$ ]] && (( candidate_mtime > latest_mtime )); then
+              latest_mtime="$candidate_mtime"
+              latest_evidence="$candidate"
+            fi
+          done
+          shopt -u nullglob
+          printf 'EVIDENCE_CANDIDATE_COUNT=%s\n' "$evidence_count"
+          if [[ -z "$latest_evidence" ]]; then
+            printf 'EVIDENCE_DISCOVERY=FAIL reason=no_post_deploy_evidence\n'
+            exit 40
+          fi
+          printf 'EVIDENCE_DISCOVERY=PASS file=%s\n' "$(basename "$(dirname "$latest_evidence")")/$(basename "$latest_evidence")"
           read_evidence_value() {
             local key="$1"
             awk -F= -v key="$key" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "$latest_evidence"
@@ -145,7 +168,6 @@ jobs:
           printf 'START_PM2_PID=%s\n' "$START_PM2_PID"
           START_DEPLOYED_SHA="$DEPLOYED_SHA"
           START_BUILD_ID="$CERTIFIED_BUILD_ID"
-          install -d -m 700 "$BACKUP"
           set -a
           source "$APP/.env"
           set +a
@@ -196,7 +218,7 @@ jobs:
         run: |
           set +e
           mkdir -p email-e6e7-readiness-evidence
-          for file_name in email-e6e7-readiness.json email-e6e7-readiness-result.txt email-scheduler-verify.log; do
+          for file_name in email-e6e7-readiness.json email-e6e7-readiness-result.txt email-scheduler-verify.log runtime-identity.log; do
             scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
               -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
               "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${AUDIT_RUN_ID}/${file_name}" \
