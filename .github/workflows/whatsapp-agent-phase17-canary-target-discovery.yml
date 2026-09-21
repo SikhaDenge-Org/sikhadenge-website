@@ -64,7 +64,7 @@ jobs:
             done < <(
               jq -r '
                 .workflow_runs
-                | map(select(.event == "workflow_dispatch" and .status == "completed"))
+                | map(select(.status == "completed"))
                 | sort_by(.created_at)
                 | reverse
                 | .[]
