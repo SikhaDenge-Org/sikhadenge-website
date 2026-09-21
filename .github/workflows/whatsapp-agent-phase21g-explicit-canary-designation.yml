@@ -41,6 +41,9 @@ jobs:
       PHASE21G_CONFIRM: ${{ inputs.confirmation }}
 
     steps:
+      - name: Checkout reviewed operator code
+        uses: actions/checkout@v4
+
       - name: Validate exact SHA and explicit inputs
         shell: bash
         env:
@@ -178,6 +181,7 @@ jobs:
               AND m.\"isActive\" = true
               AND u.\"isActive\" = true
               AND w.\"isActive\" = true
+              AND m.role IN ('ADMIN','MANAGER','COUNSELOR')
             ORDER BY m.role ASC, m.\"createdAt\" ASC
             LIMIT 1;")"
           [[ "$selected_operator_role" =~ ^(ADMIN|MANAGER|COUNSELOR)$ ]]
