@@ -14,6 +14,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -47,10 +48,34 @@ jobs:
           set -Eeuo pipefail
 
           if [[ "${GITHUB_EVENT_NAME}" = "push" ]]; then
-            EXPECTED_RELEASE_SHA="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/whatsapp-agent-production-batch1.yml/runs?branch=$RELEASE_BRANCH&per_page=50" --jq '[.workflow_runs[] | select(.event=="workflow_dispatch" and .conclusion=="success")][0].head_sha // empty')"
+            runs_json="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/actions/workflows/whatsapp-agent-production-batch1.yml/runs?branch=$RELEASE_BRANCH&per_page=50")"
+            EXPECTED_RELEASE_SHA=""
+
+            while IFS='|' read -r run_id run_sha; do
+              [[ -n "$run_id" && -n "$run_sha" ]] || continue
+              jobs_json="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100")"
+              job_result="$(jq -r '(.jobs | map(select(.name == "production-batch-1")) | .[0].conclusion) // "not_found"' <<<"$jobs_json")"
+              if [[ "$job_result" = "success" ]]; then
+                EXPECTED_RELEASE_SHA="$run_sha"
+                printf 'DEPLOYMENT_RUN_ID=%s\n' "$run_id"
+                printf 'DEPLOYMENT_JOB_RESULT=%s\n' "$job_result"
+                break
+              fi
+            done < <(
+              jq -r '
+                .workflow_runs
+                | map(select(.event == "workflow_dispatch" and .status == "completed"))
+                | sort_by(.created_at)
+                | reverse
+                | .[]
+                | [.id, .head_sha]
+                | @tsv
+              ' <<<"$runs_json" | tr '\t' '|'
+            )
+
             test -n "$EXPECTED_RELEASE_SHA"
             printf 'EXPECTED_RELEASE_SHA=%s\n' "$EXPECTED_RELEASE_SHA" >> "$GITHUB_ENV"
-            printf 'DEPLOYED_SHA_SOURCE=LATEST_SUCCESSFUL_PRODUCTION_BATCH\n'
+            printf 'DEPLOYED_SHA_SOURCE=LATEST_SUCCESSFUL_PRODUCTION_BATCH_JOB\n'
           fi
 
           [[ "$EXPECTED_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
