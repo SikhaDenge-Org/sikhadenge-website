@@ -78,12 +78,19 @@ jobs:
           source "$APP/.env"
           set +a
           set +e
+          EXPECTED_RELEASE_SHA="$DEPLOYED_SHA" ENV_FILE="$APP/.env" \
+            bash scripts/email-automation-scheduler-verify.sh | tee "$BACKUP/email-scheduler-verify.log"
+          scheduler_code=${PIPESTATUS[0]}
           EMAIL_E6E7_WORKSPACE_ID=engagews_default npx tsx scripts/email-e6e7-production-readiness.ts | tee "$BACKUP/email-e6e7-readiness.json"
-          code=${PIPESTATUS[0]}
+          readiness_code=${PIPESTATUS[0]}
           set -e
-          printf 'EXIT_CODE=%s\n' "$code" > "$BACKUP/email-e6e7-readiness-result.txt"
+          {
+            printf 'SCHEDULER_EXIT_CODE=%s\n' "$scheduler_code"
+            printf 'READINESS_EXIT_CODE=%s\n' "$readiness_code"
+          } > "$BACKUP/email-e6e7-readiness-result.txt"
           chmod 600 "$BACKUP"/*
-          exit "$code"
+          if (( scheduler_code != 0 )); then exit "$scheduler_code"; fi
+          exit "$readiness_code"
           REMOTE
 
       - name: Collect protected evidence
@@ -92,7 +99,7 @@ jobs:
         run: |
           set +e
           mkdir -p email-e6e7-readiness-evidence
-          for file_name in email-e6e7-readiness.json email-e6e7-readiness-result.txt; do
+          for file_name in email-e6e7-readiness.json email-e6e7-readiness-result.txt email-scheduler-verify.log; do
             scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
               -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
               "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${AUDIT_RUN_ID}/${file_name}" \
@@ -106,10 +113,15 @@ jobs:
         run: |
           set -Eeuo pipefail
           json="email-e6e7-readiness-evidence/email-e6e7-readiness.json"
+          result="email-e6e7-readiness-evidence/email-e6e7-readiness-result.txt"
           {
             echo "## Email E6/E7 production readiness"
             echo
             printf -- '- Audited SHA: `%s`\n' "$DEPLOYED_SHA"
+            if [[ -s "$result" ]]; then
+              scheduler_exit="$(awk -F= '$1=="SCHEDULER_EXIT_CODE"{print $2}' "$result")"
+              printf -- '- Live scheduler verification exit: `%s`\n' "${scheduler_exit:-unknown}"
+            fi
             if [[ -s "$json" ]]; then
               status="$(jq -r '.status' "$json")"
               runtime="$(jq -r '.runtime.mode' "$json")"
@@ -119,8 +131,12 @@ jobs:
               pending="$(jq -r '.automationQueue.pending' "$json")"
               failed="$(jq -r '.automationQueue.failed' "$json")"
               suppressions="$(jq -r '.deliverability.activeEmailSuppressions' "$json")"
+              tracking_enabled="$(jq -r '.runtime.trackingEnabled' "$json")"
+              tracking_evidence="$(jq -r '.deliverability.trackingEvidenceCount' "$json")"
               printf -- '- Status: **%s**\n' "$status"
               printf -- '- Runtime: `%s`\n' "$runtime"
+              printf -- '- Tracking enabled: `%s`\n' "$tracking_enabled"
+              printf -- '- Tracking evidence (30d): `%s`\n' "$tracking_evidence"
               printf -- '- Approved templates: `%s`\n' "$approved"
               printf -- '- Campaigns: `%s`\n' "$campaigns"
               printf -- '- Sequences: `%s`\n' "$sequences"
