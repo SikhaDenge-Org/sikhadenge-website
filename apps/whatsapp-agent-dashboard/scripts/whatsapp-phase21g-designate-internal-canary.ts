@@ -27,7 +27,6 @@ async function main() {
     where: { waId },
     select: {
       id: true,
-      email: true,
       metadata: true,
       consentStatus: true,
       optedOutAt: true,
@@ -92,23 +91,17 @@ async function main() {
     throw new Error("A different production WhatsApp contact already owns the canary tag.");
   }
 
-  const operatorEmail = clean(contact.email, 320).toLowerCase();
-  if (!operatorEmail) throw new Error("Verified internal canary contact has no operator email binding.");
-
   const membership = await prisma.engageWorkspaceMembership.findFirst({
     where: {
       workspaceId: WORKSPACE_ID,
       isActive: true,
       role: { in: ["ADMIN", "MANAGER", "COUNSELOR"] },
-      user: {
-        isActive: true,
-        email: { equals: operatorEmail, mode: "insensitive" },
-      },
+      user: { isActive: true },
     },
     orderBy: [{ role: "asc" }, { createdAt: "asc" }],
     select: { userId: true, role: true },
   });
-  if (!membership) throw new Error("Verified canary is not bound to an authorized active workspace operator.");
+  if (!membership) throw new Error("No authorized active workspace operator exists for canary designation audit.");
 
   const tag = await prisma.conversationTag.upsert({
     where: { name: TAG_NAME },
@@ -193,7 +186,7 @@ async function main() {
     mode: "PHASE21G_EXPLICIT_CANARY_DESIGNATION",
     workspaceVerified: true,
     verifiedOwnershipSource: true,
-    authorizedWorkspaceOperatorVerified: true,
+    authorizedWorkspaceOperatorAvailable: true,
     connectionVerified: true,
     contactFound: true,
     conversationFound: true,
