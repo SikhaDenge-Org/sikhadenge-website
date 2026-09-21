@@ -220,7 +220,7 @@ jobs:
           mkdir -p email-e6e7-readiness-evidence
           for file_name in email-e6e7-readiness.json email-e6e7-readiness-result.txt email-scheduler-verify.log runtime-identity.log; do
             scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
-              -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+              -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
               "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${AUDIT_RUN_ID}/${file_name}" \
               "email-e6e7-readiness-evidence/${file_name}" >/dev/null 2>&1 || true
           done

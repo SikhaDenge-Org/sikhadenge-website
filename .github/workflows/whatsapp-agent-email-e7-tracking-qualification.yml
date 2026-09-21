@@ -215,7 +215,7 @@ jobs:
           mkdir -p email-e7-tracking-evidence
           for file_name in tracking-result.txt tracking-canary.log scheduler-before.log scheduler-after.log; do
             scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
-              -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+              -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
               "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${QUALIFY_RUN_ID}/${file_name}" \
               "email-e7-tracking-evidence/${file_name}" >/dev/null 2>&1 || true
           done
