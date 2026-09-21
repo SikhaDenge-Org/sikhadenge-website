@@ -243,6 +243,7 @@ jobs:
           }
           on_exit() {
             status=$?
+            rm -f "$REVIEWED_ENQUEUE_REMOTE" "$REVIEWED_VERIFY_REMOTE" || true
             if [[ "$cleanup_armed" = "true" && "$status" -ne 0 ]]; then
               trap - EXIT INT TERM
               if restore_fail_closed; then
