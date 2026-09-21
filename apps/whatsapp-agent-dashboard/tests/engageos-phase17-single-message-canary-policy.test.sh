@@ -11,7 +11,13 @@ if grep -Fq 'dispatchQueuedOutboundBatch' "$SCRIPT"; then
   exit 1
 fi
 
-grep -Fq 'message.type !== MessageType.TEXT' "$SCRIPT"
+grep -Fq 'message.type !== MessageType.TEXT && !isPhase22DTemplate' "$SCRIPT"
+grep -Fq 'message.type === MessageType.TEMPLATE' "$SCRIPT"
+grep -Fq 'canary.designated === true' "$SCRIPT"
+grep -Fq 'canary.kind === "INTERNAL_TEST"' "$SCRIPT"
+grep -Fq 'hasCanaryTag' "$SCRIPT"
+grep -Fq 'outbound.templateName === "hello_world"' "$SCRIPT"
+grep -Fq 'outbound.idempotencyKey.startsWith("phase22d-internal-canary:")' "$SCRIPT"
 grep -Fq 'message.actor !== MessageActor.COUNSELOR' "$SCRIPT"
 grep -Fq 'message.status !== MessageStatus.QUEUED' "$SCRIPT"
 grep -Fq 'PHASE17_CANARY_MACHINE_EVIDENCE_VERIFIED' "$SCRIPT"
