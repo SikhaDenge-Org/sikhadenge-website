@@ -75,10 +75,8 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
-            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-            "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' VERIFIED_CANARY_WA_ID='$VERIFIED_CANARY_WA_ID' bash -s" <<'REMOTE'
+          remote_script="$RUNNER_TEMP/phase17-canary-discovery-remote.sh"
+          cat > "$remote_script" <<'REMOTE'
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           cd "$APP"
@@ -269,3 +267,40 @@ jobs:
           printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
           printf 'PASS: READ_ONLY_CANARY_TARGET_DISCOVERY\n'
           REMOTE
+
+          max_attempts=3
+          for attempt in $(seq 1 "$max_attempts"); do
+            printf 'SSH_TRANSPORT_ATTEMPT=%s/%s\n' "$attempt" "$max_attempts"
+
+            set +e
+            ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+              -o BatchMode=yes \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              -o ConnectTimeout=10 \
+              -o ConnectionAttempts=1 \
+              -o ServerAliveInterval=10 \
+              -o ServerAliveCountMax=1 \
+              "$SSH_USER@$SSH_HOST" \
+              "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' VERIFIED_CANARY_WA_ID='$VERIFIED_CANARY_WA_ID' bash -s" < "$remote_script"
+            ssh_code=$?
+            set -e
+
+            if [[ "$ssh_code" -eq 0 ]]; then
+              printf 'CANARY_TARGET_DISCOVERY=PASS\n'
+              exit 0
+            fi
+
+            if [[ "$ssh_code" -ne 255 ]]; then
+              printf 'CANARY_TARGET_DISCOVERY=FAIL_REMOTE exit_code=%s\n' "$ssh_code" >&2
+              exit "$ssh_code"
+            fi
+
+            printf 'SSH_TRANSPORT_FAILURE=true attempt=%s exit_code=%s\n' "$attempt" "$ssh_code" >&2
+            if [[ "$attempt" -lt "$max_attempts" ]]; then
+              sleep $(( attempt * 5 ))
+            fi
+          done
+
+          printf 'CANARY_TARGET_DISCOVERY=FAIL_SSH_TRANSPORT attempts=%s\n' "$max_attempts" >&2
+          exit 255
