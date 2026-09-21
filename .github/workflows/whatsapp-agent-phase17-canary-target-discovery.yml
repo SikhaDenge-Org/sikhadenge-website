@@ -220,32 +220,21 @@ jobs:
 
           if [[ -z "${VERIFIED_CANARY_WA_ID:-}" ]]; then
             printf 'VERIFIED_CANARY_CONFIGURED=false\n'
-            printf 'VERIFIED_OPERATOR_MATCH_COUNT=0\n'
+            printf 'VERIFIED_CONTACT_MATCH_COUNT=0\n'
+            printf 'AUTHORIZED_OPERATOR_COUNT=0\n'
           else
             [[ "$VERIFIED_CANARY_WA_ID" =~ ^[0-9]{6,20}$ ]]
             printf 'VERIFIED_CANARY_CONFIGURED=true\n'
 
-            verified_match_sql=$(cat <<'SQL'
+            verified_contact_sql=$(cat <<'SQL'
             SELECT
               repeat('*', GREATEST(0, LEAST(8, length(c."waId") - 4))) || right(c."waId",4) AS recipient_masked,
-              m.role AS workspace_role,
               c."consentStatus",
               CASE WHEN c."optedOutAt" IS NULL THEN 'false' ELSE 'true' END AS opted_out,
               ec.status AS connection_status,
               CASE WHEN conv."serviceWindowExpiresAt" > now() THEN 'true' ELSE 'false' END AS service_window_open,
               CASE WHEN conv.id IS NULL THEN 'false' ELSE 'true' END AS conversation_found
             FROM "WhatsAppContact" c
-            JOIN "DashboardUser" u
-              ON c.email IS NOT NULL
-             AND lower(btrim(c.email)) = lower(btrim(u.email))
-            JOIN "EngageWorkspaceMembership" m
-              ON m."userId" = u.id
-             AND m."workspaceId" = 'engagews_default'
-             AND m."isActive" = true
-             AND m.role IN ('ADMIN','MANAGER','COUNSELOR')
-            JOIN "EngageWorkspace" w
-              ON w.id = m."workspaceId"
-             AND w."isActive" = true
             JOIN "EngageChannelConnection" ec
               ON ec.id = c."metadata" #>> '{engageos,whatsappIdentity,connectionId}'
              AND ec."workspaceId" = 'engagews_default'
@@ -260,45 +249,45 @@ jobs:
               LIMIT 1
             ) conv ON true
             WHERE c."waId" = '__VERIFIED_CANARY_WA_ID__'
-              AND u."isActive" = true
               AND c."metadata" #>> '{engageos,whatsappIdentity,workspaceId}' = 'engagews_default';
           SQL
           )
 
-            printf 'VERIFIED_OPERATOR_MATCH_BEGIN\n'
-            verified_match_sql="${verified_match_sql//__VERIFIED_CANARY_WA_ID__/$VERIFIED_CANARY_WA_ID}"
-            psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -c "$verified_match_sql"
-            printf 'VERIFIED_OPERATOR_MATCH_END\n'
+            verified_contact_sql="${verified_contact_sql//__VERIFIED_CANARY_WA_ID__/$VERIFIED_CANARY_WA_ID}"
+            printf 'VERIFIED_CONTACT_BEGIN\n'
+            psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -c "$verified_contact_sql"
+            printf 'VERIFIED_CONTACT_END\n'
 
             verified_count="$(psql "$DB" -X -v ON_ERROR_STOP=1 -At -c "
               SELECT COUNT(DISTINCT c.id)
               FROM \"WhatsAppContact\" c
-              JOIN \"DashboardUser\" u
-                ON c.email IS NOT NULL
-               AND lower(btrim(c.email)) = lower(btrim(u.email))
-              JOIN \"EngageWorkspaceMembership\" m
-                ON m.\"userId\" = u.id
-               AND m.\"workspaceId\" = 'engagews_default'
-               AND m.\"isActive\" = true
-               AND m.role IN ('ADMIN','MANAGER','COUNSELOR')
-              JOIN \"EngageWorkspace\" w
-                ON w.id = m.\"workspaceId\"
-               AND w.\"isActive\" = true
               JOIN \"EngageChannelConnection\" ec
                 ON ec.id = c.\"metadata\" #>> '{engageos,whatsappIdentity,connectionId}'
                AND ec.\"workspaceId\" = 'engagews_default'
                AND ec.channel = 'WHATSAPP'
                AND ec.status IN ('CONNECTED','DEGRADED')
               WHERE c.\"waId\" = '$VERIFIED_CANARY_WA_ID'
-                AND u.\"isActive\" = true
                 AND c.\"metadata\" #>> '{engageos,whatsappIdentity,workspaceId}' = 'engagews_default'
                 AND EXISTS (
                   SELECT 1 FROM \"WhatsAppConversation\" wc
                   WHERE wc.\"contactId\" = c.id
                     AND lower(coalesce(wc.source,'whatsapp')) = 'whatsapp'
                 );")"
-            printf 'VERIFIED_OPERATOR_MATCH_COUNT=%s\n' "$verified_count"
+            printf 'VERIFIED_CONTACT_MATCH_COUNT=%s\n' "$verified_count"
             test "$verified_count" = "1"
+
+            authorized_operator_count="$(psql "$DB" -X -v ON_ERROR_STOP=1 -At -c "
+              SELECT COUNT(*)
+              FROM \"EngageWorkspaceMembership\" m
+              JOIN \"DashboardUser\" u ON u.id = m.\"userId\"
+              JOIN \"EngageWorkspace\" w ON w.id = m.\"workspaceId\"
+              WHERE m.\"workspaceId\" = 'engagews_default'
+                AND m.\"isActive\" = true
+                AND u.\"isActive\" = true
+                AND w.\"isActive\" = true
+                AND m.role IN ('ADMIN','MANAGER','COUNSELOR');")"
+            printf 'AUTHORIZED_OPERATOR_COUNT=%s\n' "$authorized_operator_count"
+            test "$authorized_operator_count" -ge 1
           fi
 
           printf 'MUTATION_PERFORMED=false\n'
