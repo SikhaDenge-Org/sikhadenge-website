@@ -9,8 +9,8 @@ on:
   workflow_dispatch:
     inputs:
       deployed_sha:
-        description: Exact production SHA to audit
-        required: true
+        description: Optional exact production SHA assertion; leave empty to discover live SHA
+        required: false
         type: string
 
 permissions:
@@ -129,7 +129,10 @@ jobs:
           {
             echo "## Email E6/E7 production readiness"
             echo
-            audited_sha="$(awk -F= '/^DISCOVERED_DEPLOYED_SHA=/{print $2}' email-e6e7-readiness.log | tail -1)"
+            audited_sha=""
+            if [[ -s email-e6e7-readiness.log ]]; then
+              audited_sha="$(awk -F= '/^DISCOVERED_DEPLOYED_SHA=/{print $2}' email-e6e7-readiness.log | tail -1 || true)"
+            fi
             if [[ -z "$audited_sha" ]]; then audited_sha="${REQUESTED_DEPLOYED_SHA:-unknown}"; fi
             printf -- '- Audited SHA: `%s`\n' "$audited_sha"
             if [[ -s "$result" ]]; then
