@@ -143,7 +143,7 @@ jobs:
           const rows=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
           const p=rows.find(x=>x.name==='sikhadenge-whatsapp-agent');
           if(!p){ process.stdout.write('||'); process.exit(0); }
-          process.stdout.write([p.pid||'',p.pm2_env?.status||'',p.pm2_env?.pm_cwd||''].join('|'));
+          process.stdout.write([p.pid||'',p.pm2_env?.status||'',p.pm2_env?.pm_cwd||''].join('|') + '\n');
           NODE
           )
           RUNTIME_BUILD_ID=""
@@ -187,7 +187,7 @@ jobs:
           const rows=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
           const p=rows.find(x=>x.name==='sikhadenge-whatsapp-agent');
           if(!p){ process.stdout.write('||'); process.exit(0); }
-          process.stdout.write([p.pid||'',p.pm2_env?.status||'',p.pm2_env?.pm_cwd||''].join('|'));
+          process.stdout.write([p.pid||'',p.pm2_env?.status||'',p.pm2_env?.pm_cwd||''].join('|') + '\n');
           NODE
           )
           deploy_stable_code=0
