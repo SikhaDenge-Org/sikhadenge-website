@@ -1,0 +1,87 @@
+name: WhatsApp Phase22D One-Time DRY_RUN Dispatch
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - .github/workflows/whatsapp-agent-phase22d-dryrun-dispatch-once.yml
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TARGET_WORKFLOW: whatsapp-agent-phase17-single-message-canary.yml
+      TARGET_REF: release/whatsapp-instagram-agent-flow-20260731
+      EXPECTED_LIVE_SHA: 4e4bcb0119f2096ee2f95c95862c5c0d797c1021
+      EXPECTED_STATE_VERSION: "2"
+      CANARY_MESSAGE_ID: cmubjhi1j0002kwh6ulh85bun
+    steps:
+      - name: Dispatch exact Phase22D no-send canary
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          previous_id="$(gh run list -R "$GITHUB_REPOSITORY" --workflow "$TARGET_WORKFLOW" --branch "$TARGET_REF" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+          gh workflow run "$TARGET_WORKFLOW" -R "$GITHUB_REPOSITORY" --ref "$TARGET_REF" \
+            -f expected_release_sha="$EXPECTED_LIVE_SHA" \
+            -f expected_state_version="$EXPECTED_STATE_VERSION" \
+            -f message_id="$CANARY_MESSAGE_ID" \
+            -f execute=false
+
+          run_id=""
+          for attempt in $(seq 1 30); do
+            sleep 3
+            candidate="$(gh run list -R "$GITHUB_REPOSITORY" --workflow "$TARGET_WORKFLOW" --branch "$TARGET_REF" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+            if [[ "$candidate" != "0" && "$candidate" != "$previous_id" ]]; then
+              run_id="$candidate"
+              break
+            fi
+          done
+          test -n "$run_id"
+          echo "TARGET_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          echo "TARGET_RUN_URL=https://github.com/$GITHUB_REPOSITORY/actions/runs/$run_id" >> "$GITHUB_ENV"
+          printf 'PHASE22D_DRYRUN_DISPATCHED=true\nTARGET_RUN_ID=%s\n' "$run_id"
+
+      - name: Wait for exact no-send canary
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh run watch "$TARGET_RUN_ID" -R "$GITHUB_REPOSITORY" --exit-status
+
+      - name: Record Phase22D DRY_RUN evidence
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          test -n "${TARGET_RUN_ID:-}"
+          status="$(gh run view "$TARGET_RUN_ID" -R "$GITHUB_REPOSITORY" --json status --jq '.status')"
+          conclusion="$(gh run view "$TARGET_RUN_ID" -R "$GITHUB_REPOSITORY" --json conclusion --jq '.conclusion')"
+          {
+            echo "## Phase22D exact internal canary DRY_RUN"
+            echo
+            echo "- Workflow run: $TARGET_RUN_URL"
+            echo "- Run ID: $TARGET_RUN_ID"
+            echo "- Expected live SHA: `$EXPECTED_LIVE_SHA`"
+            echo "- Exact message ID: `$CANARY_MESSAGE_ID`"
+            echo "- execute: `false`"
+            echo "- Status: `$status`"
+            echo "- Conclusion: `$conclusion`"
+            echo "- External WhatsApp write requested: **false**"
+            echo
+            echo "This one-time dispatcher does not enable persistent outbound flags and does not request a provider send."
+          } > phase22d-dryrun-ledger.md
+          gh issue comment 65 -R "$GITHUB_REPOSITORY" --body-file phase22d-dryrun-ledger.md
+          test "$status" = "completed"
+          test "$conclusion" = "success"
