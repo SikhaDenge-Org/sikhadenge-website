@@ -1,0 +1,230 @@
+/*
+ * SikhaDenge WhatsApp Agent — uploaded PNG icon system.
+ * The files are deployed under /public/dashboard-icons from the approved ZIP.
+ */
+
+:root {
+  --sd-icon-brand: url("/dashboard-icons/01-sikhadenge-brand.png");
+  --sd-icon-conversations: url("/dashboard-icons/02-conversations.png");
+  --sd-icon-contacts: url("/dashboard-icons/03-contacts.png");
+  --sd-icon-ai: url("/dashboard-icons/04-ai-managed.png");
+  --sd-icon-leads: url("/dashboard-icons/05-qualified-leads.png");
+  --sd-icon-unread: url("/dashboard-icons/06-unread-messages.png");
+  --sd-icon-analytics: url("/dashboard-icons/07-analytics.png");
+  --sd-icon-knowledge: url("/dashboard-icons/08-knowledge.png");
+  --sd-icon-automation: url("/dashboard-icons/09-automation.png");
+  --sd-icon-settings: url("/dashboard-icons/10-settings.png");
+}
+
+/* Exact approved SikhaDenge brand mark */
+.brand-mark {
+  width: 54px !important;
+  height: 54px !important;
+  overflow: visible !important;
+  border: 0 !important;
+  border-radius: 15px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.brand-mark::before {
+  width: 54px !important;
+  height: 54px !important;
+  border-radius: 15px !important;
+  background: var(--sd-icon-brand) center / contain no-repeat !important;
+  box-shadow: 0 12px 26px rgba(5, 18, 48, 0.38) !important;
+}
+
+.topbar > div:first-child {
+  min-height: 56px !important;
+  padding-left: 70px !important;
+}
+
+.topbar > div:first-child::before {
+  width: 54px !important;
+  height: 54px !important;
+  border-radius: 15px !important;
+  background: var(--sd-icon-brand) center / contain no-repeat !important;
+  box-shadow: 0 9px 24px rgba(15, 23, 42, 0.16) !important;
+}
+
+/* Sidebar PNG icons */
+.rail-button,
+.rail-button.active,
+.rail-button:hover {
+  width: 50px !important;
+  height: 50px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.rail-button::before,
+.rail nav .rail-button:nth-child(n)::before,
+.rail-bottom::before {
+  content: "" !important;
+  display: block !important;
+  width: 42px !important;
+  height: 42px !important;
+  border-radius: 12px !important;
+  background-color: transparent !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+  background-size: contain !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+  filter: none !important;
+  opacity: 0.76 !important;
+  transform: none !important;
+  transition: opacity 160ms ease, transform 160ms ease, filter 160ms ease !important;
+}
+
+.rail nav .rail-button:nth-child(1)::before {
+  background-image: var(--sd-icon-conversations) !important;
+}
+
+.rail nav .rail-button:nth-child(2)::before {
+  background-image: var(--sd-icon-contacts) !important;
+}
+
+.rail nav .rail-button:nth-child(3)::before {
+  background-image: var(--sd-icon-leads) !important;
+}
+
+.rail nav .rail-button:nth-child(4)::before {
+  background-image: var(--sd-icon-analytics) !important;
+}
+
+.rail nav .rail-button:nth-child(5)::before {
+  background-image: var(--sd-icon-knowledge) !important;
+}
+
+.rail-bottom::before {
+  background-image: var(--sd-icon-settings) !important;
+}
+
+.rail-button:hover::before,
+.rail-button.active::before {
+  opacity: 1 !important;
+  transform: translateY(-1px) scale(1.055) !important;
+  filter: drop-shadow(0 9px 14px rgba(20, 105, 255, 0.28)) !important;
+}
+
+.rail-button.active::after {
+  content: "" !important;
+  position: absolute !important;
+  left: -9px !important;
+  top: 13px !important;
+  width: 3px !important;
+  height: 24px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: linear-gradient(180deg, #9b4dff, #18c8ff) !important;
+  box-shadow: 0 0 13px rgba(24, 200, 255, 0.55) !important;
+  transform: none !important;
+}
+
+/* Operational metric PNG icons */
+.metric-card,
+.metric-card:nth-child(n) {
+  min-height: 92px !important;
+  padding: 15px 16px 13px 76px !important;
+}
+
+.metric-card::before,
+.metric-card:nth-child(n)::before {
+  left: 15px !important;
+  top: 17px !important;
+  width: 48px !important;
+  height: 48px !important;
+  border: 0 !important;
+  border-radius: 14px !important;
+  background-color: transparent !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+  background-size: contain !important;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.13) !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+  filter: none !important;
+}
+
+.metric-card:nth-child(1)::before {
+  background-image: var(--sd-icon-conversations) !important;
+}
+
+.metric-card:nth-child(2)::before {
+  background-image: var(--sd-icon-ai) !important;
+}
+
+.metric-card:nth-child(3)::before {
+  background-image: var(--sd-icon-leads) !important;
+}
+
+.metric-card:nth-child(4)::before {
+  background-image: var(--sd-icon-unread) !important;
+}
+
+.metric-card::after,
+.metric-card:nth-child(n)::after {
+  display: none !important;
+}
+
+.metric-card:hover::before {
+  transform: translateY(-2px) scale(1.035) !important;
+  box-shadow: 0 14px 28px rgba(20, 105, 255, 0.2) !important;
+}
+
+/* Reuse approved PNG assets for the two image-based composer tools. */
+.composer-tools button:nth-child(2),
+.composer-tools button:nth-child(3) {
+  font-size: 0 !important;
+}
+
+.composer-tools button:nth-child(2)::before,
+.composer-tools button:nth-child(3)::before {
+  content: "" !important;
+  width: 25px !important;
+  height: 25px !important;
+  border-radius: 8px !important;
+  background-color: transparent !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+  background-size: contain !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+  filter: none !important;
+}
+
+.composer-tools button:nth-child(2)::before {
+  background-image: var(--sd-icon-knowledge) !important;
+}
+
+.composer-tools button:nth-child(3)::before {
+  background-image: var(--sd-icon-automation) !important;
+}
+
+@media (max-width: 760px) {
+  .topbar > div:first-child {
+    padding-left: 58px !important;
+  }
+
+  .topbar > div:first-child::before {
+    width: 46px !important;
+    height: 46px !important;
+    border-radius: 13px !important;
+  }
+
+  .metric-card,
+  .metric-card:nth-child(n) {
+    padding-left: 67px !important;
+  }
+
+  .metric-card::before,
+  .metric-card:nth-child(n)::before {
+    width: 42px !important;
+    height: 42px !important;
+  }
+}
