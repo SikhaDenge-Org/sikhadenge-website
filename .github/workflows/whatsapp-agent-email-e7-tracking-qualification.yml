@@ -1,0 +1,233 @@
+name: WhatsApp Agent Email E7 Tracking Qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployed_sha:
+        description: Exact production SHA currently deployed
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  qualify-email-tracking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      DEPLOYED_SHA: ${{ inputs.deployed_sha }}
+      QUALIFY_RUN_ID: email-e7-tracking-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Validate production access
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          missing=0
+          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            [[ -n "${!variable_name:-}" ]] || { echo "Missing production secret: $variable_name" >&2; missing=1; }
+          done
+          test "$missing" = "0"
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Enable and qualify E7 tracking
+        shell: bash
+        run: |
+          set -o pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "DEPLOYED_SHA='$DEPLOYED_SHA' RUN_ID='$QUALIFY_RUN_ID' bash -s" <<'REMOTE' | tee email-e7-tracking-qualification.log
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ENV_FILE="$APP/.env"
+          PROCESS=sikhadenge-whatsapp-agent
+          BACKUP=/root/sikhadenge-backups/$RUN_ID
+
+          test "$(id -u)" = "0"
+          test -f "$ENV_FILE"
+          test "$(git -C "$APP" rev-parse HEAD)" = "$DEPLOYED_SHA"
+          install -d -m 700 "$BACKUP"
+          cp -a "$ENV_FILE" "$BACKUP/.env.before"
+          chmod 600 "$BACKUP/.env.before"
+
+          cd "$APP"
+          set -a
+          source "$ENV_FILE"
+          set +a
+
+          test "${EMAIL_RUNTIME_ENABLED:-false}" = "true"
+          test "${EMAIL_AUTOMATION_ENABLED:-false}" = "true"
+          test "${EMAIL_RUNTIME_MODE:-DISABLED}" = "DRY_RUN"
+          test "${EMAIL_EXTERNAL_WRITES_ENABLED:-true}" = "false"
+
+          EXPECTED_RELEASE_SHA="$DEPLOYED_SHA" ENV_FILE="$ENV_FILE" \
+            bash scripts/email-automation-scheduler-verify.sh | tee "$BACKUP/scheduler-before.log"
+
+          rollback_armed=false
+          rollback() {
+            code=$?
+            trap - ERR EXIT
+            if [[ "$rollback_armed" = "true" ]]; then
+              cp -a "$BACKUP/.env.before" "$ENV_FILE" || true
+              set -a
+              source "$ENV_FILE" || true
+              set +a
+              pm2 restart "$PROCESS" --update-env >/dev/null 2>&1 || true
+            fi
+            printf 'STATUS=ROLLED_BACK\nEXIT_CODE=%s\n' "$code" > "$BACKUP/tracking-result.txt" || true
+            chmod 600 "$BACKUP/tracking-result.txt" 2>/dev/null || true
+            exit "$code"
+          }
+          trap rollback ERR EXIT
+
+          node - "$ENV_FILE" <<'NODE'
+          const fs=require('node:fs'),crypto=require('node:crypto'),path=require('node:path');
+          const file=process.argv[2],original=fs.readFileSync(file,'utf8'),stat=fs.statSync(file);
+          const current={};
+          for(const raw of original.split(/\r?\n/)){
+            const line=raw.trim(); if(!line||line.startsWith('#')) continue;
+            const n=line.startsWith('export ')?line.slice(7).trim():line;
+            const i=n.indexOf('='); if(i<1) continue;
+            let v=n.slice(i+1).trim();
+            if(v.length>=2&&((v.startsWith('"')&&v.endsWith('"'))||(v.startsWith("'")&&v.endsWith("'")))) v=v.slice(1,-1);
+            current[n.slice(0,i).trim()]=v;
+          }
+          const secret=(current.EMAIL_TRACKING_SECRET||'').length>=32
+            ? current.EMAIL_TRACKING_SECRET
+            : crypto.randomBytes(48).toString('base64url');
+          const desired={EMAIL_TRACKING_ENABLED:'true',EMAIL_TRACKING_SECRET:secret};
+          const keys=new Set(Object.keys(desired));
+          const kept=original.split(/\r?\n/).filter(raw=>{
+            const line=raw.trim(); if(!line||line.startsWith('#')) return true;
+            const n=line.startsWith('export ')?line.slice(7).trim():line;
+            const i=n.indexOf('='); return i<1||!keys.has(n.slice(0,i).trim());
+          });
+          while(kept.length&&kept.at(-1)==='') kept.pop();
+          for(const [k,v] of Object.entries(desired)) kept.push(`${k}=${v}`);
+          kept.push('');
+          const tmp=path.join(path.dirname(file),`.${path.basename(file)}.${process.pid}.tmp`);
+          fs.writeFileSync(tmp,kept.join('\n'),{mode:stat.mode});
+          fs.chmodSync(tmp,stat.mode);
+          try{fs.chownSync(tmp,stat.uid,stat.gid)}catch{}
+          fs.renameSync(tmp,file);
+          NODE
+
+          rollback_armed=true
+          set -a
+          source "$ENV_FILE"
+          set +a
+          test "${EMAIL_TRACKING_ENABLED:-false}" = "true"
+          test ${#EMAIL_TRACKING_SECRET} -ge 32
+          pm2 restart "$PROCESS" --update-env >/dev/null
+          sleep 3
+
+          pm2 jlist | node -e '
+          let s="";
+          process.stdin.on("data",d=>s+=d).on("end",()=>{
+            const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");
+            if(!p) throw new Error("PM2 process missing");
+            if(p.pm2_env?.status!=="online") throw new Error("PM2 process offline");
+            if(String(p.pm2_env?.EMAIL_TRACKING_ENABLED||"")!=="true") throw new Error("tracking flag not live in PM2");
+            if(String(p.pm2_env?.EMAIL_RUNTIME_MODE||"")!=="DRY_RUN") throw new Error("runtime mode drifted");
+            if(String(p.pm2_env?.EMAIL_EXTERNAL_WRITES_ENABLED||"")!=="false") throw new Error("external writes drifted");
+            process.stdout.write("PM2_TRACKING_STATE=PASS\\n");
+          });
+          '
+
+          npm exec -- tsx -e '
+          import { prisma } from "./lib/db/prisma";
+          import { instrumentEmailHtml } from "./modules/email-automation/analytics/tracking";
+          (async()=>{
+            const rows=await prisma.engageEmailMessage.findMany({
+              where:{status:"SENT",externalRequestSent:true,idempotencyKey:{startsWith:"internal-test-"}},
+              orderBy:{createdAt:"desc"},take:50
+            });
+            const message=rows.find((row:any)=>{
+              const to=Array.isArray(row.toRecipients)?row.toRecipients:[];
+              return to.some((x:any)=>String(x?.email||"").toLowerCase()==="ankitsingh@sikhadenge.in");
+            });
+            if(!message) throw new Error("No persisted internal canary message is available for tracking qualification.");
+            const appUrl=process.env.APP_URL||"";
+            if(!appUrl.startsWith("https://")) throw new Error("Production APP_URL must use HTTPS.");
+            const html=instrumentEmailHtml({messageId:message.id,html:message.htmlBody,appUrl});
+            const match=html.match(/<img[^>]+src="([^"]+\/api\/email\/track\/open\/[^"]+)"/i);
+            if(!match?.[1]) throw new Error("Instrumented open pixel URL is missing.");
+            const response=await fetch(match[1],{redirect:"manual"});
+            if(response.status!==200) throw new Error(`Tracking pixel returned HTTP ${response.status}.`);
+            const opened=await prisma.engageEmailAnalyticsEvent.count({
+              where:{workspaceId:message.workspaceId,messageId:message.id,eventType:"OPENED",occurredAt:{gte:new Date(Date.now()-10*60*1000)}}
+            });
+            if(opened<1) throw new Error("OPENED tracking evidence was not persisted.");
+            console.log(`TRACKING_CANARY_MESSAGE_ID=${message.id}`);
+            console.log("TRACKING_PIXEL_HTTP=200");
+            console.log(`TRACKING_OPENED_COUNT=${opened}`);
+            await prisma.$disconnect();
+          })().catch(async e=>{console.error(e);try{await prisma.$disconnect()}catch{}process.exit(1)});
+          ' | tee "$BACKUP/tracking-canary.log"
+
+          EXPECTED_RELEASE_SHA="$DEPLOYED_SHA" ENV_FILE="$ENV_FILE" \
+            bash scripts/email-automation-scheduler-verify.sh | tee "$BACKUP/scheduler-after.log"
+
+          printf 'STATUS=PASS\nEXPECTED_RELEASE_SHA=%s\nEMAIL_TRACKING_ENABLED=true\nTRACKING_SECRET_PRESENT=true\nRUNTIME_MODE=DRY_RUN\nEXTERNAL_WRITES=false\nCOMPLETED_UTC=%s\n' \
+            "$DEPLOYED_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$BACKUP/tracking-result.txt"
+          chmod 600 "$BACKUP"/*
+          rollback_armed=false
+          trap - ERR EXIT
+          printf 'EMAIL_E7_TRACKING_QUALIFICATION=PASS\n'
+          REMOTE
+
+      - name: Collect tracking evidence
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p email-e7-tracking-evidence
+          for file_name in tracking-result.txt tracking-canary.log scheduler-before.log scheduler-after.log; do
+            scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+              -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+              "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${QUALIFY_RUN_ID}/${file_name}" \
+              "email-e7-tracking-evidence/${file_name}" >/dev/null 2>&1 || true
+          done
+          chmod -R go-rwx email-e7-tracking-evidence 2>/dev/null || true
+
+      - name: Upload tracking evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatsapp-agent-email-e7-tracking-${{ env.QUALIFY_RUN_ID }}
+          path: |
+            email-e7-tracking-qualification.log
+            email-e7-tracking-evidence
+          if-no-files-found: error
+          retention-days: 14
