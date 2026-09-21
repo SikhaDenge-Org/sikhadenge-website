@@ -54,6 +54,7 @@ jobs:
       APPROVER_USER_ID: ${{ inputs.approved_by_user_id }}
       APPROVAL_REASON: ${{ inputs.approval_reason }}
       EXECUTE: ${{ inputs.execute }}
+      VERIFIED_CANARY_WA_ID: ${{ secrets.WHATSAPP_INTERNAL_CANARY_WA_ID }}
 
     steps:
       - name: Checkout operator workflow
@@ -64,6 +65,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           [[ "$EXPECTED_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VERIFIED_CANARY_WA_ID" =~ ^[0-9]{6,20}$ ]]
           for value in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
             test -n "${!value:-}"
           done
@@ -112,7 +114,7 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' MESSAGE_B64='$message_b64' bash -s" <<'REMOTE'
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' MESSAGE_B64='$message_b64' VERIFIED_CANARY_WA_ID='$VERIFIED_CANARY_WA_ID' APPROVER_USER_ID='$APPROVER_USER_ID' EXECUTE='$EXECUTE' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           cd "$APP"
@@ -137,9 +139,60 @@ jobs:
           printf 'BASE_OUTBOUND_MODE=%s\nBASE_CUTOVER_APPROVED=%s\nBASE_LIVE_ACK_SET=false\nBASE_KILL_SWITCH=%s\n' \
             "${WHATSAPP_OUTBOUND_MODE:-disabled}" "${WHATSAPP_CUTOVER_APPROVED:-false}" "${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}"
 
+          scheduler_outbound="$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED??""))})')"
+          scheduler_mode="$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.WHATSAPP_OUTBOUND_MODE??""))})')"
+          scheduler_kill="$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.WHATSAPP_OUTBOUND_KILL_SWITCH??""))})')"
+          test "$scheduler_outbound" = "false"
+          test "$scheduler_mode" = "disabled"
+          test "$scheduler_kill" = "on"
+          printf 'SCHEDULER_OUTBOUND_ISOLATION_VERIFIED=true\n'
+
+          message_id="$(printf '%s' "$MESSAGE_B64" | base64 --decode)"
+          if [[ -n "$message_id" ]]; then
+            DB="$(node scripts/prisma-postgres-cli-url.mjs "$DATABASE_URL")"
+            canary_message_count="$(psql "$DB" -X -v ON_ERROR_STOP=1 -At -c "
+              SELECT COUNT(*)
+              FROM \"WhatsAppMessage\" m
+              JOIN \"WhatsAppConversation\" c ON c.id=m.\"conversationId\"
+              JOIN \"WhatsAppContact\" ct ON ct.id=c.\"contactId\"
+              WHERE m.id='${message_id}'
+                AND m.direction='OUTBOUND'
+                AND m.status='QUEUED'
+                AND m.type='TEMPLATE'
+                AND ct.\"waId\"='$VERIFIED_CANARY_WA_ID'
+                AND ct.metadata #>> '{engageos,canary,designated}'='true'
+                AND ct.metadata #>> '{engageos,canary,kind}'='INTERNAL_TEST'
+                AND lower(coalesce(c.source,'whatsapp'))='whatsapp'
+                AND m.\"rawPayload\" #>> '{outbound,templateName}'='hello_world'
+                AND m.\"rawPayload\" #>> '{outbound,idempotencyKey}' LIKE 'phase22d-internal-canary:%'
+                AND EXISTS (
+                  SELECT 1
+                  FROM \"ConversationTagLink\" ctl
+                  JOIN \"ConversationTag\" tag ON tag.id=ctl.\"tagId\"
+                  WHERE ctl.\"conversationId\"=c.id
+                    AND tag.name='CANARY_INTERNAL_TEST'
+                );")"
+            printf 'EXACT_PHASE22D_CANARY_MESSAGE_COUNT=%s\n' "$canary_message_count"
+            test "$canary_message_count" = "1"
+
+            if [[ "$EXECUTE" = "true" ]]; then
+              admin_count="$(psql "$DB" -X -v ON_ERROR_STOP=1 -At -c "
+                SELECT COUNT(*)
+                FROM \"EngageWorkspaceMembership\" m
+                JOIN \"DashboardUser\" u ON u.id=m.\"userId\"
+                WHERE m.\"workspaceId\"='engagews_default'
+                  AND m.\"userId\"='$APPROVER_USER_ID'
+                  AND m.\"isActive\"=true
+                  AND u.\"isActive\"=true
+                  AND m.role='ADMIN';")"
+              printf 'EXACT_ADMIN_APPROVER_COUNT=%s\n' "$admin_count"
+              test "$admin_count" = "1"
+            fi
+          fi
+
           parity="$(npx tsx scripts/engageos-whatsapp-provider-binding-reconcile.ts)"
           printf '%s\n' "$parity"
-          printf '%s' "$parity" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const o=JSON.parse(s);if(o.mode!=="DRY_RUN"||o.contactsScanned!==2168||o.mappingsNeedingRepairBefore!==0||o.mappingsNeedingRepairAfter!==0||o.externalWhatsAppWriteSent!==false||o.parityPassed!==true)process.exit(2);console.log("PASS: PROVIDER_BINDING_PARITY");})'
+          printf '%s' "$parity" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const o=JSON.parse(s);if(o.mode!=="DRY_RUN"||!Number.isInteger(o.contactsScanned)||o.contactsScanned<1||o.mappingsNeedingRepairBefore!==0||o.mappingsNeedingRepairAfter!==0||o.externalWhatsAppWriteSent!==false||o.parityPassed!==true)process.exit(2);console.log("PASS: PROVIDER_BINDING_PARITY contactsScanned="+o.contactsScanned);})'
           npx tsx tests/engageos-phase17-g1-outbound-guard.test.ts
 
           message_id="$(printf '%s' "$MESSAGE_B64" | base64 --decode)"
@@ -160,7 +213,7 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' EXPECTED_STATE_VERSION='$EXPECTED_STATE_VERSION' MESSAGE_ID='$MESSAGE_ID' APPROVER_USER_ID='$APPROVER_USER_ID' REASON_B64='$reason_b64' bash -s" <<'REMOTE'
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' EXPECTED_STATE_VERSION='$EXPECTED_STATE_VERSION' MESSAGE_ID='$MESSAGE_ID' APPROVER_USER_ID='$APPROVER_USER_ID' REASON_B64='$reason_b64' VERIFIED_CANARY_WA_ID='$VERIFIED_CANARY_WA_ID' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           cd "$APP"
@@ -169,6 +222,24 @@ jobs:
           source .env
           set +a
           reason="$(printf '%s' "$REASON_B64" | base64 --decode)"
+
+          DB="$(node scripts/prisma-postgres-cli-url.mjs "$DATABASE_URL")"
+          execute_target_count="$(psql "$DB" -X -v ON_ERROR_STOP=1 -At -c "
+            SELECT COUNT(*)
+            FROM \"WhatsAppMessage\" m
+            JOIN \"WhatsAppConversation\" c ON c.id=m.\"conversationId\"
+            JOIN \"WhatsAppContact\" ct ON ct.id=c.\"contactId\"
+            WHERE m.id='$MESSAGE_ID'
+              AND m.direction='OUTBOUND'
+              AND m.status='QUEUED'
+              AND m.type='TEMPLATE'
+              AND ct.\"waId\"='$VERIFIED_CANARY_WA_ID'
+              AND ct.metadata #>> '{engageos,canary,designated}'='true'
+              AND ct.metadata #>> '{engageos,canary,kind}'='INTERNAL_TEST'
+              AND m.\"rawPayload\" #>> '{outbound,templateName}'='hello_world'
+              AND m.\"rawPayload\" #>> '{outbound,idempotencyKey}' LIKE 'phase22d-internal-canary:%';")"
+          test "$execute_target_count" = "1"
+          printf 'EXACT_EXECUTE_TARGET_VERIFIED=true\n'
 
           env \
             PHASE17_CANARY_MODE=EXECUTE \
@@ -217,7 +288,7 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' MESSAGE_B64='$message_b64' bash -s" <<'REMOTE'
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' MESSAGE_B64='$message_b64' VERIFIED_CANARY_WA_ID='$VERIFIED_CANARY_WA_ID' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           cd "$APP"
@@ -247,9 +318,10 @@ jobs:
           message_id="$(printf '%s' "$MESSAGE_B64" | base64 --decode)"
           if [[ -n "$message_id" ]]; then
             approvals="$(psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "SELECT COUNT(*) FROM \"EngageControlledLaunchOutboundApproval\" WHERE \"workspaceId\"='engagews_default' AND \"messageId\"='${message_id}' AND \"consumedAt\" IS NULL AND \"revokedAt\" IS NULL AND \"expiresAt\">NOW();")"
-            message_state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"status\",CASE WHEN \"metaMessageId\" IS NULL THEN 'false' ELSE 'true' END FROM \"WhatsAppMessage\" WHERE \"id\"='${message_id}';")"
+            message_state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT m.\"status\",CASE WHEN m.\"metaMessageId\" IS NULL THEN 'false' ELSE 'true' END FROM \"WhatsAppMessage\" m JOIN \"WhatsAppConversation\" c ON c.id=m.\"conversationId\" JOIN \"WhatsAppContact\" ct ON ct.id=c.\"contactId\" WHERE m.id='${message_id}' AND ct.\"waId\"='$VERIFIED_CANARY_WA_ID';")"
             printf 'ACTIVE_MESSAGE_APPROVALS=%s\nCANARY_MESSAGE_STATE=%s\n' "$approvals" "$message_state"
             test "$approvals" = "0"
+            test -n "$message_state"
           fi
 
           parity="$(npx tsx scripts/engageos-whatsapp-provider-binding-reconcile.ts)"
