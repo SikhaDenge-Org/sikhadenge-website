@@ -95,11 +95,21 @@ jobs:
           CERTIFIED_BUILD_ID="$(read_evidence_value BUILD_ID)"
           CERTIFIED_PM2_STATUS="$(read_evidence_value PM2_STATUS)"
           CERTIFIED_PM2_CWD="$(read_evidence_value PM2_CWD)"
-          [[ "$CERTIFIED_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          test -n "$CERTIFIED_BUILD_ID"
-          test "$CERTIFIED_PM2_STATUS" = "online"
-          test "$DEPLOYED_SHA" = "$CERTIFIED_RELEASE_SHA"
-          test "$(cat "$APP/.next/BUILD_ID")" = "$CERTIFIED_BUILD_ID"
+          LIVE_APP_BUILD_ID="$(cat "$APP/.next/BUILD_ID" 2>/dev/null || true)"
+          printf 'IDENTITY_DISCOVERED_SHA=%s\n' "$DEPLOYED_SHA"
+          printf 'IDENTITY_CERTIFIED_SHA=%s\n' "$CERTIFIED_RELEASE_SHA"
+          printf 'IDENTITY_LIVE_APP_BUILD_ID=%s\n' "$LIVE_APP_BUILD_ID"
+          printf 'IDENTITY_CERTIFIED_BUILD_ID=%s\n' "$CERTIFIED_BUILD_ID"
+          printf 'IDENTITY_CERTIFIED_PM2_STATUS=%s\n' "$CERTIFIED_PM2_STATUS"
+          printf 'IDENTITY_CERTIFIED_PM2_CWD=%s\n' "$CERTIFIED_PM2_CWD"
+
+          identity_failures=0
+          [[ "$CERTIFIED_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { printf 'IDENTITY_CHECK=certified_sha_format:FAIL\n'; identity_failures=$((identity_failures+1)); }
+          [[ -n "$CERTIFIED_BUILD_ID" ]] || { printf 'IDENTITY_CHECK=certified_build_present:FAIL\n'; identity_failures=$((identity_failures+1)); }
+          [[ "$CERTIFIED_PM2_STATUS" = "online" ]] || { printf 'IDENTITY_CHECK=certified_pm2_online:FAIL\n'; identity_failures=$((identity_failures+1)); }
+          [[ "$DEPLOYED_SHA" = "$CERTIFIED_RELEASE_SHA" ]] || { printf 'IDENTITY_CHECK=git_sha_matches_certified:FAIL\n'; identity_failures=$((identity_failures+1)); }
+          [[ "$LIVE_APP_BUILD_ID" = "$CERTIFIED_BUILD_ID" ]] || { printf 'IDENTITY_CHECK=live_build_matches_certified:FAIL\n'; identity_failures=$((identity_failures+1)); }
+          if (( identity_failures == 0 )); then printf 'IDENTITY_PRE_PM2_CHECKS=PASS\n'; else printf 'IDENTITY_PRE_PM2_CHECKS=FAIL count=%s\n' "$identity_failures"; exit 41; fi
 
           PM2_SNAPSHOT="$(mktemp)"
           trap 'rm -f "$PM2_SNAPSHOT"' EXIT
@@ -109,15 +119,26 @@ jobs:
           const fs=require('node:fs');
           const rows=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
           const p=rows.find(x=>x.name==='sikhadenge-whatsapp-agent');
-          if(!p) process.exit(1);
+          if(!p){ process.stdout.write('||'); process.exit(0); }
           process.stdout.write([p.pid||'',p.pm2_env?.status||'',p.pm2_env?.pm_cwd||''].join('|'));
           NODE
           )
-          test "$START_PM2_STATUS" = "online"
-          test -n "$START_PM2_PID"
-          test "$START_PM2_CWD" = "$CERTIFIED_PM2_CWD"
-          test -f "$START_PM2_CWD/.next/BUILD_ID"
-          test "$(cat "$START_PM2_CWD/.next/BUILD_ID")" = "$CERTIFIED_BUILD_ID"
+          RUNTIME_BUILD_ID=""
+          if [[ -n "$START_PM2_CWD" && -f "$START_PM2_CWD/.next/BUILD_ID" ]]; then
+            RUNTIME_BUILD_ID="$(cat "$START_PM2_CWD/.next/BUILD_ID")"
+          fi
+          printf 'IDENTITY_START_PM2_PID=%s\n' "$START_PM2_PID"
+          printf 'IDENTITY_START_PM2_STATUS=%s\n' "$START_PM2_STATUS"
+          printf 'IDENTITY_START_PM2_CWD=%s\n' "$START_PM2_CWD"
+          printf 'IDENTITY_RUNTIME_BUILD_ID=%s\n' "$RUNTIME_BUILD_ID"
+
+          pm2_identity_failures=0
+          [[ "$START_PM2_STATUS" = "online" ]] || { printf 'IDENTITY_CHECK=live_pm2_online:FAIL\n'; pm2_identity_failures=$((pm2_identity_failures+1)); }
+          [[ -n "$START_PM2_PID" ]] || { printf 'IDENTITY_CHECK=live_pm2_pid_present:FAIL\n'; pm2_identity_failures=$((pm2_identity_failures+1)); }
+          [[ "$START_PM2_CWD" = "$CERTIFIED_PM2_CWD" ]] || { printf 'IDENTITY_CHECK=pm2_cwd_matches_certified:FAIL\n'; pm2_identity_failures=$((pm2_identity_failures+1)); }
+          [[ -f "$START_PM2_CWD/.next/BUILD_ID" ]] || { printf 'IDENTITY_CHECK=runtime_build_file_present:FAIL\n'; pm2_identity_failures=$((pm2_identity_failures+1)); }
+          [[ "$RUNTIME_BUILD_ID" = "$CERTIFIED_BUILD_ID" ]] || { printf 'IDENTITY_CHECK=runtime_build_matches_certified:FAIL\n'; pm2_identity_failures=$((pm2_identity_failures+1)); }
+          if (( pm2_identity_failures == 0 )); then printf 'IDENTITY_PM2_CHECKS=PASS\n'; else printf 'IDENTITY_PM2_CHECKS=FAIL count=%s\n' "$pm2_identity_failures"; exit 42; fi
 
           printf 'DISCOVERED_DEPLOYED_SHA=%s\n' "$DEPLOYED_SHA"
           printf 'CERTIFIED_BUILD_ID=%s\n' "$CERTIFIED_BUILD_ID"
@@ -143,7 +164,7 @@ jobs:
           const fs=require('node:fs');
           const rows=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
           const p=rows.find(x=>x.name==='sikhadenge-whatsapp-agent');
-          if(!p) process.exit(1);
+          if(!p){ process.stdout.write('||'); process.exit(0); }
           process.stdout.write([p.pid||'',p.pm2_env?.status||'',p.pm2_env?.pm_cwd||''].join('|'));
           NODE
           )
