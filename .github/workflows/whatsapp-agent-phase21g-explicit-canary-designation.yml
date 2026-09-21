@@ -148,11 +148,63 @@ jobs:
           test -n "$DATABASE_URL"
 
           cd "$APP"
+          DB="$(node scripts/prisma-postgres-cli-url.mjs "$DATABASE_URL")"
+
+          selected_operator_role="$(psql "$DB" -X -v ON_ERROR_STOP=1 -At -c "
+            SELECT m.role
+            FROM \"EngageWorkspaceMembership\" m
+            JOIN \"DashboardUser\" u ON u.id = m.\"userId\"
+            JOIN \"EngageWorkspace\" w ON w.id = m.\"workspaceId\"
+            WHERE m.\"workspaceId\" = 'engagews_default'
+              AND m.\"isActive\" = true
+              AND u.\"isActive\" = true
+              AND w.\"isActive\" = true
+            ORDER BY m.role ASC, m.\"createdAt\" ASC
+            LIMIT 1;")"
+          [[ "$selected_operator_role" =~ ^(ADMIN|MANAGER|COUNSELOR)$ ]]
+          printf 'SELECTED_AUDIT_OPERATOR_ROLE=%s\n' "$selected_operator_role"
+
+          canary_contact_count="$(psql "$DB" -X -v ON_ERROR_STOP=1 -At -c "
+            SELECT COUNT(DISTINCT c.id)
+            FROM \"WhatsAppContact\" c
+            JOIN \"EngageChannelConnection\" ec
+              ON ec.id = c.\"metadata\" #>> '{engageos,whatsappIdentity,connectionId}'
+             AND ec.\"workspaceId\" = 'engagews_default'
+             AND ec.channel = 'WHATSAPP'
+             AND ec.status IN ('CONNECTED','DEGRADED')
+            WHERE c.\"waId\" = '$PHASE21G_CANARY_WA_ID'
+              AND c.\"metadata\" #>> '{engageos,whatsappIdentity,workspaceId}' = 'engagews_default'
+              AND EXISTS (
+                SELECT 1 FROM \"WhatsAppConversation\" wc
+                WHERE wc.\"contactId\" = c.id
+                  AND lower(coalesce(wc.source,'whatsapp')) = 'whatsapp'
+              );")"
+          printf 'VERIFIED_CANARY_CONTACT_COUNT=%s\n' "$canary_contact_count"
+          test "$canary_contact_count" = "1"
+
           npm exec -- tsx tests/whatsapp-phase21g-explicit-canary-designation-certification.test.ts
           PHASE21G_CANARY_WA_ID="$PHASE21G_CANARY_WA_ID" \
           PHASE21G_VERIFIED_CANARY_WA_ID="$PHASE21G_VERIFIED_CANARY_WA_ID" \
           PHASE21G_CONFIRM="$PHASE21G_CONFIRM" \
           npm exec -- tsx scripts/whatsapp-phase21g-designate-internal-canary.ts
+
+          designation_count="$(psql "$DB" -X -v ON_ERROR_STOP=1 -At -c "
+            SELECT COUNT(DISTINCT c.id)
+            FROM \"WhatsAppContact\" c
+            WHERE c.\"waId\" = '$PHASE21G_CANARY_WA_ID'
+              AND c.\"metadata\" #>> '{engageos,canary,designated}' = 'true'
+              AND c.\"metadata\" #>> '{engageos,canary,kind}' = 'INTERNAL_TEST'
+              AND EXISTS (
+                SELECT 1
+                FROM \"WhatsAppConversation\" wc
+                JOIN \"ConversationTagLink\" ctl ON ctl.\"conversationId\" = wc.id
+                JOIN \"ConversationTag\" ct ON ct.id = ctl.\"tagId\"
+                WHERE wc.\"contactId\" = c.id
+                  AND ct.name = 'CANARY_INTERNAL_TEST'
+              );")"
+          printf 'DESIGNATED_CANARY_POSTCONDITION_COUNT=%s\n' "$designation_count"
+          test "$designation_count" = "1"
+
           printf 'PM2_RUNTIME_FLAGS_MUTATED=false\n'
           printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
           REMOTE
