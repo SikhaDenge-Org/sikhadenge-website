@@ -3,6 +3,7 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
+  TemplateStatus,
 } from "@prisma/client";
 
 import { prisma } from "@/lib/db/prisma";
@@ -82,6 +83,15 @@ function compactPreview(value: string | null): string {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 120);
+}
+
+function hasTemplateVariables(value: unknown): boolean {
+  if (typeof value === "string") return /{{\s*\d+\s*}}/.test(value);
+  if (Array.isArray(value)) return value.some(hasTemplateVariables);
+  if (value && typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).some(hasTemplateVariables);
+  }
+  return false;
 }
 
 function assertShadowBaseline(
@@ -178,8 +188,11 @@ async function resolveTarget(
       text: true,
       createdAt: true,
       messageTimestamp: true,
+      rawPayload: true,
       conversation: {
         select: {
+          source: true,
+          tags: { select: { tag: { select: { name: true } } } },
           contact: {
             select: {
               id: true,
@@ -197,8 +210,68 @@ async function resolveTarget(
   if (message.status !== MessageStatus.QUEUED) {
     throw new Error(`Canary target is ${message.status}, not QUEUED.`);
   }
-  if (message.type !== MessageType.TEXT) {
-    throw new Error("Initial controlled canary is restricted to a single TEXT message.");
+  const contactMetadata =
+    message.conversation.contact.metadata &&
+    typeof message.conversation.contact.metadata === "object" &&
+    !Array.isArray(message.conversation.contact.metadata)
+      ? (message.conversation.contact.metadata as Record<string, unknown>)
+      : {};
+  const engageos =
+    contactMetadata.engageos &&
+    typeof contactMetadata.engageos === "object" &&
+    !Array.isArray(contactMetadata.engageos)
+      ? (contactMetadata.engageos as Record<string, unknown>)
+      : {};
+  const canary =
+    engageos.canary && typeof engageos.canary === "object" && !Array.isArray(engageos.canary)
+      ? (engageos.canary as Record<string, unknown>)
+      : {};
+  const rawPayload =
+    message.rawPayload && typeof message.rawPayload === "object" && !Array.isArray(message.rawPayload)
+      ? (message.rawPayload as Record<string, unknown>)
+      : {};
+  const outbound =
+    rawPayload.outbound && typeof rawPayload.outbound === "object" && !Array.isArray(rawPayload.outbound)
+      ? (rawPayload.outbound as Record<string, unknown>)
+      : {};
+  const source = message.conversation.source?.trim().toLowerCase() || "whatsapp";
+  const hasCanaryTag = message.conversation.tags.some((link) => link.tag.name === "CANARY_INTERNAL_TEST");
+  const templateId = typeof outbound.templateId === "string" ? outbound.templateId : "";
+  const template =
+    message.type === MessageType.TEMPLATE && templateId
+      ? await prisma.whatsAppTemplate.findUnique({
+          where: { id: templateId },
+          select: {
+            id: true,
+            name: true,
+            language: true,
+            status: true,
+            components: true,
+          },
+        })
+      : null;
+  const currentTemplateApproved =
+    template?.id === templateId &&
+    template.name === "hello_world" &&
+    template.language === "en_US" &&
+    template.status === TemplateStatus.APPROVED &&
+    !hasTemplateVariables(template.components);
+
+  const isPhase22DTemplate =
+    message.type === MessageType.TEMPLATE &&
+    canary.designated === true &&
+    canary.kind === "INTERNAL_TEST" &&
+    source === "whatsapp" &&
+    hasCanaryTag &&
+    outbound.templateName === "hello_world" &&
+    typeof outbound.idempotencyKey === "string" &&
+    outbound.idempotencyKey.startsWith("phase22d-internal-canary:") &&
+    currentTemplateApproved;
+
+  if (message.type !== MessageType.TEXT && !isPhase22DTemplate) {
+    throw new Error(
+      "Controlled canary allows TEXT or the exact designated Phase22D hello_world template only.",
+    );
   }
   if (message.actor !== MessageActor.COUNSELOR) {
     throw new Error("Initial controlled canary must be a counselor-authored message.");
