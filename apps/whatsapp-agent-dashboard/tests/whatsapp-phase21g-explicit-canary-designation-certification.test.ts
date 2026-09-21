@@ -14,6 +14,7 @@ assert.match(source, /CANARY_INTERNAL_TEST/);
 assert.match(source, /whatsAppConversation\.create/);
 assert.match(source, /source: "whatsapp"/);
 assert.match(source, /conversationCreated/);
+assert.match(source, /conversation\.source\?\.trim\(\)\.toLowerCase\(\) \|\| "whatsapp"/);
 assert.match(source, /serviceWindowProvisioned: false/);
 assert.match(source, /Provisioned canary conversation must not contain any messages/);
 assert.match(source, /workspaceId !== WORKSPACE_ID/);
