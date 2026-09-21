@@ -1,3 +1,4 @@
+# Email DRY_RUN scheduler activation checkpoint: 2026-09-21
 name: WhatsApp Agent Email DRY_RUN Activation
 
 on:
