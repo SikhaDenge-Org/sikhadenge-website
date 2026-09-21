@@ -36,6 +36,7 @@ jobs:
       EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
       RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
       PHASE21G_CANARY_WA_ID: ${{ inputs.canary_wa_id }}
+      PHASE21G_VERIFIED_CANARY_WA_ID: ${{ secrets.WHATSAPP_INTERNAL_CANARY_WA_ID }}
       PHASE21G_CONFIRM: ${{ inputs.confirmation }}
 
     steps:
@@ -47,6 +48,8 @@ jobs:
           set -Eeuo pipefail
           [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$PHASE21G_CANARY_WA_ID" =~ ^[0-9]{6,20}$ ]]
+          [[ "$PHASE21G_VERIFIED_CANARY_WA_ID" =~ ^[0-9]{6,20}$ ]]
+          test "$PHASE21G_CANARY_WA_ID" = "$PHASE21G_VERIFIED_CANARY_WA_ID"
           test "$PHASE21G_CONFIRM" = "DESIGNATE_INTERNAL_CANARY"
           release_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/$RELEASE_BRANCH" --jq '.commit.sha')"
           test "$release_sha" = "$EXPECTED_LIVE_SHA"
@@ -79,7 +82,7 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
             "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' PHASE21G_CANARY_WA_ID='$PHASE21G_CANARY_WA_ID' PHASE21G_CONFIRM='$PHASE21G_CONFIRM' bash -s" <<'REMOTE' | tee phase21g-canary-designation.txt
+            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' PHASE21G_CANARY_WA_ID='$PHASE21G_CANARY_WA_ID' PHASE21G_VERIFIED_CANARY_WA_ID='$PHASE21G_VERIFIED_CANARY_WA_ID' PHASE21G_CONFIRM='$PHASE21G_CONFIRM' bash -s" <<'REMOTE' | tee phase21g-canary-designation.txt
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           ENV_FILE="$APP/.env"
@@ -119,6 +122,7 @@ jobs:
           cd "$APP"
           npm exec -- tsx tests/whatsapp-phase21g-explicit-canary-designation-certification.test.ts
           PHASE21G_CANARY_WA_ID="$PHASE21G_CANARY_WA_ID" \
+          PHASE21G_VERIFIED_CANARY_WA_ID="$PHASE21G_VERIFIED_CANARY_WA_ID" \
           PHASE21G_CONFIRM="$PHASE21G_CONFIRM" \
           npm exec -- tsx scripts/whatsapp-phase21g-designate-internal-canary.ts
           printf 'PM2_RUNTIME_FLAGS_MUTATED=false\n'
