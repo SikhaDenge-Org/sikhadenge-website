@@ -113,11 +113,11 @@ jobs:
           test -f "$local_script"
           remote_script="/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard/scripts/.phase22d-canary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.ts"
           script_sha="$(sha256sum "$local_script" | awk '{print $1}')"
-          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \\
-            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \\
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
             "$SSH_USER@$SSH_HOST" "cat > '$remote_script'" < "$local_script"
-          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \\
-            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \\
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
             "$SSH_USER@$SSH_HOST" "test -f '$remote_script' && test \"\$(sha256sum '$remote_script' | cut -d ' ' -f1)\" = '$script_sha'"
           printf 'REVIEWED_CANARY_SCRIPT_REMOTE=%s\n' "$remote_script" >> "$GITHUB_ENV"
           printf 'REVIEWED_CANARY_SCRIPT_SHA256=%s\n' "$script_sha" >> "$GITHUB_ENV"
