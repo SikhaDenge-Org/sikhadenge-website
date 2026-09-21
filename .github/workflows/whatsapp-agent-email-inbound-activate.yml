@@ -36,6 +36,33 @@ jobs:
       ACTIVATION_ACCOUNT: support@sikhadenge.in
       ACTIVATION_WORKSPACE_ID: engagews_default
     steps:
+      - name: Checkout reviewed release source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build critical Email runtime parity manifest
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          declare -A files=(
+            [EXPECTED_ACTIVATE_SH]="apps/whatsapp-agent-dashboard/scripts/email-inbound-production-activate.sh"
+            [EXPECTED_ACTIVATE_TS]="apps/whatsapp-agent-dashboard/scripts/email-inbound-production-activate.ts"
+            [EXPECTED_READINESS_TS]="apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts"
+            [EXPECTED_GMAIL_SERVICE]="apps/whatsapp-agent-dashboard/modules/email-automation/inbound/gmail-inbound-service.ts"
+            [EXPECTED_GMAIL_ADAPTER]="apps/whatsapp-agent-dashboard/modules/email-automation/providers/gmail/gmail-adapter.ts"
+            [EXPECTED_EMAIL_SCHEDULER]="apps/whatsapp-agent-dashboard/modules/email-automation/automation/scheduler.ts"
+            [EXPECTED_PROCESS_ROUTE]="apps/whatsapp-agent-dashboard/app/api/internal/email/automation/process/route.ts"
+            [EXPECTED_SCHEDULER_VERIFY]="apps/whatsapp-agent-dashboard/scripts/email-automation-scheduler-verify.sh"
+          )
+          for variable_name in "${!files[@]}"; do
+            file="${files[$variable_name]}"
+            test -f "$file"
+            blob="$(git hash-object "$file")"
+            [[ "$blob" =~ ^[0-9a-f]{40}$ ]]
+            printf '%s=%s\n' "$variable_name" "$blob" >> "$GITHUB_ENV"
+          done
+
       - name: Validate trigger and production secrets
         shell: bash
         run: |
@@ -71,7 +98,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" \
-            "REQUESTED_DEPLOYED_SHA='$REQUESTED_DEPLOYED_SHA' RUN_ID='$ACTIVATION_RUN_ID' ACCOUNT='$ACTIVATION_ACCOUNT' WORKSPACE_ID='$ACTIVATION_WORKSPACE_ID' bash -s" <<'REMOTE' | tee email-inbound-activation.log
+            "REQUESTED_DEPLOYED_SHA='$REQUESTED_DEPLOYED_SHA' RUN_ID='$ACTIVATION_RUN_ID' ACCOUNT='$ACTIVATION_ACCOUNT' WORKSPACE_ID='$ACTIVATION_WORKSPACE_ID' EXPECTED_ACTIVATE_SH='$EXPECTED_ACTIVATE_SH' EXPECTED_ACTIVATE_TS='$EXPECTED_ACTIVATE_TS' EXPECTED_READINESS_TS='$EXPECTED_READINESS_TS' EXPECTED_GMAIL_SERVICE='$EXPECTED_GMAIL_SERVICE' EXPECTED_GMAIL_ADAPTER='$EXPECTED_GMAIL_ADAPTER' EXPECTED_EMAIL_SCHEDULER='$EXPECTED_EMAIL_SCHEDULER' EXPECTED_PROCESS_ROUTE='$EXPECTED_PROCESS_ROUTE' EXPECTED_SCHEDULER_VERIFY='$EXPECTED_SCHEDULER_VERIFY' bash -s" <<'REMOTE' | tee email-inbound-activation.log
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           test "$(id -u)" = "0"
@@ -126,6 +153,31 @@ jobs:
           printf 'DISCOVERED_DEPLOYED_SHA=%s\n' "$DEPLOYED_SHA"
           printf 'CERTIFIED_BUILD_ID=%s\n' "$CERTIFIED_BUILD_ID"
           printf 'START_PM2_PID=%s\n' "$START_PM2_PID"
+
+          declare -A critical_files=(
+            [EXPECTED_ACTIVATE_SH]="scripts/email-inbound-production-activate.sh"
+            [EXPECTED_ACTIVATE_TS]="scripts/email-inbound-production-activate.ts"
+            [EXPECTED_READINESS_TS]="scripts/email-inbound-production-readiness.ts"
+            [EXPECTED_GMAIL_SERVICE]="modules/email-automation/inbound/gmail-inbound-service.ts"
+            [EXPECTED_GMAIL_ADAPTER]="modules/email-automation/providers/gmail/gmail-adapter.ts"
+            [EXPECTED_EMAIL_SCHEDULER]="modules/email-automation/automation/scheduler.ts"
+            [EXPECTED_PROCESS_ROUTE]="app/api/internal/email/automation/process/route.ts"
+            [EXPECTED_SCHEDULER_VERIFY]="scripts/email-automation-scheduler-verify.sh"
+          )
+          parity_failures=0
+          for variable_name in "${!critical_files[@]}"; do
+            relative="${critical_files[$variable_name]}"
+            expected="${!variable_name:-}"
+            actual="$(git hash-object "$relative" 2>/dev/null || true)"
+            if [[ ! "$expected" =~ ^[0-9a-f]{40}$ || "$actual" != "$expected" ]]; then
+              printf 'CRITICAL_PARITY=FAIL variable=%s file=%s expected=%s actual=%s\n' "$variable_name" "$relative" "$expected" "$actual"
+              parity_failures=$((parity_failures+1))
+            else
+              printf 'CRITICAL_PARITY=PASS file=%s blob=%s\n' "$relative" "$actual"
+            fi
+          done
+          (( parity_failures == 0 )) || exit 43
+          printf 'CRITICAL_EMAIL_RUNTIME_PARITY=PASS\n'
 
           APPLY=1 LIVE_APP="$APP" ENV_FILE="$APP/.env" EXPECTED_RELEASE_SHA="$DEPLOYED_SHA" RUN_ID="$RUN_ID" \
             EMAIL_INBOUND_ACTIVATION_ACCOUNT="$ACCOUNT" EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID="$WORKSPACE_ID" bash scripts/email-inbound-production-activate.sh
