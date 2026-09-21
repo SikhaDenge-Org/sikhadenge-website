@@ -19,7 +19,7 @@ permissions:
 jobs:
   email-e6e7-production-readiness:
     concurrency:
-      group: whatsapp-agent-production
+      group: whatsapp-agent-email-e6e7-readiness
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -85,6 +85,7 @@ jobs:
             test "$DEPLOYED_SHA" = "$REQUESTED_DEPLOYED_SHA"
           fi
           printf 'DISCOVERED_DEPLOYED_SHA=%s\n' "$DEPLOYED_SHA"
+          START_DEPLOYED_SHA="$DEPLOYED_SHA"
           install -d -m 700 "$BACKUP"
           set -a
           source "$APP/.env"
@@ -96,11 +97,21 @@ jobs:
           EMAIL_E6E7_WORKSPACE_ID=engagews_default npx tsx scripts/email-e6e7-production-readiness.ts | tee "$BACKUP/email-e6e7-readiness.json"
           readiness_code=${PIPESTATUS[0]}
           set -e
+          END_DEPLOYED_SHA="$(git rev-parse HEAD)"
+          deploy_stable_code=0
+          if [[ "$END_DEPLOYED_SHA" != "$START_DEPLOYED_SHA" ]]; then
+            printf 'DEPLOYED_SHA_CHANGED_DURING_AUDIT start=%s end=%s\n' "$START_DEPLOYED_SHA" "$END_DEPLOYED_SHA" >&2
+            deploy_stable_code=3
+          fi
           {
             printf 'SCHEDULER_EXIT_CODE=%s\n' "$scheduler_code"
             printf 'READINESS_EXIT_CODE=%s\n' "$readiness_code"
+            printf 'DEPLOY_STABLE_EXIT_CODE=%s\n' "$deploy_stable_code"
+            printf 'START_DEPLOYED_SHA=%s\n' "$START_DEPLOYED_SHA"
+            printf 'END_DEPLOYED_SHA=%s\n' "$END_DEPLOYED_SHA"
           } > "$BACKUP/email-e6e7-readiness-result.txt"
           chmod 600 "$BACKUP"/*
+          if (( deploy_stable_code != 0 )); then exit "$deploy_stable_code"; fi
           if (( scheduler_code != 0 )); then exit "$scheduler_code"; fi
           exit "$readiness_code"
           REMOTE
@@ -137,7 +148,9 @@ jobs:
             printf -- '- Audited SHA: `%s`\n' "$audited_sha"
             if [[ -s "$result" ]]; then
               scheduler_exit="$(awk -F= '$1=="SCHEDULER_EXIT_CODE"{print $2}' "$result")"
+              deploy_stable_exit="$(awk -F= '$1=="DEPLOY_STABLE_EXIT_CODE"{print $2}' "$result")"
               printf -- '- Live scheduler verification exit: `%s`\n' "${scheduler_exit:-unknown}"
+              printf -- '- Deployment stable during audit: `%s`\n' "$( [[ "${deploy_stable_exit:-1}" == "0" ]] && echo true || echo false )"
             fi
             if [[ -s "$json" ]]; then
               status="$(jq -r '.status' "$json")"
