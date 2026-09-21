@@ -225,6 +225,7 @@ jobs:
                 JOIN \"ConversationTagLink\" ctl ON ctl.\"conversationId\" = wc.id
                 JOIN \"ConversationTag\" ct ON ct.id = ctl.\"tagId\"
                 WHERE wc.\"contactId\" = c.id
+                  AND lower(coalesce(wc.source,'whatsapp')) = 'whatsapp'
                   AND ct.name = 'CANARY_INTERNAL_TEST'
               );")"
           printf 'DESIGNATED_CANARY_POSTCONDITION_COUNT=%s\n' "$designation_count"
