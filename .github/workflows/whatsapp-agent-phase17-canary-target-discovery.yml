@@ -259,17 +259,18 @@ jobs:
               ORDER BY wc."lastMessageAt" DESC NULLS LAST, wc."createdAt" DESC
               LIMIT 1
             ) conv ON true
-            WHERE c."waId" = :'verified_canary_wa_id'
+            WHERE c."waId" = '__VERIFIED_CANARY_WA_ID__'
               AND u."isActive" = true
               AND c."metadata" #>> '{engageos,whatsappIdentity,workspaceId}' = 'engagews_default';
           SQL
           )
 
             printf 'VERIFIED_OPERATOR_MATCH_BEGIN\n'
-            psql "$DB" -X -v ON_ERROR_STOP=1 -v verified_canary_wa_id="$VERIFIED_CANARY_WA_ID" -A -F '|' -c "$verified_match_sql"
+            verified_match_sql="${verified_match_sql//__VERIFIED_CANARY_WA_ID__/$VERIFIED_CANARY_WA_ID}"
+            psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -c "$verified_match_sql"
             printf 'VERIFIED_OPERATOR_MATCH_END\n'
 
-            verified_count="$(psql "$DB" -X -v ON_ERROR_STOP=1 -v verified_canary_wa_id="$VERIFIED_CANARY_WA_ID" -At -c "
+            verified_count="$(psql "$DB" -X -v ON_ERROR_STOP=1 -At -c "
               SELECT COUNT(DISTINCT c.id)
               FROM \"WhatsAppContact\" c
               JOIN \"DashboardUser\" u
@@ -288,7 +289,7 @@ jobs:
                AND ec.\"workspaceId\" = 'engagews_default'
                AND ec.channel = 'WHATSAPP'
                AND ec.status IN ('CONNECTED','DEGRADED')
-              WHERE c.\"waId\" = :'verified_canary_wa_id'
+              WHERE c.\"waId\" = '$VERIFIED_CANARY_WA_ID'
                 AND u.\"isActive\" = true
                 AND c.\"metadata\" #>> '{engageos,whatsappIdentity,workspaceId}' = 'engagews_default'
                 AND EXISTS (
