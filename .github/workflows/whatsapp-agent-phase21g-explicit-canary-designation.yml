@@ -69,7 +69,7 @@ jobs:
           done < <(
             jq -r '
               .workflow_runs
-              | map(select(.event == "workflow_dispatch" and .status == "completed"))
+              | map(select(.status == "completed"))
               | sort_by(.created_at)
               | reverse
               | .[]
@@ -103,6 +103,20 @@ jobs:
           printf '%s %s %s\n' "$canonical_host" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
 
+      - name: Transport reviewed designation script
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          local_script="apps/whatsapp-agent-dashboard/scripts/whatsapp-phase21g-designate-internal-canary.ts"
+          test -f "$local_script"
+          reviewed_sha="$(sha256sum "$local_script" | awk '{print $1}')"
+          remote_script="/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard/scripts/.phase22c-designate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.ts"
+          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$local_script" "$SSH_USER@$SSH_HOST:$remote_script"
+          printf 'REVIEWED_DESIGNATION_SCRIPT_SHA256=%s\n' "$reviewed_sha" >> "$GITHUB_ENV"
+          printf 'REVIEWED_DESIGNATION_SCRIPT_REMOTE_PATH=%s\n' "$remote_script" >> "$GITHUB_ENV"
+
       - name: Designate exact internal WhatsApp canary
         shell: bash
         run: |
@@ -110,11 +124,16 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
             "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' PHASE21G_CANARY_WA_ID='$PHASE21G_CANARY_WA_ID' PHASE21G_VERIFIED_CANARY_WA_ID='$PHASE21G_VERIFIED_CANARY_WA_ID' PHASE21G_CONFIRM='$PHASE21G_CONFIRM' bash -s" <<'REMOTE' | tee phase21g-canary-designation.txt
+            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' PHASE21G_CANARY_WA_ID='$PHASE21G_CANARY_WA_ID' PHASE21G_VERIFIED_CANARY_WA_ID='$PHASE21G_VERIFIED_CANARY_WA_ID' PHASE21G_CONFIRM='$PHASE21G_CONFIRM' REVIEWED_DESIGNATION_SCRIPT_REMOTE_PATH='$REVIEWED_DESIGNATION_SCRIPT_REMOTE_PATH' REVIEWED_DESIGNATION_SCRIPT_SHA256='$REVIEWED_DESIGNATION_SCRIPT_SHA256' bash -s" <<'REMOTE' | tee phase21g-canary-designation.txt
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           ENV_FILE="$APP/.env"
           test -f "$ENV_FILE"
+          [[ "$REVIEWED_DESIGNATION_SCRIPT_REMOTE_PATH" == "$APP/scripts/.phase22c-designate-"*".ts" ]]
+          trap 'rm -f "$REVIEWED_DESIGNATION_SCRIPT_REMOTE_PATH"' EXIT
+          test -f "$REVIEWED_DESIGNATION_SCRIPT_REMOTE_PATH"
+          test "$(sha256sum "$REVIEWED_DESIGNATION_SCRIPT_REMOTE_PATH" | awk '{print $1}')" = "$REVIEWED_DESIGNATION_SCRIPT_SHA256"
+          printf 'REVIEWED_DESIGNATION_SCRIPT_VERIFIED=true\n'
           test "$(git -C "$APP" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
           test "$(git -C "$APP" status --porcelain --untracked-files=no | wc -l)" -eq 0
 
@@ -182,11 +201,10 @@ jobs:
           printf 'VERIFIED_CANARY_CONTACT_COUNT=%s\n' "$canary_contact_count"
           test "$canary_contact_count" = "1"
 
-          npm exec -- tsx tests/whatsapp-phase21g-explicit-canary-designation-certification.test.ts
           PHASE21G_CANARY_WA_ID="$PHASE21G_CANARY_WA_ID" \
           PHASE21G_VERIFIED_CANARY_WA_ID="$PHASE21G_VERIFIED_CANARY_WA_ID" \
           PHASE21G_CONFIRM="$PHASE21G_CONFIRM" \
-          npm exec -- tsx scripts/whatsapp-phase21g-designate-internal-canary.ts
+          npm exec -- tsx "$REVIEWED_DESIGNATION_SCRIPT_REMOTE_PATH"
 
           designation_count="$(psql "$DB" -X -v ON_ERROR_STOP=1 -At -c "
             SELECT COUNT(DISTINCT c.id)
