@@ -32,17 +32,17 @@ jobs:
       RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
 
     steps:
-      - name: Validate exact protected release SHA
+      - name: Checkout reviewed operator code
+        uses: actions/checkout@v4
+
+      - name: Validate exact targeted-canary inputs
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
           [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$PHASE21G_SOURCE_EVENT_ID" == phase21g-canary:* ]]
           [[ "$PHASE21G_VERIFIED_CANARY_WA_ID" =~ ^[0-9]{6,20}$ ]]
-          release_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/$RELEASE_BRANCH" --jq '.commit.sha')"
-          test "$release_sha" = "$EXPECTED_LIVE_SHA"
+          printf 'PASS: PHASE21G_TARGETED_INPUT_GATE\n'
 
       - name: Configure pinned production SSH
         shell: bash
@@ -79,19 +79,66 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
           ssh-keygen -F "$canonical_host" -f "$HOME/.ssh/known_hosts" >/dev/null
 
+      - name: Verify exact live production SHA
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          live_sha="$(ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" \
+            "git -C /var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard rev-parse HEAD")"
+          printf 'LIVE_SHA=%s\n' "$live_sha"
+          test "$live_sha" = "$EXPECTED_LIVE_SHA"
+          printf 'PASS: EXACT_LIVE_SHA_VERIFIED\n'
+
+      - name: Transport reviewed targeted canary scripts
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          enqueue_local="apps/whatsapp-agent-dashboard/scripts/whatsapp-phase21g-targeted-canary-enqueue.ts"
+          verify_local="apps/whatsapp-agent-dashboard/scripts/whatsapp-phase21g-targeted-canary-verify.ts"
+          test -f "$enqueue_local"
+          test -f "$verify_local"
+
+          enqueue_sha="$(sha256sum "$enqueue_local" | awk '{print $1}')"
+          verify_sha="$(sha256sum "$verify_local" | awk '{print $1}')"
+          enqueue_remote="/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard/scripts/.phase22c-targeted-enqueue-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.ts"
+          verify_remote="/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard/scripts/.phase22c-targeted-verify-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.ts"
+
+          printf 'REVIEWED_ENQUEUE_REMOTE=%s\n' "$enqueue_remote" >> "$GITHUB_ENV"
+          printf 'REVIEWED_VERIFY_REMOTE=%s\n' "$verify_remote" >> "$GITHUB_ENV"
+          printf 'REVIEWED_ENQUEUE_SHA256=%s\n' "$enqueue_sha" >> "$GITHUB_ENV"
+          printf 'REVIEWED_VERIFY_SHA256=%s\n' "$verify_sha" >> "$GITHUB_ENV"
+
+          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$enqueue_local" "$SSH_USER@$SSH_HOST:$enqueue_remote"
+          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$verify_local" "$SSH_USER@$SSH_HOST:$verify_remote"
+
+
       - name: Execute targeted scheduler canary
         shell: bash
         run: |
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
-            "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' PHASE21G_SOURCE_EVENT_ID='$PHASE21G_SOURCE_EVENT_ID' PHASE21G_VERIFIED_CANARY_WA_ID='$PHASE21G_VERIFIED_CANARY_WA_ID' bash -s" <<'REMOTE' | tee phase21g-targeted-scheduler-canary.txt
+            "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' PHASE21G_SOURCE_EVENT_ID='$PHASE21G_SOURCE_EVENT_ID' PHASE21G_VERIFIED_CANARY_WA_ID='$PHASE21G_VERIFIED_CANARY_WA_ID' REVIEWED_ENQUEUE_REMOTE='$REVIEWED_ENQUEUE_REMOTE' REVIEWED_VERIFY_REMOTE='$REVIEWED_VERIFY_REMOTE' REVIEWED_ENQUEUE_SHA256='$REVIEWED_ENQUEUE_SHA256' REVIEWED_VERIFY_SHA256='$REVIEWED_VERIFY_SHA256' bash -s" <<'REMOTE' | tee phase21g-targeted-scheduler-canary.txt
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           ENV_FILE="$APP/.env"
           PROCESS=sikhadenge-whatsapp-automation-scheduler
 
           test -f "$ENV_FILE"
+          [[ "$REVIEWED_ENQUEUE_REMOTE" == "$APP/scripts/.phase22c-targeted-enqueue-"*".ts" ]]
+          [[ "$REVIEWED_VERIFY_REMOTE" == "$APP/scripts/.phase22c-targeted-verify-"*".ts" ]]
+          trap 'rm -f "$REVIEWED_ENQUEUE_REMOTE" "$REVIEWED_VERIFY_REMOTE"' EXIT
+          test -f "$REVIEWED_ENQUEUE_REMOTE"
+          test -f "$REVIEWED_VERIFY_REMOTE"
+          test "$(sha256sum "$REVIEWED_ENQUEUE_REMOTE" | awk '{print $1}')" = "$REVIEWED_ENQUEUE_SHA256"
+          test "$(sha256sum "$REVIEWED_VERIFY_REMOTE" | awk '{print $1}')" = "$REVIEWED_VERIFY_SHA256"
+          printf 'REVIEWED_TARGETED_SCRIPTS_VERIFIED=true\n'
           test "$(git -C "$APP" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
           test "$(git -C "$APP" status --porcelain --untracked-files=no | wc -l)" -eq 0
           test -f "$APP/ecosystem.automation-scheduler.cjs"
@@ -178,6 +225,7 @@ jobs:
           }
           on_exit() {
             status=$?
+            rm -f "$REVIEWED_ENQUEUE_REMOTE" "$REVIEWED_VERIFY_REMOTE" || true
             if [[ "$cleanup_armed" = "true" && "$status" -ne 0 ]]; then
               trap - EXIT INT TERM
               if restore_fail_closed; then
@@ -199,7 +247,7 @@ jobs:
           npm exec -- tsx tests/whatsapp-phase21g-targeted-scheduler-certification.test.ts
           PHASE21G_SOURCE_EVENT_ID="$PHASE21G_SOURCE_EVENT_ID" \
           PHASE21G_VERIFIED_CANARY_WA_ID="$PHASE21G_VERIFIED_CANARY_WA_ID" \
-            npm exec -- tsx scripts/whatsapp-phase21g-targeted-canary-enqueue.ts
+            npm exec -- tsx "$REVIEWED_ENQUEUE_REMOTE"
 
           activation_at="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
           export NODE_ENV=production
@@ -226,7 +274,7 @@ jobs:
             if PHASE21G_SOURCE_EVENT_ID="$PHASE21G_SOURCE_EVENT_ID" \
                PHASE21G_VERIFIED_CANARY_WA_ID="$PHASE21G_VERIFIED_CANARY_WA_ID" \
                PHASE21G_ACTIVATION_AT="$activation_at" \
-               npm exec -- tsx scripts/whatsapp-phase21g-targeted-canary-verify.ts > /tmp/phase21g-verify.txt 2>&1; then
+               npm exec -- tsx "$REVIEWED_VERIFY_REMOTE" > /tmp/phase21g-verify.txt 2>&1; then
               verified=true
               break
             fi
@@ -276,11 +324,27 @@ jobs:
           printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
           pm2 save
           cleanup_armed=false
+          rm -f "$REVIEWED_ENQUEUE_REMOTE" "$REVIEWED_VERIFY_REMOTE"
           trap - EXIT INT TERM
           printf 'FAIL_CLOSED_CLEANUP_ARMED=false\n'
           printf 'ROLLBACK_CONTROLLER=WhatsApp_Automation_Scheduler_Activation\n'
           printf 'PASS: PHASE21G_TARGETED_SCHEDULER_CANARY\n'
           REMOTE
+
+      - name: Cleanup reviewed targeted canary scripts
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -n "${REVIEWED_ENQUEUE_REMOTE:-}" || -n "${REVIEWED_VERIFY_REMOTE:-}" ]]; then
+            if [[ -f "$HOME/.ssh/whatsapp-production" && -n "${SSH_HOST:-}" && -n "${SSH_USER:-}" && -n "${SSH_PORT:-}" ]]; then
+              ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+                -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 \
+                "$SSH_USER@$SSH_HOST" \
+                "rm -f '${REVIEWED_ENQUEUE_REMOTE:-}' '${REVIEWED_VERIFY_REMOTE:-}'" || true
+            fi
+          fi
+          exit 0
 
       - name: Upload targeted canary evidence
         if: always()
