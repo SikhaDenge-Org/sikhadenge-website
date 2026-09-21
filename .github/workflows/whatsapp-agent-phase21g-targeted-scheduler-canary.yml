@@ -23,6 +23,7 @@ jobs:
     env:
       EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
       PHASE21G_SOURCE_EVENT_ID: phase21g-canary:${{ github.run_id }}:${{ github.run_attempt }}:${{ inputs.expected_live_sha }}
+      PHASE21G_VERIFIED_CANARY_WA_ID: ${{ secrets.WHATSAPP_INTERNAL_CANARY_WA_ID }}
       SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
@@ -39,6 +40,7 @@ jobs:
           set -Eeuo pipefail
           [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$PHASE21G_SOURCE_EVENT_ID" == phase21g-canary:* ]]
+          [[ "$PHASE21G_VERIFIED_CANARY_WA_ID" =~ ^[0-9]{6,20}$ ]]
           release_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/$RELEASE_BRANCH" --jq '.commit.sha')"
           test "$release_sha" = "$EXPECTED_LIVE_SHA"
 
@@ -83,7 +85,7 @@ jobs:
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
-            "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' PHASE21G_SOURCE_EVENT_ID='$PHASE21G_SOURCE_EVENT_ID' bash -s" <<'REMOTE' | tee phase21g-targeted-scheduler-canary.txt
+            "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' PHASE21G_SOURCE_EVENT_ID='$PHASE21G_SOURCE_EVENT_ID' PHASE21G_VERIFIED_CANARY_WA_ID='$PHASE21G_VERIFIED_CANARY_WA_ID' bash -s" <<'REMOTE' | tee phase21g-targeted-scheduler-canary.txt
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           ENV_FILE="$APP/.env"
@@ -196,6 +198,7 @@ jobs:
           npm exec -- tsx tests/whatsapp-automation-scheduler-certification.test.ts
           npm exec -- tsx tests/whatsapp-phase21g-targeted-scheduler-certification.test.ts
           PHASE21G_SOURCE_EVENT_ID="$PHASE21G_SOURCE_EVENT_ID" \
+          PHASE21G_VERIFIED_CANARY_WA_ID="$PHASE21G_VERIFIED_CANARY_WA_ID" \
             npm exec -- tsx scripts/whatsapp-phase21g-targeted-canary-enqueue.ts
 
           activation_at="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
@@ -221,6 +224,7 @@ jobs:
           verified=false
           for attempt in $(seq 1 15); do
             if PHASE21G_SOURCE_EVENT_ID="$PHASE21G_SOURCE_EVENT_ID" \
+               PHASE21G_VERIFIED_CANARY_WA_ID="$PHASE21G_VERIFIED_CANARY_WA_ID" \
                PHASE21G_ACTIVATION_AT="$activation_at" \
                npm exec -- tsx scripts/whatsapp-phase21g-targeted-canary-verify.ts > /tmp/phase21g-verify.txt 2>&1; then
               verified=true
