@@ -3,6 +3,7 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
+  TemplateStatus,
 } from "@prisma/client";
 
 import { prisma } from "@/lib/db/prisma";
@@ -82,6 +83,15 @@ function compactPreview(value: string | null): string {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 120);
+}
+
+function hasTemplateVariables(value: unknown): boolean {
+  if (typeof value === "string") return /{{\s*\d+\s*}}/.test(value);
+  if (Array.isArray(value)) return value.some(hasTemplateVariables);
+  if (value && typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).some(hasTemplateVariables);
+  }
+  return false;
 }
 
 function assertShadowBaseline(
@@ -226,6 +236,27 @@ async function resolveTarget(
       : {};
   const source = message.conversation.source?.trim().toLowerCase() || "whatsapp";
   const hasCanaryTag = message.conversation.tags.some((link) => link.tag.name === "CANARY_INTERNAL_TEST");
+  const templateId = typeof outbound.templateId === "string" ? outbound.templateId : "";
+  const template =
+    message.type === MessageType.TEMPLATE && templateId
+      ? await prisma.whatsAppTemplate.findUnique({
+          where: { id: templateId },
+          select: {
+            id: true,
+            name: true,
+            language: true,
+            status: true,
+            components: true,
+          },
+        })
+      : null;
+  const currentTemplateApproved =
+    template?.id === templateId &&
+    template.name === "hello_world" &&
+    template.language === "en_US" &&
+    template.status === TemplateStatus.APPROVED &&
+    !hasTemplateVariables(template.components);
+
   const isPhase22DTemplate =
     message.type === MessageType.TEMPLATE &&
     canary.designated === true &&
@@ -234,7 +265,8 @@ async function resolveTarget(
     hasCanaryTag &&
     outbound.templateName === "hello_world" &&
     typeof outbound.idempotencyKey === "string" &&
-    outbound.idempotencyKey.startsWith("phase22d-internal-canary:");
+    outbound.idempotencyKey.startsWith("phase22d-internal-canary:") &&
+    currentTemplateApproved;
 
   if (message.type !== MessageType.TEXT && !isPhase22DTemplate) {
     throw new Error(
