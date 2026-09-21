@@ -136,6 +136,9 @@ jobs:
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           cd "$APP"
+          [[ "$REVIEWED_CANARY_SCRIPT_REMOTE" == "$APP/scripts/.phase22d-canary-"*".ts" ]]
+          test -f "$REVIEWED_CANARY_SCRIPT_REMOTE"
+          test "$(sha256sum "$REVIEWED_CANARY_SCRIPT_REMOTE" | awk '{print $1}')" = "$REVIEWED_CANARY_SCRIPT_SHA256"
 
           live_sha="$(git rev-parse HEAD)"
           dirty="$(git status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
@@ -235,6 +238,9 @@ jobs:
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           cd "$APP"
+          [[ "$REVIEWED_CANARY_SCRIPT_REMOTE" == "$APP/scripts/.phase22d-canary-"*".ts" ]]
+          test -f "$REVIEWED_CANARY_SCRIPT_REMOTE"
+          test "$(sha256sum "$REVIEWED_CANARY_SCRIPT_REMOTE" | awk '{print $1}')" = "$REVIEWED_CANARY_SCRIPT_SHA256"
           test "$(git rev-parse HEAD)" = "$EXPECTED_RELEASE_SHA"
           set -a
           source .env
@@ -286,6 +292,9 @@ jobs:
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           cd "$APP"
+          [[ "$REVIEWED_CANARY_SCRIPT_REMOTE" == "$APP/scripts/.phase22d-canary-"*".ts" ]]
+          test -f "$REVIEWED_CANARY_SCRIPT_REMOTE"
+          test "$(sha256sum "$REVIEWED_CANARY_SCRIPT_REMOTE" | awk '{print $1}')" = "$REVIEWED_CANARY_SCRIPT_SHA256"
           test "$(git rev-parse HEAD)" = "$EXPECTED_RELEASE_SHA"
           set -a
           source .env
