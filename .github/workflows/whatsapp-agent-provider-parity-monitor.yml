@@ -73,9 +73,21 @@ jobs:
         run: |
           set -Eeuo pipefail
           port="${SSH_PORT:-22}"
-          ssh -p "$port" -i "$HOME/.ssh/whatsapp-production" \
-            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-            "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          max_attempts=3
+
+          for attempt in $(seq 1 "$max_attempts"); do
+            printf 'SSH_TRANSPORT_ATTEMPT=%s/%s\n' "$attempt" "$max_attempts"
+
+            set +e
+            ssh -p "$port" -i "$HOME/.ssh/whatsapp-production" \
+              -o BatchMode=yes \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              -o ConnectTimeout=10 \
+              -o ConnectionAttempts=1 \
+              -o ServerAliveInterval=10 \
+              -o ServerAliveCountMax=1 \
+              "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           cd "$APP"
@@ -84,3 +96,24 @@ jobs:
           set +a
           npm run whatsapp:provider-parity-monitor
           REMOTE
+            ssh_code=$?
+            set -e
+
+            if [[ "$ssh_code" -eq 0 ]]; then
+              printf 'PROVIDER_PARITY_MONITOR=PASS\n'
+              exit 0
+            fi
+
+            if [[ "$ssh_code" -ne 255 ]]; then
+              printf 'PROVIDER_PARITY_MONITOR=FAIL_REMOTE exit_code=%s\n' "$ssh_code" >&2
+              exit "$ssh_code"
+            fi
+
+            printf 'SSH_TRANSPORT_FAILURE=true attempt=%s exit_code=%s\n' "$attempt" "$ssh_code" >&2
+            if [[ "$attempt" -lt "$max_attempts" ]]; then
+              sleep $(( attempt * 5 ))
+            fi
+          done
+
+          printf 'PROVIDER_PARITY_MONITOR=FAIL_SSH_TRANSPORT attempts=%s\n' "$max_attempts" >&2
+          exit 255
