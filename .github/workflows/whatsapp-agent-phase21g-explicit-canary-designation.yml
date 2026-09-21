@@ -17,6 +17,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -40,6 +41,9 @@ jobs:
       PHASE21G_CONFIRM: ${{ inputs.confirmation }}
 
     steps:
+      - name: Checkout reviewed operator code
+        uses: actions/checkout@v4
+
       - name: Validate exact SHA and explicit inputs
         shell: bash
         env:
@@ -51,8 +55,35 @@ jobs:
           [[ "$PHASE21G_VERIFIED_CANARY_WA_ID" =~ ^[0-9]{6,20}$ ]]
           test "$PHASE21G_CANARY_WA_ID" = "$PHASE21G_VERIFIED_CANARY_WA_ID"
           test "$PHASE21G_CONFIRM" = "DESIGNATE_INTERNAL_CANARY"
-          release_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/$RELEASE_BRANCH" --jq '.commit.sha')"
-          test "$release_sha" = "$EXPECTED_LIVE_SHA"
+
+          runs_json="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/actions/workflows/whatsapp-agent-production-batch1.yml/runs?branch=$RELEASE_BRANCH&per_page=50")"
+          deployed_sha=""
+
+          while IFS='|' read -r run_id run_sha; do
+            [[ -n "$run_id" && -n "$run_sha" ]] || continue
+            jobs_json="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100")"
+            job_result="$(jq -r '(.jobs | map(select(.name == "production-batch-1")) | .[0].conclusion) // "not_found"' <<<"$jobs_json")"
+            if [[ "$job_result" = "success" ]]; then
+              deployed_sha="$run_sha"
+              printf 'DEPLOYMENT_RUN_ID=%s\n' "$run_id"
+              printf 'DEPLOYMENT_JOB_RESULT=%s\n' "$job_result"
+              break
+            fi
+          done < <(
+            jq -r '
+              .workflow_runs
+              | map(select(.status == "completed"))
+              | sort_by(.created_at)
+              | reverse
+              | .[]
+              | [.id, .head_sha]
+              | @tsv
+            ' <<<"$runs_json" | tr '\t' '|'
+          )
+
+          test -n "$deployed_sha"
+          printf 'DEPLOYED_SHA=%s\n' "$deployed_sha"
+          test "$deployed_sha" = "$EXPECTED_LIVE_SHA"
 
       - name: Configure pinned production SSH
         shell: bash
@@ -75,6 +106,20 @@ jobs:
           printf '%s %s %s\n' "$canonical_host" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
 
+      - name: Transport reviewed designation script
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          local_script="apps/whatsapp-agent-dashboard/scripts/whatsapp-phase21g-designate-internal-canary.ts"
+          test -f "$local_script"
+          reviewed_sha="$(sha256sum "$local_script" | awk '{print $1}')"
+          remote_script="/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard/scripts/.phase22c-designate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.ts"
+          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$local_script" "$SSH_USER@$SSH_HOST:$remote_script"
+          printf 'REVIEWED_DESIGNATION_SCRIPT_SHA256=%s\n' "$reviewed_sha" >> "$GITHUB_ENV"
+          printf 'REVIEWED_DESIGNATION_SCRIPT_REMOTE_PATH=%s\n' "$remote_script" >> "$GITHUB_ENV"
+
       - name: Designate exact internal WhatsApp canary
         shell: bash
         run: |
@@ -82,11 +127,16 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
             "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' PHASE21G_CANARY_WA_ID='$PHASE21G_CANARY_WA_ID' PHASE21G_VERIFIED_CANARY_WA_ID='$PHASE21G_VERIFIED_CANARY_WA_ID' PHASE21G_CONFIRM='$PHASE21G_CONFIRM' bash -s" <<'REMOTE' | tee phase21g-canary-designation.txt
+            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' PHASE21G_CANARY_WA_ID='$PHASE21G_CANARY_WA_ID' PHASE21G_VERIFIED_CANARY_WA_ID='$PHASE21G_VERIFIED_CANARY_WA_ID' PHASE21G_CONFIRM='$PHASE21G_CONFIRM' REVIEWED_DESIGNATION_SCRIPT_REMOTE_PATH='$REVIEWED_DESIGNATION_SCRIPT_REMOTE_PATH' REVIEWED_DESIGNATION_SCRIPT_SHA256='$REVIEWED_DESIGNATION_SCRIPT_SHA256' bash -s" <<'REMOTE' | tee phase21g-canary-designation.txt
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           ENV_FILE="$APP/.env"
           test -f "$ENV_FILE"
+          [[ "$REVIEWED_DESIGNATION_SCRIPT_REMOTE_PATH" == "$APP/scripts/.phase22c-designate-"*".ts" ]]
+          trap 'rm -f "$REVIEWED_DESIGNATION_SCRIPT_REMOTE_PATH"' EXIT
+          test -f "$REVIEWED_DESIGNATION_SCRIPT_REMOTE_PATH"
+          test "$(sha256sum "$REVIEWED_DESIGNATION_SCRIPT_REMOTE_PATH" | awk '{print $1}')" = "$REVIEWED_DESIGNATION_SCRIPT_SHA256"
+          printf 'REVIEWED_DESIGNATION_SCRIPT_VERIFIED=true\n'
           test "$(git -C "$APP" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
           test "$(git -C "$APP" status --porcelain --untracked-files=no | wc -l)" -eq 0
 
@@ -120,11 +170,63 @@ jobs:
           test -n "$DATABASE_URL"
 
           cd "$APP"
-          npm exec -- tsx tests/whatsapp-phase21g-explicit-canary-designation-certification.test.ts
+          DB="$(node scripts/prisma-postgres-cli-url.mjs "$DATABASE_URL")"
+
+          selected_operator_role="$(psql "$DB" -X -v ON_ERROR_STOP=1 -At -c "
+            SELECT m.role
+            FROM \"EngageWorkspaceMembership\" m
+            JOIN \"DashboardUser\" u ON u.id = m.\"userId\"
+            JOIN \"EngageWorkspace\" w ON w.id = m.\"workspaceId\"
+            WHERE m.\"workspaceId\" = 'engagews_default'
+              AND m.\"isActive\" = true
+              AND u.\"isActive\" = true
+              AND w.\"isActive\" = true
+              AND m.role IN ('ADMIN','MANAGER','COUNSELOR')
+            ORDER BY m.role ASC, m.\"createdAt\" ASC
+            LIMIT 1;")"
+          [[ "$selected_operator_role" =~ ^(ADMIN|MANAGER|COUNSELOR)$ ]]
+          printf 'SELECTED_AUDIT_OPERATOR_ROLE=%s\n' "$selected_operator_role"
+
+          canary_contact_count="$(psql "$DB" -X -v ON_ERROR_STOP=1 -At -c "
+            SELECT COUNT(DISTINCT c.id)
+            FROM \"WhatsAppContact\" c
+            JOIN \"EngageChannelConnection\" ec
+              ON ec.id = c.\"metadata\" #>> '{engageos,whatsappIdentity,connectionId}'
+             AND ec.\"workspaceId\" = 'engagews_default'
+             AND ec.channel = 'WHATSAPP'
+             AND ec.status IN ('CONNECTED','DEGRADED')
+            WHERE c.\"waId\" = '$PHASE21G_CANARY_WA_ID'
+              AND c.\"metadata\" #>> '{engageos,whatsappIdentity,workspaceId}' = 'engagews_default'
+              AND EXISTS (
+                SELECT 1 FROM \"WhatsAppConversation\" wc
+                WHERE wc.\"contactId\" = c.id
+                  AND lower(coalesce(wc.source,'whatsapp')) = 'whatsapp'
+              );")"
+          printf 'VERIFIED_CANARY_CONTACT_COUNT=%s\n' "$canary_contact_count"
+          test "$canary_contact_count" = "1"
+
           PHASE21G_CANARY_WA_ID="$PHASE21G_CANARY_WA_ID" \
           PHASE21G_VERIFIED_CANARY_WA_ID="$PHASE21G_VERIFIED_CANARY_WA_ID" \
           PHASE21G_CONFIRM="$PHASE21G_CONFIRM" \
-          npm exec -- tsx scripts/whatsapp-phase21g-designate-internal-canary.ts
+          npm exec -- tsx "$REVIEWED_DESIGNATION_SCRIPT_REMOTE_PATH"
+
+          designation_count="$(psql "$DB" -X -v ON_ERROR_STOP=1 -At -c "
+            SELECT COUNT(DISTINCT c.id)
+            FROM \"WhatsAppContact\" c
+            WHERE c.\"waId\" = '$PHASE21G_CANARY_WA_ID'
+              AND c.\"metadata\" #>> '{engageos,canary,designated}' = 'true'
+              AND c.\"metadata\" #>> '{engageos,canary,kind}' = 'INTERNAL_TEST'
+              AND EXISTS (
+                SELECT 1
+                FROM \"WhatsAppConversation\" wc
+                JOIN \"ConversationTagLink\" ctl ON ctl.\"conversationId\" = wc.id
+                JOIN \"ConversationTag\" ct ON ct.id = ctl.\"tagId\"
+                WHERE wc.\"contactId\" = c.id
+                  AND ct.name = 'CANARY_INTERNAL_TEST'
+              );")"
+          printf 'DESIGNATED_CANARY_POSTCONDITION_COUNT=%s\n' "$designation_count"
+          test "$designation_count" = "1"
+
           printf 'PM2_RUNTIME_FLAGS_MUTATED=false\n'
           printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
           REMOTE
