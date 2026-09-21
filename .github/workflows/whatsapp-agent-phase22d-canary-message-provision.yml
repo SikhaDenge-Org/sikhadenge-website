@@ -1,0 +1,171 @@
+name: WhatsApp Phase22D Canary Message Provision
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_live_sha:
+        description: Exact deployed WhatsApp app SHA
+        required: true
+        type: string
+      action:
+        description: DRY_RUN inventories canary/template/admin state; PROVISION queues exactly one canary message
+        required: true
+        default: DRY_RUN
+        type: choice
+        options:
+          - DRY_RUN
+          - PROVISION
+      template_name:
+        description: Exact approved zero-variable WhatsApp template name; required for PROVISION
+        required: false
+        type: string
+      confirmation:
+        description: PROVISION_ONE_INTERNAL_CANARY_MESSAGE required for PROVISION
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-phase22d-canary-message-provision
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
+      ACTION: ${{ inputs.action }}
+      TEMPLATE_NAME: ${{ inputs.template_name }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+      VERIFIED_CANARY_WA_ID: ${{ secrets.WHATSAPP_INTERNAL_CANARY_WA_ID }}
+
+    steps:
+      - name: Checkout reviewed operator code
+        uses: actions/checkout@v4
+
+      - name: Validate Phase22D inputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VERIFIED_CANARY_WA_ID" =~ ^[0-9]{6,20}$ ]]
+          case "$ACTION" in
+            DRY_RUN)
+              test -z "$TEMPLATE_NAME"
+              ;;
+            PROVISION)
+              test -n "$TEMPLATE_NAME"
+              test "$CONFIRMATION" = "PROVISION_ONE_INTERNAL_CANARY_MESSAGE"
+              ;;
+            *)
+              exit 2
+              ;;
+          esac
+          for value in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            test -n "${!value:-}"
+          done
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            SSH_PORT=22
+            printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"
+          fi
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          printf 'PASS: PHASE22D_PROVISION_INPUT_GATE\n'
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          ssh-keygen -y -f "$key" >/dev/null
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          if [[ "$SSH_PORT" = "22" ]]; then
+            canonical_host="$SSH_HOST"
+          else
+            canonical_host="[$SSH_HOST]:$SSH_PORT"
+          fi
+          printf '%s %s %s\n' "$canonical_host" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          printf 'PASS: PINNED_SSH_READY\n'
+
+      - name: Verify exact live SHA
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          live_sha="$(ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production"             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15             "$SSH_USER@$SSH_HOST"             "git -C /var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard rev-parse HEAD")"
+          printf 'LIVE_SHA=%s\n' "$live_sha"
+          test "$live_sha" = "$EXPECTED_LIVE_SHA"
+          printf 'PASS: EXACT_LIVE_SHA_VERIFIED\n'
+
+      - name: Transport reviewed Phase22D provisioner
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          local_script="apps/whatsapp-agent-dashboard/scripts/whatsapp-phase22d-canary-message-provision.ts"
+          test -f "$local_script"
+          reviewed_sha="$(sha256sum "$local_script" | awk '{print $1}')"
+          remote_script="/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard/scripts/.phase22d-provision-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.ts"
+          printf 'REVIEWED_SCRIPT_REMOTE=%s\n' "$remote_script" >> "$GITHUB_ENV"
+          printf 'REVIEWED_SCRIPT_SHA256=%s\n' "$reviewed_sha" >> "$GITHUB_ENV"
+          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production"             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15             "$local_script" "$SSH_USER@$SSH_HOST:$remote_script"
+
+      - name: Run Phase22D canary provisioner
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          template_b64="$(printf '%s' "$TEMPLATE_NAME" | base64 -w0)"
+          confirmation_b64="$(printf '%s' "$CONFIRMATION" | base64 -w0)"
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production"             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15             "$SSH_USER@$SSH_HOST"             "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' ACTION='$ACTION' VERIFIED_CANARY_WA_ID='$VERIFIED_CANARY_WA_ID' REVIEWED_SCRIPT_REMOTE='$REVIEWED_SCRIPT_REMOTE' REVIEWED_SCRIPT_SHA256='$REVIEWED_SCRIPT_SHA256' TEMPLATE_B64='$template_b64' CONFIRMATION_B64='$confirmation_b64' bash -s" <<'REMOTE' | tee phase22d-canary-message-provision.txt
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          cd "$APP"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
+          [[ "$REVIEWED_SCRIPT_REMOTE" == "$APP/scripts/.phase22d-provision-"*".ts" ]]
+          test -f "$REVIEWED_SCRIPT_REMOTE"
+          test "$(sha256sum "$REVIEWED_SCRIPT_REMOTE" | awk '{print $1}')" = "$REVIEWED_SCRIPT_SHA256"
+          set -a
+          source .env
+          set +a
+          test "${WHATSAPP_OUTBOUND_MODE:-disabled}" != "live"
+          test "${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}" = "on"
+          template_name="$(printf '%s' "$TEMPLATE_B64" | base64 --decode)"
+          confirmation="$(printf '%s' "$CONFIRMATION_B64" | base64 --decode)"
+          PHASE22D_MODE="$ACTION"           PHASE22D_VERIFIED_CANARY_WA_ID="$VERIFIED_CANARY_WA_ID"           PHASE22D_TEMPLATE_NAME="$template_name"           PHASE22D_CONFIRM="$confirmation"           npm exec -- tsx "$REVIEWED_SCRIPT_REMOTE"
+          printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          printf 'PASS: PHASE22D_CANARY_MESSAGE_PROVISION\n'
+          REMOTE
+
+      - name: Cleanup reviewed Phase22D provisioner
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -n "${REVIEWED_SCRIPT_REMOTE:-}" && -f "$HOME/.ssh/whatsapp-production" ]]; then
+            ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production"               -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10               "$SSH_USER@$SSH_HOST" "rm -f '$REVIEWED_SCRIPT_REMOTE'" || true
+          fi
+          exit 0
+
+      - name: Upload Phase22D provision evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase22d-canary-message-provision-${{ inputs.expected_live_sha }}
+          path: phase22d-canary-message-provision.txt
+          if-no-files-found: warn
+          retention-days: 30
