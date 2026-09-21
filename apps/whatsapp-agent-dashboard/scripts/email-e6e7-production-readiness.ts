@@ -5,6 +5,7 @@ const runtimeMode = process.env.EMAIL_RUNTIME_MODE || "DISABLED";
 const runtimeEnabled = process.env.EMAIL_RUNTIME_ENABLED === "true";
 const automationEnabled = process.env.EMAIL_AUTOMATION_ENABLED === "true";
 const externalWritesEnabled = process.env.EMAIL_EXTERNAL_WRITES_ENABLED === "true";
+const trackingEnabled = process.env.EMAIL_TRACKING_ENABLED === "true";
 const now = new Date();
 const since = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
@@ -52,10 +53,10 @@ async function main() {
     prisma.engageEmailAutomationEvent.count({
       where: { workspaceId, status: "FAILED" },
     }),
-    prisma.engageEmailAnalyticsEvent.findMany({
+    prisma.engageEmailAnalyticsEvent.groupBy({
+      by: ["eventType"],
       where: { workspaceId, occurredAt: { gte: since } },
-      select: { eventType: true },
-      take: 5000,
+      _count: { _all: true },
     }),
     prisma.engageCustomerSuppression.count({
       where: {
@@ -77,14 +78,20 @@ async function main() {
     }, {});
 
   const analyticsByType = analytics.reduce<Record<string, number>>((acc, row) => {
-    acc[row.eventType] = (acc[row.eventType] || 0) + 1;
+    acc[row.eventType] = row._count._all;
     return acc;
   }, {});
+  const trackingEvidenceCount = ["OPENED", "CLICKED", "DELIVERED"]
+    .reduce((sum, eventType) => sum + (analyticsByType[eventType] || 0), 0);
 
   const checks = {
     workspacePresent: Boolean(workspace),
     safeRuntime: runtimeMode === "DRY_RUN" && runtimeEnabled && automationEnabled && !externalWritesEnabled,
     approvedTemplatePresent: approvedTemplates > 0,
+    trackingEnabled,
+    trackingEvidencePresent: trackingEvidenceCount > 0,
+    noCampaignRecipientFailures: campaignRecipientsFailed === 0,
+    noSequenceEnrollmentFailures: sequenceEnrollmentsFailed === 0,
     noDeadLetters: automationFailed === 0,
   };
 
@@ -92,6 +99,10 @@ async function main() {
   if (!checks.workspacePresent) blockers.push("Activation workspace is missing.");
   if (!checks.safeRuntime) blockers.push("Email runtime is not in protected DRY_RUN automation mode.");
   if (!checks.approvedTemplatePresent) blockers.push("No approved email template is available.");
+  if (!checks.trackingEnabled) blockers.push("EMAIL_TRACKING_ENABLED must be true for E7 production readiness.");
+  if (!checks.trackingEvidencePresent) blockers.push("No OPENED, CLICKED, or DELIVERED tracking evidence exists in the last 30 days.");
+  if (!checks.noCampaignRecipientFailures) blockers.push(`Email campaigns have ${campaignRecipientsFailed} FAILED recipient(s).`);
+  if (!checks.noSequenceEnrollmentFailures) blockers.push(`Email sequences have ${sequenceEnrollmentsFailed} FAILED enrollment(s).`);
   if (!checks.noDeadLetters) blockers.push(`Email automation has ${automationFailed} dead-lettered FAILED event(s).`);
 
   const output = {
@@ -102,6 +113,7 @@ async function main() {
       runtimeEnabled,
       automationEnabled,
       externalWritesEnabled,
+      trackingEnabled,
     },
     checks,
     campaigns: {
@@ -120,6 +132,7 @@ async function main() {
     },
     deliverability: {
       analyticsLast30dByType: analyticsByType,
+      trackingEvidenceCount,
       activeEmailSuppressions,
     },
     approvedTemplates,
