@@ -1,11 +1,16 @@
 name: WhatsApp Agent Email E6 E7 Production Readiness
 
 on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - "apps/whatsapp-agent-dashboard/docs/email-e6e7-live-certification-trigger.md"
   workflow_dispatch:
     inputs:
       deployed_sha:
-        description: Exact production SHA to audit
-        required: true
+        description: Optional exact production SHA assertion; leave empty to discover live SHA
+        required: false
         type: string
 
 permissions:
@@ -25,7 +30,7 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
-      DEPLOYED_SHA: ${{ inputs.deployed_sha }}
+      REQUESTED_DEPLOYED_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.deployed_sha || '' }}
       AUDIT_RUN_ID: email-e6e7-readiness-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
@@ -33,7 +38,9 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          [[ "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ -n "$REQUESTED_DEPLOYED_SHA" ]]; then
+            [[ "$REQUESTED_DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          fi
           missing=0
           for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
             [[ -n "${!variable_name:-}" ]] || { echo "Missing production secret: $variable_name" >&2; missing=1; }
@@ -66,13 +73,18 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            "DEPLOYED_SHA='$DEPLOYED_SHA' RUN_ID='$AUDIT_RUN_ID' bash -s" <<'REMOTE' | tee email-e6e7-readiness.log
+            "REQUESTED_DEPLOYED_SHA='$REQUESTED_DEPLOYED_SHA' RUN_ID='$AUDIT_RUN_ID' bash -s" <<'REMOTE' | tee email-e6e7-readiness.log
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           BACKUP=/root/sikhadenge-backups/$RUN_ID
           test "$(id -u)" = "0"
           cd "$APP"
-          test "$(git rev-parse HEAD)" = "$DEPLOYED_SHA"
+          DEPLOYED_SHA="$(git rev-parse HEAD)"
+          [[ "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ -n "${REQUESTED_DEPLOYED_SHA:-}" ]]; then
+            test "$DEPLOYED_SHA" = "$REQUESTED_DEPLOYED_SHA"
+          fi
+          printf 'DISCOVERED_DEPLOYED_SHA=%s\n' "$DEPLOYED_SHA"
           install -d -m 700 "$BACKUP"
           set -a
           source "$APP/.env"
@@ -117,7 +129,12 @@ jobs:
           {
             echo "## Email E6/E7 production readiness"
             echo
-            printf -- '- Audited SHA: `%s`\n' "$DEPLOYED_SHA"
+            audited_sha=""
+            if [[ -s email-e6e7-readiness.log ]]; then
+              audited_sha="$(awk -F= '/^DISCOVERED_DEPLOYED_SHA=/{print $2}' email-e6e7-readiness.log | tail -1 || true)"
+            fi
+            if [[ -z "$audited_sha" ]]; then audited_sha="${REQUESTED_DEPLOYED_SHA:-unknown}"; fi
+            printf -- '- Audited SHA: `%s`\n' "$audited_sha"
             if [[ -s "$result" ]]; then
               scheduler_exit="$(awk -F= '$1=="SCHEDULER_EXIT_CODE"{print $2}' "$result")"
               printf -- '- Live scheduler verification exit: `%s`\n' "${scheduler_exit:-unknown}"
