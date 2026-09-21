@@ -152,16 +152,17 @@ jobs:
           pm2 restart "$PROCESS" --update-env >/dev/null
           sleep 3
 
-          pm2 jlist | node - <<'NODE'
-          let s=''; process.stdin.on('data',d=>s+=d).on('end',()=>{
-            const p=JSON.parse(s||'[]').find(x=>x.name==='sikhadenge-whatsapp-agent');
-            if(!p) throw new Error('PM2 process missing');
-            if(p.pm2_env?.status!=='online') throw new Error('PM2 process offline');
-            if(String(p.pm2_env?.EMAIL_TRACKING_ENABLED||'')!=='true') throw new Error('tracking flag not live in PM2');
-            if(String(p.pm2_env?.EMAIL_RUNTIME_MODE||'')!=='DRY_RUN') throw new Error('runtime mode drifted');
-            if(String(p.pm2_env?.EMAIL_EXTERNAL_WRITES_ENABLED||'')!=='false') throw new Error('external writes drifted');
-            process.stdout.write('PM2_TRACKING_STATE=PASS\n');
-          });
+          pm2 jlist > "$BACKUP/pm2-after.json"
+          node - "$BACKUP/pm2-after.json" <<'NODE'
+          const fs=require('node:fs');
+          const file=process.argv[2];
+          const p=JSON.parse(fs.readFileSync(file,'utf8')||'[]').find(x=>x.name==='sikhadenge-whatsapp-agent');
+          if(!p) throw new Error('PM2 process missing');
+          if(p.pm2_env?.status!=='online') throw new Error('PM2 process offline');
+          if(String(p.pm2_env?.EMAIL_TRACKING_ENABLED||'')!=='true') throw new Error('tracking flag not live in PM2');
+          if(String(p.pm2_env?.EMAIL_RUNTIME_MODE||'')!=='DRY_RUN') throw new Error('runtime mode drifted');
+          if(String(p.pm2_env?.EMAIL_EXTERNAL_WRITES_ENABLED||'')!=='false') throw new Error('external writes drifted');
+          process.stdout.write('PM2_TRACKING_STATE=PASS\\n');
           NODE
 
           npm exec -- tsx -e '
