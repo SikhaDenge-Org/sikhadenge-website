@@ -39,7 +39,7 @@ concurrency:
 
 jobs:
   canary:
-    runs-on: [self-hosted, Linux, X64, sikhadenge-ci]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: whatsapp-agent-production
     env:
