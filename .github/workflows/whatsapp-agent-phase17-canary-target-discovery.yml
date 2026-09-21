@@ -32,6 +32,7 @@ jobs:
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       EXPECTED_RELEASE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.expected_release_sha || github.event.before }}
+      VERIFIED_CANARY_WA_ID: ${{ secrets.WHATSAPP_INTERNAL_CANARY_WA_ID }}
 
     steps:
       - name: Checkout operator workflow
@@ -77,7 +78,7 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' bash -s" <<'REMOTE'
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' VERIFIED_CANARY_WA_ID='$VERIFIED_CANARY_WA_ID' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           cd "$APP"
@@ -182,16 +183,22 @@ jobs:
             ORDER BY u.role,u.id;"
           printf 'ELIGIBLE_APPROVERS_END\n'
 
-          operator_match_sql=$(cat <<'SQL'
-          WITH operator_matches AS (
-            SELECT DISTINCT
-              c.id,
-              c."waId",
+          if [[ -z "${VERIFIED_CANARY_WA_ID:-}" ]]; then
+            printf 'VERIFIED_CANARY_CONFIGURED=false\n'
+            printf 'VERIFIED_OPERATOR_MATCH_COUNT=0\n'
+          else
+            [[ "$VERIFIED_CANARY_WA_ID" =~ ^[0-9]{6,20}$ ]]
+            printf 'VERIFIED_CANARY_CONFIGURED=true\n'
+
+            verified_match_sql=$(cat <<'SQL'
+            SELECT
+              repeat('*', GREATEST(0, LEAST(8, length(c."waId") - 4))) || right(c."waId",4) AS recipient_masked,
+              m.role AS workspace_role,
               c."consentStatus",
-              c."optedOutAt",
-              c."metadata" #>> '{engageos,whatsappIdentity,connectionId}' AS "connectionId",
-              u.id AS "operatorId",
-              u.role AS "operatorRole"
+              CASE WHEN c."optedOutAt" IS NULL THEN 'false' ELSE 'true' END AS opted_out,
+              ec.status AS connection_status,
+              CASE WHEN conv."serviceWindowExpiresAt" > now() THEN 'true' ELSE 'false' END AS service_window_open,
+              CASE WHEN conv.id IS NULL THEN 'false' ELSE 'true' END AS conversation_found
             FROM "WhatsAppContact" c
             JOIN "DashboardUser" u
               ON c.email IS NOT NULL
@@ -200,47 +207,35 @@ jobs:
               ON m."userId" = u.id
              AND m."workspaceId" = 'engagews_default'
              AND m."isActive" = true
+             AND m.role IN ('ADMIN','MANAGER','COUNSELOR')
             JOIN "EngageWorkspace" w
               ON w.id = m."workspaceId"
              AND w."isActive" = true
-            WHERE u."isActive" = true
-              AND u.role IN ('ADMIN','MANAGER','COUNSELOR')
-              AND c."metadata" #>> '{engageos,whatsappIdentity,workspaceId}' = 'engagews_default'
-          )
-          SELECT
-            repeat('*', GREATEST(0, LEAST(8, length(o."waId") - 4))) || right(o."waId",4) AS recipient_masked,
-            o."operatorRole",
-            o."consentStatus",
-            CASE WHEN o."optedOutAt" IS NULL THEN 'false' ELSE 'true' END AS opted_out,
-            ec.status AS connection_status,
-            CASE WHEN conv."serviceWindowExpiresAt" > now() THEN 'true' ELSE 'false' END AS service_window_open,
-            CASE WHEN conv.id IS NULL THEN 'false' ELSE 'true' END AS conversation_found
-          FROM operator_matches o
-          JOIN "EngageChannelConnection" ec
-            ON ec.id = o."connectionId"
-           AND ec."workspaceId" = 'engagews_default'
-           AND ec.channel = 'WHATSAPP'
-           AND ec.status IN ('CONNECTED','DEGRADED')
-          LEFT JOIN LATERAL (
-            SELECT wc.id, wc."serviceWindowExpiresAt"
-            FROM "WhatsAppConversation" wc
-            WHERE wc."contactId" = o.id
-              AND lower(coalesce(wc.source,'whatsapp')) = 'whatsapp'
-            ORDER BY wc."lastMessageAt" DESC NULLS LAST, wc."createdAt" DESC
-            LIMIT 1
-          ) conv ON true
-          ORDER BY o."operatorRole", recipient_masked;
-          SQL
-          )
+            JOIN "EngageChannelConnection" ec
+              ON ec.id = c."metadata" #>> '{engageos,whatsappIdentity,connectionId}'
+             AND ec."workspaceId" = 'engagews_default'
+             AND ec.channel = 'WHATSAPP'
+             AND ec.status IN ('CONNECTED','DEGRADED')
+            LEFT JOIN LATERAL (
+              SELECT wc.id, wc."serviceWindowExpiresAt"
+              FROM "WhatsAppConversation" wc
+              WHERE wc."contactId" = c.id
+                AND lower(coalesce(wc.source,'whatsapp')) = 'whatsapp'
+              ORDER BY wc."lastMessageAt" DESC NULLS LAST, wc."createdAt" DESC
+              LIMIT 1
+            ) conv ON true
+            WHERE c."waId" = :'verified_canary_wa_id'
+              AND u."isActive" = true
+              AND c."metadata" #>> '{engageos,whatsappIdentity,workspaceId}' = 'engagews_default';
+            SQL
+            )
 
-          printf 'OPERATOR_IDENTITY_MATCH_BEGIN\n'
-          psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -c "$operator_match_sql"
-          printf 'OPERATOR_IDENTITY_MATCH_END\n'
+            printf 'VERIFIED_OPERATOR_MATCH_BEGIN\n'
+            psql "$DB" -X -v ON_ERROR_STOP=1 -v verified_canary_wa_id="$VERIFIED_CANARY_WA_ID" -A -F '|' -c "$verified_match_sql"
+            printf 'VERIFIED_OPERATOR_MATCH_END\n'
 
-          psql "$DB" -X -v ON_ERROR_STOP=1 -At -c "
-            SELECT 'OPERATOR_IDENTITY_MATCH_COUNT=' || COUNT(*)
-            FROM (
-              SELECT DISTINCT c.id
+            verified_count="$(psql "$DB" -X -v ON_ERROR_STOP=1 -v verified_canary_wa_id="$VERIFIED_CANARY_WA_ID" -At -c "
+              SELECT COUNT(DISTINCT c.id)
               FROM \"WhatsAppContact\" c
               JOIN \"DashboardUser\" u
                 ON c.email IS NOT NULL
@@ -249,6 +244,7 @@ jobs:
                 ON m.\"userId\" = u.id
                AND m.\"workspaceId\" = 'engagews_default'
                AND m.\"isActive\" = true
+               AND m.role IN ('ADMIN','MANAGER','COUNSELOR')
               JOIN \"EngageWorkspace\" w
                 ON w.id = m.\"workspaceId\"
                AND w.\"isActive\" = true
@@ -257,15 +253,17 @@ jobs:
                AND ec.\"workspaceId\" = 'engagews_default'
                AND ec.channel = 'WHATSAPP'
                AND ec.status IN ('CONNECTED','DEGRADED')
-              WHERE u.\"isActive\" = true
-                AND u.role IN ('ADMIN','MANAGER','COUNSELOR')
+              WHERE c.\"waId\" = :'verified_canary_wa_id'
+                AND u.\"isActive\" = true
                 AND c.\"metadata\" #>> '{engageos,whatsappIdentity,workspaceId}' = 'engagews_default'
                 AND EXISTS (
                   SELECT 1 FROM \"WhatsAppConversation\" wc
                   WHERE wc.\"contactId\" = c.id
                     AND lower(coalesce(wc.source,'whatsapp')) = 'whatsapp'
-                )
-            ) q;"
+                );")"
+            printf 'VERIFIED_OPERATOR_MATCH_COUNT=%s\n' "$verified_count"
+            test "$verified_count" = "1"
+          fi
 
           printf 'MUTATION_PERFORMED=false\n'
           printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
