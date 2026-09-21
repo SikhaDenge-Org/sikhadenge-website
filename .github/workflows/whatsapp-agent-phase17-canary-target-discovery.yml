@@ -31,8 +31,9 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
-      EXPECTED_RELEASE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.expected_release_sha || github.event.before }}
+      EXPECTED_RELEASE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.expected_release_sha || '' }}
       VERIFIED_CANARY_WA_ID: ${{ secrets.WHATSAPP_INTERNAL_CANARY_WA_ID }}
+      RELEASE_BRANCH: release/whatsapp-instagram-agent-flow-20260731
 
     steps:
       - name: Checkout operator workflow
@@ -40,8 +41,18 @@ jobs:
 
       - name: Validate exact operator inputs
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" = "push" ]]; then
+            EXPECTED_RELEASE_SHA="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/whatsapp-agent-production-batch1.yml/runs?branch=$RELEASE_BRANCH&per_page=50" --jq '[.workflow_runs[] | select(.event=="workflow_dispatch" and .conclusion=="success")][0].head_sha // empty')"
+            test -n "$EXPECTED_RELEASE_SHA"
+            printf 'EXPECTED_RELEASE_SHA=%s\n' "$EXPECTED_RELEASE_SHA" >> "$GITHUB_ENV"
+            printf 'DEPLOYED_SHA_SOURCE=LATEST_SUCCESSFUL_PRODUCTION_BATCH\n'
+          fi
+
           [[ "$EXPECTED_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
           for value in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
             test -n "${!value:-}"
@@ -51,6 +62,7 @@ jobs:
             SSH_PORT=22
           fi
           [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          printf 'EXPECTED_DEPLOYED_SHA=%s\n' "$EXPECTED_RELEASE_SHA"
           printf 'PASS: CANARY_TARGET_DISCOVERY_INPUT_GATE\n'
 
       - name: Configure pinned production SSH
