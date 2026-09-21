@@ -95,7 +95,7 @@ jobs:
           latest_mtime=0
           evidence_count=0
           shopt -s nullglob
-          for candidate in /root/sikhadenge-backups/github-*/post-deploy-evidence.txt; do
+          for candidate in /root/sikhadenge-backups/engageos-github-*/post-deploy-evidence.txt; do
             evidence_count=$((evidence_count + 1))
             candidate_mtime="$(stat -c %Y "$candidate" 2>/dev/null || printf '0')"
             if [[ "$candidate_mtime" =~ ^[0-9]+$ ]] && (( candidate_mtime > latest_mtime )); then

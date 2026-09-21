@@ -5,3 +5,5 @@ This marker triggers the guarded production readiness workflow. The workflow dis
 Diagnostic rerun marker: 2026-09-21 runtime identity gate.
 
 Evidence discovery hardening rerun marker: 2026-09-21.
+
+Canonical engageos production-evidence path rerun marker: 2026-09-21.
