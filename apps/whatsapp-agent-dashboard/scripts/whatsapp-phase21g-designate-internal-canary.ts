@@ -63,8 +63,7 @@ async function main() {
     throw new Error("Contact WhatsApp connection is not operational.");
   }
 
-  const conversation = contact.conversations[0];
-  if (!conversation) throw new Error("Contact has no WhatsApp conversation.");
+  const existingConversation = contact.conversations[0] ?? null;
 
   const existingDistinctCanary = await prisma.whatsAppContact.findFirst({
     where: {
@@ -103,12 +102,6 @@ async function main() {
   });
   if (!membership) throw new Error("No authorized active workspace operator exists for canary designation audit.");
 
-  const tag = await prisma.conversationTag.upsert({
-    where: { name: TAG_NAME },
-    update: {},
-    create: { name: TAG_NAME },
-  });
-
   const priorCanary = rec(engageos.canary);
   const updatedMetadata = {
     ...metadata,
@@ -124,12 +117,32 @@ async function main() {
     },
   };
 
-  await prisma.$transaction([
-    prisma.whatsAppContact.update({
+  const transactionResult = await prisma.$transaction(async (tx) => {
+    const conversation = existingConversation ?? await tx.whatsAppConversation.create({
+      data: {
+        contactId: contact.id,
+        source: "whatsapp",
+      },
+      select: {
+        id: true,
+        status: true,
+        agentMode: true,
+        serviceWindowExpiresAt: true,
+      },
+    });
+
+    const tag = await tx.conversationTag.upsert({
+      where: { name: TAG_NAME },
+      update: {},
+      create: { name: TAG_NAME },
+    });
+
+    await tx.whatsAppContact.update({
       where: { id: contact.id },
       data: { metadata: updatedMetadata },
-    }),
-    prisma.conversationTagLink.upsert({
+    });
+
+    await tx.conversationTagLink.upsert({
       where: {
         conversationId_tagId: {
           conversationId: conversation.id,
@@ -141,8 +154,9 @@ async function main() {
         conversationId: conversation.id,
         tagId: tag.id,
       },
-    }),
-    prisma.auditLog.create({
+    });
+
+    await tx.auditLog.create({
       data: {
         actorId: membership.userId,
         action: "WHATSAPP_INTERNAL_CANARY_DESIGNATED",
@@ -154,15 +168,34 @@ async function main() {
           tag: TAG_NAME,
           consentStatus: contact.consentStatus,
           optedOut: Boolean(contact.optedOutAt),
+          conversationCreated: !existingConversation,
           serviceWindowOpen: Boolean(
             conversation.serviceWindowExpiresAt &&
             conversation.serviceWindowExpiresAt.getTime() > Date.now(),
           ),
+          outboundMessagesQueued: false,
           externalWriteSent: false,
         },
       },
-    }),
-  ]);
+    });
+
+    return {
+      conversation,
+      conversationCreated: !existingConversation,
+    };
+  });
+
+  const conversation = transactionResult.conversation;
+  const conversationCreated = transactionResult.conversationCreated;
+
+  if (conversationCreated) {
+    const provisionedMessageCount = await prisma.whatsAppMessage.count({
+      where: { conversationId: conversation.id },
+    });
+    if (provisionedMessageCount !== 0) {
+      throw new Error("Provisioned canary conversation must not contain any messages.");
+    }
+  }
 
   const verified = await prisma.whatsAppContact.findUnique({
     where: { id: contact.id },
@@ -190,6 +223,9 @@ async function main() {
     connectionVerified: true,
     contactFound: true,
     conversationFound: true,
+    conversationCreated,
+    conversationSource: "whatsapp",
+    serviceWindowProvisioned: false,
     canaryMetadataMarked: true,
     canaryTagLinked: true,
     consentStatus: contact.consentStatus,
