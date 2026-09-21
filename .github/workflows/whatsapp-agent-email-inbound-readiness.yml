@@ -4,11 +4,13 @@ on:
   push:
     branches:
       - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - "apps/whatsapp-agent-dashboard/docs/email-inbound-live-readiness-trigger.md"
   workflow_dispatch:
     inputs:
       deployed_sha:
-        description: Exact production SHA to audit or operate against
-        required: true
+        description: Optional exact deployed SHA assertion; leave empty to discover live runtime
+        required: false
         type: string
 
 permissions:
@@ -17,9 +19,8 @@ permissions:
 jobs:
   email-inbound-readiness:
     concurrency:
-      group: whatsapp-agent-production
+      group: whatsapp-agent-email-inbound-readiness
       cancel-in-progress: false
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[email-inbound-readiness]')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: whatsapp-agent-production
@@ -29,7 +30,7 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
-      DEPLOYED_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.deployed_sha || github.event.before }}
+      REQUESTED_DEPLOYED_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.deployed_sha || '' }}
       AUDIT_RUN_ID: email-inbound-readiness-${{ github.run_id }}-${{ github.run_attempt }}
       ACTIVATION_WORKSPACE_ID: engagews_default
     steps:
@@ -37,7 +38,9 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          [[ "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ -n "$REQUESTED_DEPLOYED_SHA" ]]; then
+            [[ "$REQUESTED_DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          fi
           [[ "$ACTIVATION_WORKSPACE_ID" == "engagews_default" ]]
           missing=0
           for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
@@ -65,24 +68,98 @@ jobs:
         run: |
           set -o pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" \
-            "DEPLOYED_SHA='$DEPLOYED_SHA' RUN_ID='$AUDIT_RUN_ID' WORKSPACE_ID='$ACTIVATION_WORKSPACE_ID' bash -s" <<'REMOTE' | tee email-inbound-readiness.log
+            "REQUESTED_DEPLOYED_SHA='$REQUESTED_DEPLOYED_SHA' RUN_ID='$AUDIT_RUN_ID' WORKSPACE_ID='$ACTIVATION_WORKSPACE_ID' bash -s" <<'REMOTE' | tee email-inbound-readiness.log
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           BACKUP=/root/sikhadenge-backups/$RUN_ID
           test "$(id -u)" = "0"
           cd "$APP"
-          test "$(git rev-parse HEAD)" = "$DEPLOYED_SHA"
           install -d -m 700 "$BACKUP"
+
+          DEPLOYED_SHA="$(git rev-parse HEAD)"
+          [[ "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ -n "${REQUESTED_DEPLOYED_SHA:-}" ]]; then
+            test "$DEPLOYED_SHA" = "$REQUESTED_DEPLOYED_SHA"
+          fi
+
+          latest_evidence=""
+          latest_mtime=0
+          shopt -s nullglob
+          for candidate in /root/sikhadenge-backups/engageos-github-*/post-deploy-evidence.txt; do
+            candidate_mtime="$(stat -c %Y "$candidate" 2>/dev/null || printf '0')"
+            if [[ "$candidate_mtime" =~ ^[0-9]+$ ]] && (( candidate_mtime > latest_mtime )); then
+              latest_mtime="$candidate_mtime"
+              latest_evidence="$candidate"
+            fi
+          done
+          shopt -u nullglob
+          test -n "$latest_evidence"
+          read_evidence_value() {
+            local key="$1"
+            awk -F= -v key="$key" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "$latest_evidence"
+          }
+          CERTIFIED_RELEASE_SHA="$(read_evidence_value RELEASE_SHA)"
+          CERTIFIED_BUILD_ID="$(read_evidence_value BUILD_ID)"
+          CERTIFIED_PM2_STATUS="$(read_evidence_value PM2_STATUS)"
+          CERTIFIED_PM2_CWD="$(read_evidence_value PM2_CWD)"
+          LIVE_BUILD_ID="$(cat "$APP/.next/BUILD_ID")"
+          test "$CERTIFIED_RELEASE_SHA" = "$DEPLOYED_SHA"
+          test -n "$CERTIFIED_BUILD_ID"
+          test "$CERTIFIED_PM2_STATUS" = "online"
+          test "$LIVE_BUILD_ID" = "$CERTIFIED_BUILD_ID"
+
+          PM2_SNAPSHOT="$(mktemp)"
+          trap 'rm -f "$PM2_SNAPSHOT"' EXIT
+          pm2 jlist > "$PM2_SNAPSHOT"
+          IFS='|' read -r START_PM2_PID START_PM2_STATUS START_PM2_CWD < <(
+            node - "$PM2_SNAPSHOT" <<'NODE'
+          const fs=require('node:fs');
+          const rows=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const p=rows.find(x=>x.name==='sikhadenge-whatsapp-agent');
+          process.stdout.write(p ? [p.pid||'',p.pm2_env?.status||'',p.pm2_env?.pm_cwd||''].join('|') + '\n' : '||\n');
+          NODE
+          )
+          test "$START_PM2_STATUS" = "online"
+          test -n "$START_PM2_PID"
+          test "$START_PM2_CWD" = "$CERTIFIED_PM2_CWD"
+          test "$(cat "$START_PM2_CWD/.next/BUILD_ID")" = "$CERTIFIED_BUILD_ID"
+
+          printf 'DISCOVERED_DEPLOYED_SHA=%s\n' "$DEPLOYED_SHA"
+          printf 'CERTIFIED_BUILD_ID=%s\n' "$CERTIFIED_BUILD_ID"
+          printf 'START_PM2_PID=%s\n' "$START_PM2_PID"
+
           set -a
           source "$APP/.env"
           set +a
           set +e
           EXPECTED_RELEASE_SHA="$DEPLOYED_SHA" EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID="$WORKSPACE_ID" npx tsx scripts/email-inbound-production-readiness.ts | tee "$BACKUP/inbound-readiness.json"
-          code=${PIPESTATUS[0]}
+          readiness_code=${PIPESTATUS[0]}
           set -e
-          printf 'EXIT_CODE=%s\n' "$code" > "$BACKUP/inbound-readiness-result.txt"
+
+          END_DEPLOYED_SHA="$(git rev-parse HEAD)"
+          END_BUILD_ID="$(cat "$APP/.next/BUILD_ID")"
+          pm2 jlist > "$PM2_SNAPSHOT"
+          IFS='|' read -r END_PM2_PID END_PM2_STATUS END_PM2_CWD < <(
+            node - "$PM2_SNAPSHOT" <<'NODE'
+          const fs=require('node:fs');
+          const rows=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const p=rows.find(x=>x.name==='sikhadenge-whatsapp-agent');
+          process.stdout.write(p ? [p.pid||'',p.pm2_env?.status||'',p.pm2_env?.pm_cwd||''].join('|') + '\n' : '||\n');
+          NODE
+          )
+          stable_code=0
+          if [[ "$END_DEPLOYED_SHA" != "$DEPLOYED_SHA" || "$END_BUILD_ID" != "$CERTIFIED_BUILD_ID" || "$END_PM2_PID" != "$START_PM2_PID" || "$END_PM2_STATUS" != "online" || "$END_PM2_CWD" != "$START_PM2_CWD" ]]; then
+            stable_code=3
+          fi
+          {
+            printf 'READINESS_EXIT_CODE=%s\n' "$readiness_code"
+            printf 'RUNTIME_STABLE_EXIT_CODE=%s\n' "$stable_code"
+            printf 'DEPLOYED_SHA=%s\n' "$DEPLOYED_SHA"
+            printf 'BUILD_ID=%s\n' "$CERTIFIED_BUILD_ID"
+          } > "$BACKUP/inbound-readiness-result.txt"
           chmod 600 "$BACKUP"/*
-          exit "$code"
+          if (( stable_code != 0 )); then exit "$stable_code"; fi
+          exit "$readiness_code"
           REMOTE
 
       - name: Collect protected readiness evidence
@@ -107,7 +184,9 @@ jobs:
           {
             echo "## Email inbound production readiness"
             echo
-            echo "- Audited SHA: \`$DEPLOYED_SHA\`"
+            audited_sha="$(awk -F= '/^DISCOVERED_DEPLOYED_SHA=/{print $2}' email-inbound-readiness.log | tail -1 || true)"
+            if [[ -z "$audited_sha" ]]; then audited_sha="${REQUESTED_DEPLOYED_SHA:-unknown}"; fi
+            echo "- Audited SHA: \`$audited_sha\`"
             if [[ -f "$json_file" ]]; then
               status="$(jq -r '.status // "UNKNOWN"' "$json_file")"
               account="$(jq -r '.activationAccount // "unknown"' "$json_file")"
