@@ -182,6 +182,91 @@ jobs:
             ORDER BY u.role,u.id;"
           printf 'ELIGIBLE_APPROVERS_END\n'
 
+          operator_match_sql=$(cat <<'SQL'
+          WITH operator_matches AS (
+            SELECT DISTINCT
+              c.id,
+              c."waId",
+              c."consentStatus",
+              c."optedOutAt",
+              c."metadata" #>> '{engageos,whatsappIdentity,connectionId}' AS "connectionId",
+              u.id AS "operatorId",
+              u.role AS "operatorRole"
+            FROM "WhatsAppContact" c
+            JOIN "DashboardUser" u
+              ON c.email IS NOT NULL
+             AND lower(btrim(c.email)) = lower(btrim(u.email))
+            JOIN "EngageWorkspaceMembership" m
+              ON m."userId" = u.id
+             AND m."workspaceId" = 'engagews_default'
+             AND m."isActive" = true
+            JOIN "EngageWorkspace" w
+              ON w.id = m."workspaceId"
+             AND w."isActive" = true
+            WHERE u."isActive" = true
+              AND u.role IN ('ADMIN','MANAGER','COUNSELOR')
+              AND c."metadata" #>> '{engageos,whatsappIdentity,workspaceId}' = 'engagews_default'
+          )
+          SELECT
+            repeat('*', GREATEST(0, LEAST(8, length(o."waId") - 4))) || right(o."waId",4) AS recipient_masked,
+            o."operatorRole",
+            o."consentStatus",
+            CASE WHEN o."optedOutAt" IS NULL THEN 'false' ELSE 'true' END AS opted_out,
+            ec.status AS connection_status,
+            CASE WHEN conv."serviceWindowExpiresAt" > now() THEN 'true' ELSE 'false' END AS service_window_open,
+            CASE WHEN conv.id IS NULL THEN 'false' ELSE 'true' END AS conversation_found
+          FROM operator_matches o
+          JOIN "EngageChannelConnection" ec
+            ON ec.id = o."connectionId"
+           AND ec."workspaceId" = 'engagews_default'
+           AND ec.channel = 'WHATSAPP'
+           AND ec.status IN ('CONNECTED','DEGRADED')
+          LEFT JOIN LATERAL (
+            SELECT wc.id, wc."serviceWindowExpiresAt"
+            FROM "WhatsAppConversation" wc
+            WHERE wc."contactId" = o.id
+              AND lower(coalesce(wc.source,'whatsapp')) = 'whatsapp'
+            ORDER BY wc."lastMessageAt" DESC NULLS LAST, wc."createdAt" DESC
+            LIMIT 1
+          ) conv ON true
+          ORDER BY o."operatorRole", recipient_masked;
+          SQL
+          )
+
+          printf 'OPERATOR_IDENTITY_MATCH_BEGIN\n'
+          psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -c "$operator_match_sql"
+          printf 'OPERATOR_IDENTITY_MATCH_END\n'
+
+          psql "$DB" -X -v ON_ERROR_STOP=1 -At -c "
+            SELECT 'OPERATOR_IDENTITY_MATCH_COUNT=' || COUNT(*)
+            FROM (
+              SELECT DISTINCT c.id
+              FROM \"WhatsAppContact\" c
+              JOIN \"DashboardUser\" u
+                ON c.email IS NOT NULL
+               AND lower(btrim(c.email)) = lower(btrim(u.email))
+              JOIN \"EngageWorkspaceMembership\" m
+                ON m.\"userId\" = u.id
+               AND m.\"workspaceId\" = 'engagews_default'
+               AND m.\"isActive\" = true
+              JOIN \"EngageWorkspace\" w
+                ON w.id = m.\"workspaceId\"
+               AND w.\"isActive\" = true
+              JOIN \"EngageChannelConnection\" ec
+                ON ec.id = c.\"metadata\" #>> '{engageos,whatsappIdentity,connectionId}'
+               AND ec.\"workspaceId\" = 'engagews_default'
+               AND ec.channel = 'WHATSAPP'
+               AND ec.status IN ('CONNECTED','DEGRADED')
+              WHERE u.\"isActive\" = true
+                AND u.role IN ('ADMIN','MANAGER','COUNSELOR')
+                AND c.\"metadata\" #>> '{engageos,whatsappIdentity,workspaceId}' = 'engagews_default'
+                AND EXISTS (
+                  SELECT 1 FROM \"WhatsAppConversation\" wc
+                  WHERE wc.\"contactId\" = c.id
+                    AND lower(coalesce(wc.source,'whatsapp')) = 'whatsapp'
+                )
+            ) q;"
+
           printf 'MUTATION_PERFORMED=false\n'
           printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
           printf 'PASS: READ_ONLY_CANARY_TARGET_DISCOVERY\n'
