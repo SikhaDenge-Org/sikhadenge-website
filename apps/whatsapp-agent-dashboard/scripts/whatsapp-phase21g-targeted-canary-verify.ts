@@ -7,6 +7,7 @@ const WORKSPACE_ID = "engagews_default";
 const FLOW_NAME = "WhatsApp Phase21E No-Send Canary";
 const SOURCE_EVENT_ID = process.env.PHASE21G_SOURCE_EVENT_ID?.trim() ?? "";
 const ACTIVATION_AT_RAW = process.env.PHASE21G_ACTIVATION_AT?.trim() ?? "";
+const VERIFIED_CANARY_WA_ID = process.env.PHASE21G_VERIFIED_CANARY_WA_ID?.trim() ?? "";
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -17,6 +18,9 @@ function record(value: unknown): Record<string, unknown> {
 async function main() {
   if (!SOURCE_EVENT_ID.startsWith("phase21g-canary:")) {
     throw new Error("PHASE21G_SOURCE_EVENT_ID must use the reserved phase21g-canary prefix.");
+  }
+  if (!/^\d{6,20}$/.test(VERIFIED_CANARY_WA_ID)) {
+    throw new Error("Verified internal canary ownership is not configured.");
   }
   const activationAt = new Date(ACTIVATION_AT_RAW);
   if (!ACTIVATION_AT_RAW || Number.isNaN(activationAt.getTime())) {
@@ -45,6 +49,7 @@ async function main() {
     take: 3,
     select: {
       id: true,
+      waId: true,
       metadata: true,
       conversations: {
         where: {
@@ -72,6 +77,7 @@ async function main() {
       conversation.tags.some((row) => row.tag.name === "CANARY_INTERNAL_TEST"),
     );
     return identity.workspaceId === WORKSPACE_ID &&
+      contact.waId === VERIFIED_CANARY_WA_ID &&
       canary.designated === true &&
       canary.kind === "INTERNAL_TEST" &&
       Boolean(taggedConversation);
@@ -134,6 +140,7 @@ async function main() {
     canaryAttemptCount: event.attemptCount,
     runtimeStatus: payload.status,
     designatedInternalCanaryVerified: true,
+    verifiedOwnershipSourceMatched: true,
     queuedMessageCount: queued.length,
     nonCanaryMutations,
     remainingNonCanaryDue,
