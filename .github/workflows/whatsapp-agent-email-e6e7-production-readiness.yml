@@ -63,7 +63,10 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production"             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes             "$SSH_USER@$SSH_HOST"             "DEPLOYED_SHA='$DEPLOYED_SHA' RUN_ID='$AUDIT_RUN_ID' bash -s" <<'REMOTE' | tee email-e6e7-readiness.log
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "DEPLOYED_SHA='$DEPLOYED_SHA' RUN_ID='$AUDIT_RUN_ID' bash -s" <<'REMOTE' | tee email-e6e7-readiness.log
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           BACKUP=/root/sikhadenge-backups/$RUN_ID
@@ -90,7 +93,10 @@ jobs:
           set +e
           mkdir -p email-e6e7-readiness-evidence
           for file_name in email-e6e7-readiness.json email-e6e7-readiness-result.txt; do
-            scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production"               -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes               "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${AUDIT_RUN_ID}/${file_name}"               "email-e6e7-readiness-evidence/${file_name}" >/dev/null 2>&1 || true
+            scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+              -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+              "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${AUDIT_RUN_ID}/${file_name}" \
+              "email-e6e7-readiness-evidence/${file_name}" >/dev/null 2>&1 || true
           done
           chmod -R go-rwx email-e6e7-readiness-evidence 2>/dev/null || true
 
