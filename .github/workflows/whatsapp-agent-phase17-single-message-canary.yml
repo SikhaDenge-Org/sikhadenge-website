@@ -220,7 +220,7 @@ jobs:
           PHASE17_CANARY_MODE=DRY_RUN \
           PHASE17_CANARY_WORKSPACE_ID=engagews_default \
           PHASE17_CANARY_MESSAGE_ID="$message_id" \
-          npx tsx scripts/engageos-phase17-single-message-canary.ts
+          npx tsx "$REVIEWED_CANARY_SCRIPT_REMOTE"
           printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
           printf 'PASS: PHASE17_SINGLE_MESSAGE_CANARY_PREFLIGHT\n'
           REMOTE
@@ -277,7 +277,7 @@ jobs:
             WHATSAPP_CUTOVER_APPROVED=true \
             WHATSAPP_OUTBOUND_LIVE_ACK=I_UNDERSTAND_LIVE_WHATSAPP_SENDS \
             WHATSAPP_OUTBOUND_KILL_SWITCH=off \
-            npx tsx scripts/engageos-phase17-single-message-canary.ts
+            npx tsx "$REVIEWED_CANARY_SCRIPT_REMOTE"
           REMOTE
 
       - name: Safety restore controlled launch to SHADOW
@@ -303,7 +303,7 @@ jobs:
           PHASE17_CANARY_WORKSPACE_ID=engagews_default \
           PHASE17_CANARY_EXPECTED_STATE_VERSION="$EXPECTED_STATE_VERSION" \
           PHASE17_CANARY_APPROVER_USER_ID="$APPROVER_USER_ID" \
-          npx tsx scripts/engageos-phase17-single-message-canary.ts
+          npx tsx "$REVIEWED_CANARY_SCRIPT_REMOTE"
           REMOTE
 
       - name: Final fail-closed production verification
