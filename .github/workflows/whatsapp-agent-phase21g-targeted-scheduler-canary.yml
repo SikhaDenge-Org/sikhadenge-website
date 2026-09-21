@@ -9,7 +9,6 @@ on:
         type: string
 
 permissions:
-  actions: read
   contents: read
 
 concurrency:
@@ -36,44 +35,14 @@ jobs:
       - name: Checkout reviewed operator code
         uses: actions/checkout@v4
 
-      - name: Validate exact deployed production SHA
+      - name: Validate exact targeted-canary inputs
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
           [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$PHASE21G_SOURCE_EVENT_ID" == phase21g-canary:* ]]
           [[ "$PHASE21G_VERIFIED_CANARY_WA_ID" =~ ^[0-9]{6,20}$ ]]
-
-          runs_json="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/actions/workflows/whatsapp-agent-production-batch1.yml/runs?branch=$RELEASE_BRANCH&per_page=50")"
-          deployed_sha=""
-
-          while IFS='|' read -r run_id run_sha; do
-            [[ -n "$run_id" && -n "$run_sha" ]] || continue
-            jobs_json="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100")"
-            job_result="$(jq -r '(.jobs | map(select(.name == "production-batch-1")) | .[0].conclusion) // "not_found"' <<<"$jobs_json")"
-            if [[ "$job_result" = "success" ]]; then
-              deployed_sha="$run_sha"
-              printf 'DEPLOYMENT_RUN_ID=%s\n' "$run_id"
-              printf 'DEPLOYMENT_JOB_RESULT=%s\n' "$job_result"
-              break
-            fi
-          done < <(
-            jq -r '
-              .workflow_runs
-              | map(select(.status == "completed"))
-              | sort_by(.created_at)
-              | reverse
-              | .[]
-              | [.id, .head_sha]
-              | @tsv
-            ' <<<"$runs_json" | tr '\t' '|'
-          )
-
-          test -n "$deployed_sha"
-          printf 'DEPLOYED_SHA=%s\n' "$deployed_sha"
-          test "$deployed_sha" = "$EXPECTED_LIVE_SHA"
+          printf 'PASS: PHASE21G_TARGETED_INPUT_GATE\n'
 
       - name: Configure pinned production SSH
         shell: bash
@@ -110,6 +79,18 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
           ssh-keygen -F "$canonical_host" -f "$HOME/.ssh/known_hosts" >/dev/null
 
+      - name: Verify exact live production SHA
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          live_sha="$(ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" \
+            "git -C /var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard rev-parse HEAD")"
+          printf 'LIVE_SHA=%s\n' "$live_sha"
+          test "$live_sha" = "$EXPECTED_LIVE_SHA"
+          printf 'PASS: EXACT_LIVE_SHA_VERIFIED\n'
+
       - name: Transport reviewed targeted canary scripts
         shell: bash
         run: |
@@ -124,6 +105,11 @@ jobs:
           enqueue_remote="/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard/scripts/.phase22c-targeted-enqueue-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.ts"
           verify_remote="/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard/scripts/.phase22c-targeted-verify-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.ts"
 
+          printf 'REVIEWED_ENQUEUE_REMOTE=%s\n' "$enqueue_remote" >> "$GITHUB_ENV"
+          printf 'REVIEWED_VERIFY_REMOTE=%s\n' "$verify_remote" >> "$GITHUB_ENV"
+          printf 'REVIEWED_ENQUEUE_SHA256=%s\n' "$enqueue_sha" >> "$GITHUB_ENV"
+          printf 'REVIEWED_VERIFY_SHA256=%s\n' "$verify_sha" >> "$GITHUB_ENV"
+
           scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
             "$enqueue_local" "$SSH_USER@$SSH_HOST:$enqueue_remote"
@@ -131,10 +117,6 @@ jobs:
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
             "$verify_local" "$SSH_USER@$SSH_HOST:$verify_remote"
 
-          printf 'REVIEWED_ENQUEUE_SHA256=%s\n' "$enqueue_sha" >> "$GITHUB_ENV"
-          printf 'REVIEWED_VERIFY_SHA256=%s\n' "$verify_sha" >> "$GITHUB_ENV"
-          printf 'REVIEWED_ENQUEUE_REMOTE=%s\n' "$enqueue_remote" >> "$GITHUB_ENV"
-          printf 'REVIEWED_VERIFY_REMOTE=%s\n' "$verify_remote" >> "$GITHUB_ENV"
 
       - name: Execute targeted scheduler canary
         shell: bash
@@ -348,6 +330,21 @@ jobs:
           printf 'ROLLBACK_CONTROLLER=WhatsApp_Automation_Scheduler_Activation\n'
           printf 'PASS: PHASE21G_TARGETED_SCHEDULER_CANARY\n'
           REMOTE
+
+      - name: Cleanup reviewed targeted canary scripts
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -n "${REVIEWED_ENQUEUE_REMOTE:-}" || -n "${REVIEWED_VERIFY_REMOTE:-}" ]]; then
+            if [[ -f "$HOME/.ssh/whatsapp-production" && -n "${SSH_HOST:-}" && -n "${SSH_USER:-}" && -n "${SSH_PORT:-}" ]]; then
+              ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+                -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 \
+                "$SSH_USER@$SSH_HOST" \
+                "rm -f '${REVIEWED_ENQUEUE_REMOTE:-}' '${REVIEWED_VERIFY_REMOTE:-}'" || true
+            fi
+          fi
+          exit 0
 
       - name: Upload targeted canary evidence
         if: always()
