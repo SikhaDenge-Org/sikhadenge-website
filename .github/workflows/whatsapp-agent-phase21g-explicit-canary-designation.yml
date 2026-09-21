@@ -17,6 +17,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -51,8 +52,35 @@ jobs:
           [[ "$PHASE21G_VERIFIED_CANARY_WA_ID" =~ ^[0-9]{6,20}$ ]]
           test "$PHASE21G_CANARY_WA_ID" = "$PHASE21G_VERIFIED_CANARY_WA_ID"
           test "$PHASE21G_CONFIRM" = "DESIGNATE_INTERNAL_CANARY"
-          release_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/$RELEASE_BRANCH" --jq '.commit.sha')"
-          test "$release_sha" = "$EXPECTED_LIVE_SHA"
+
+          runs_json="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/actions/workflows/whatsapp-agent-production-batch1.yml/runs?branch=$RELEASE_BRANCH&per_page=50")"
+          deployed_sha=""
+
+          while IFS='|' read -r run_id run_sha; do
+            [[ -n "$run_id" && -n "$run_sha" ]] || continue
+            jobs_json="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100")"
+            job_result="$(jq -r '(.jobs | map(select(.name == "production-batch-1")) | .[0].conclusion) // "not_found"' <<<"$jobs_json")"
+            if [[ "$job_result" = "success" ]]; then
+              deployed_sha="$run_sha"
+              printf 'DEPLOYMENT_RUN_ID=%s\n' "$run_id"
+              printf 'DEPLOYMENT_JOB_RESULT=%s\n' "$job_result"
+              break
+            fi
+          done < <(
+            jq -r '
+              .workflow_runs
+              | map(select(.event == "workflow_dispatch" and .status == "completed"))
+              | sort_by(.created_at)
+              | reverse
+              | .[]
+              | [.id, .head_sha]
+              | @tsv
+            ' <<<"$runs_json" | tr '\t' '|'
+          )
+
+          test -n "$deployed_sha"
+          printf 'DEPLOYED_SHA=%s\n' "$deployed_sha"
+          test "$deployed_sha" = "$EXPECTED_LIVE_SHA"
 
       - name: Configure pinned production SSH
         shell: bash
