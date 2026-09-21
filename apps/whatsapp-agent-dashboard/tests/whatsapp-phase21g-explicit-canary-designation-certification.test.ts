@@ -5,6 +5,10 @@ const source = readFileSync("scripts/whatsapp-phase21g-designate-internal-canary
 
 assert.match(source, /DESIGNATE_INTERNAL_CANARY/);
 assert.match(source, /PHASE21G_CANARY_WA_ID/);
+assert.match(source, /PHASE21G_VERIFIED_CANARY_WA_ID/);
+assert.match(source, /waId !== verifiedWaId/);
+assert.match(source, /role: \{ in: \["ADMIN", "MANAGER", "COUNSELOR"\] \}/);
+assert.match(source, /mode: "insensitive"/);
 assert.match(source, /CANARY_INTERNAL_TEST/);
 assert.match(source, /workspaceId !== WORKSPACE_ID/);
 assert.match(source, /connection\.channel !== "WHATSAPP"/);
