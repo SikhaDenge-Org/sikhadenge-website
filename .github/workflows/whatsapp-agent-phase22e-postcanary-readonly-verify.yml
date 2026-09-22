@@ -29,6 +29,8 @@ jobs:
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       EXPECTED_RUNTIME_SHA: 4e4bcb0119f2096ee2f95c95862c5c0d797c1021
       QUALIFIED_CANARY_MESSAGE_ID: cmuce80nn0005kwodm06mj7kf
+      REVIEWED_EMAIL_INTERNAL_TEST_BLOB: a04e7aa5942cc212413d90a862c600722f2a90b1
+      REVIEWED_EMAIL_INBOUND_READINESS_BLOB: 17afac5d654af11c90890dad36969d0d76cd9583
 
     steps:
       - name: Configure pinned production SSH
@@ -64,7 +66,7 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
             "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_RUNTIME_SHA='$EXPECTED_RUNTIME_SHA' QUALIFIED_CANARY_MESSAGE_ID='$QUALIFIED_CANARY_MESSAGE_ID' bash -s" <<'REMOTE' | tee phase22e-post-canary-readonly.txt
+            "EXPECTED_RUNTIME_SHA='$EXPECTED_RUNTIME_SHA' QUALIFIED_CANARY_MESSAGE_ID='$QUALIFIED_CANARY_MESSAGE_ID' REVIEWED_EMAIL_INTERNAL_TEST_BLOB='$REVIEWED_EMAIL_INTERNAL_TEST_BLOB' REVIEWED_EMAIL_INBOUND_READINESS_BLOB='$REVIEWED_EMAIL_INBOUND_READINESS_BLOB' bash -s" <<'REMOTE' | tee phase22e-post-canary-readonly.txt
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           cd "$APP"
@@ -81,9 +83,20 @@ jobs:
           if [[ "$tracked_dirty_count" = "0" ]]; then
             printf 'OUT_OF_SCOPE_EMAIL_DRIFT_PRESENT=false\n'
           else
-            allowed_dirty_line=" M apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts"
-            test "$tracked_dirty_count" = "1"
-            test "$tracked_dirty" = "$allowed_dirty_line"
+            expected_dirty="$(printf '%s\n' \
+              ' M apps/whatsapp-agent-dashboard/scripts/email-automation-production-internal-test.sh' \
+              ' M apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts' | LC_ALL=C sort)"
+            actual_dirty="$(printf '%s\n' "$tracked_dirty" | LC_ALL=C sort)"
+            test "$tracked_dirty_count" = "2"
+            test "$actual_dirty" = "$expected_dirty"
+            [[ "$REVIEWED_EMAIL_INTERNAL_TEST_BLOB" =~ ^[0-9a-f]{40}$ ]]
+            [[ "$REVIEWED_EMAIL_INBOUND_READINESS_BLOB" =~ ^[0-9a-f]{40}$ ]]
+            live_internal_test_blob="$(git hash-object scripts/email-automation-production-internal-test.sh)"
+            live_inbound_readiness_blob="$(git hash-object scripts/email-inbound-production-readiness.ts)"
+            printf 'REVIEWED_EMAIL_INTERNAL_TEST_BLOB_MATCH=%s\n' "$([[ "$live_internal_test_blob" = "$REVIEWED_EMAIL_INTERNAL_TEST_BLOB" ]] && echo true || echo false)"
+            printf 'REVIEWED_EMAIL_INBOUND_READINESS_BLOB_MATCH=%s\n' "$([[ "$live_inbound_readiness_blob" = "$REVIEWED_EMAIL_INBOUND_READINESS_BLOB" ]] && echo true || echo false)"
+            test "$live_internal_test_blob" = "$REVIEWED_EMAIL_INTERNAL_TEST_BLOB"
+            test "$live_inbound_readiness_blob" = "$REVIEWED_EMAIL_INBOUND_READINESS_BLOB"
             printf 'OUT_OF_SCOPE_EMAIL_DRIFT_PRESENT=true\n'
           fi
 
