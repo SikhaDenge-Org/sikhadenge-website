@@ -21,6 +21,7 @@ on:
       - "apps/whatsapp-agent-dashboard/prisma/migrations/**"
       - ".github/workflows/email-automation-ci.yml"
       - ".github/workflows/whatsapp-agent-email-internal-test.yml"
+      - ".github/workflows/whatsapp-agent-email-internal-test-*.yml"
       - ".github/workflows/whatsapp-agent-email-inbound-*.yml"
       - ".github/workflows/whatsapp-agent-email-lifecycle-*.yml"
 
