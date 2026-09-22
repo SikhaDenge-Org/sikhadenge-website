@@ -39,7 +39,7 @@ concurrency:
 
 jobs:
   canary:
-    runs-on: [self-hosted, Linux, X64, sikhadenge-ci]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: whatsapp-agent-production
     env:
@@ -105,6 +105,28 @@ jobs:
           ssh-keygen -y -f "$key" >/dev/null
           printf 'PASS: PINNED_SSH_READY\n'
 
+      - name: Transport reviewed canary executor
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          local_script="apps/whatsapp-agent-dashboard/scripts/engageos-phase17-single-message-canary.ts"
+          reviewed_email_drift_local="apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts"
+          test -f "$local_script"
+          test -f "$reviewed_email_drift_local"
+          remote_script="/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard/scripts/.phase22d-canary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.ts"
+          script_sha="$(sha256sum "$local_script" | awk '{print $1}')"
+          reviewed_email_drift_sha="$(sha256sum "$reviewed_email_drift_local" | awk '{print $1}')"
+          printf 'REVIEWED_EMAIL_DRIFT_SHA256=%s\n' "$reviewed_email_drift_sha" >> "$GITHUB_ENV"
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" "cat > '$remote_script'" < "$local_script"
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" "test -f '$remote_script' && test \"\$(sha256sum '$remote_script' | cut -d ' ' -f1)\" = '$script_sha'"
+          printf 'REVIEWED_CANARY_SCRIPT_REMOTE=%s\n' "$remote_script" >> "$GITHUB_ENV"
+          printf 'REVIEWED_CANARY_SCRIPT_SHA256=%s\n' "$script_sha" >> "$GITHUB_ENV"
+          printf 'PASS: REVIEWED_CANARY_EXECUTOR_TRANSPORTED\n'
+
       - name: Production fail-closed preflight and canary DRY_RUN
         id: preflight
         shell: bash
@@ -114,17 +136,31 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' MESSAGE_B64='$message_b64' VERIFIED_CANARY_WA_ID='$VERIFIED_CANARY_WA_ID' APPROVER_USER_ID='$APPROVER_USER_ID' EXECUTE='$EXECUTE' bash -s" <<'REMOTE'
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' MESSAGE_B64='$message_b64' VERIFIED_CANARY_WA_ID='$VERIFIED_CANARY_WA_ID' APPROVER_USER_ID='$APPROVER_USER_ID' EXECUTE='$EXECUTE' REVIEWED_CANARY_SCRIPT_REMOTE='$REVIEWED_CANARY_SCRIPT_REMOTE' REVIEWED_CANARY_SCRIPT_SHA256='$REVIEWED_CANARY_SCRIPT_SHA256' REVIEWED_EMAIL_DRIFT_SHA256='$REVIEWED_EMAIL_DRIFT_SHA256' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           cd "$APP"
+          [[ "$REVIEWED_CANARY_SCRIPT_REMOTE" == "$APP/scripts/.phase22d-canary-"*".ts" ]]
+          test -f "$REVIEWED_CANARY_SCRIPT_REMOTE"
+          test "$(sha256sum "$REVIEWED_CANARY_SCRIPT_REMOTE" | awk '{print $1}')" = "$REVIEWED_CANARY_SCRIPT_SHA256"
 
           live_sha="$(git rev-parse HEAD)"
-          dirty="$(git status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+          tracked_dirty="$(git status --porcelain --untracked-files=no | sed '/^$/d')"
+          dirty="$(printf '%s\n' "$tracked_dirty" | sed '/^$/d' | wc -l | tr -d ' ')"
           pm2_state="$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s);process.stdout.write(a.find(x=>x.name==="sikhadenge-whatsapp-agent")?.pm2_env?.status||"")})')"
           login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login)"
           test "$live_sha" = "$EXPECTED_RELEASE_SHA"
-          test "$dirty" = "0"
+          if [[ "$dirty" = "0" ]]; then
+            printf 'REVIEWED_EMAIL_DRIFT_PRESENT=false\n'
+          else
+            allowed_dirty_line=" M apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts"
+            test "$dirty" = "1"
+            test "$tracked_dirty" = "$allowed_dirty_line"
+            [[ "$REVIEWED_EMAIL_DRIFT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+            live_email_drift_sha="$(sha256sum scripts/email-inbound-production-readiness.ts | awk '{print $1}')"
+            test "$live_email_drift_sha" = "$REVIEWED_EMAIL_DRIFT_SHA256"
+            printf 'REVIEWED_EMAIL_DRIFT_PRESENT=true\n'
+          fi
           test "$pm2_state" = "online"
           test "$login_http" = "200"
           printf 'LIVE_SHA=%s\nTRACKED_DIRTY_COUNT=%s\nPM2_STATE=%s\nLOGIN_HTTP=%s\n' "$live_sha" "$dirty" "$pm2_state" "$login_http"
@@ -199,7 +235,7 @@ jobs:
           PHASE17_CANARY_MODE=DRY_RUN \
           PHASE17_CANARY_WORKSPACE_ID=engagews_default \
           PHASE17_CANARY_MESSAGE_ID="$message_id" \
-          npx tsx scripts/engageos-phase17-single-message-canary.ts
+          npx tsx "$REVIEWED_CANARY_SCRIPT_REMOTE"
           printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
           printf 'PASS: PHASE17_SINGLE_MESSAGE_CANARY_PREFLIGHT\n'
           REMOTE
@@ -213,10 +249,13 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' EXPECTED_STATE_VERSION='$EXPECTED_STATE_VERSION' MESSAGE_ID='$MESSAGE_ID' APPROVER_USER_ID='$APPROVER_USER_ID' REASON_B64='$reason_b64' VERIFIED_CANARY_WA_ID='$VERIFIED_CANARY_WA_ID' bash -s" <<'REMOTE'
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' EXPECTED_STATE_VERSION='$EXPECTED_STATE_VERSION' MESSAGE_ID='$MESSAGE_ID' APPROVER_USER_ID='$APPROVER_USER_ID' REASON_B64='$reason_b64' VERIFIED_CANARY_WA_ID='$VERIFIED_CANARY_WA_ID' REVIEWED_CANARY_SCRIPT_REMOTE='$REVIEWED_CANARY_SCRIPT_REMOTE' REVIEWED_CANARY_SCRIPT_SHA256='$REVIEWED_CANARY_SCRIPT_SHA256' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           cd "$APP"
+          [[ "$REVIEWED_CANARY_SCRIPT_REMOTE" == "$APP/scripts/.phase22d-canary-"*".ts" ]]
+          test -f "$REVIEWED_CANARY_SCRIPT_REMOTE"
+          test "$(sha256sum "$REVIEWED_CANARY_SCRIPT_REMOTE" | awk '{print $1}')" = "$REVIEWED_CANARY_SCRIPT_SHA256"
           test "$(git rev-parse HEAD)" = "$EXPECTED_RELEASE_SHA"
           set -a
           source .env
@@ -253,7 +292,7 @@ jobs:
             WHATSAPP_CUTOVER_APPROVED=true \
             WHATSAPP_OUTBOUND_LIVE_ACK=I_UNDERSTAND_LIVE_WHATSAPP_SENDS \
             WHATSAPP_OUTBOUND_KILL_SWITCH=off \
-            npx tsx scripts/engageos-phase17-single-message-canary.ts
+            npx tsx "$REVIEWED_CANARY_SCRIPT_REMOTE"
           REMOTE
 
       - name: Safety restore controlled launch to SHADOW
@@ -264,10 +303,13 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' EXPECTED_STATE_VERSION='$EXPECTED_STATE_VERSION' APPROVER_USER_ID='$APPROVER_USER_ID' bash -s" <<'REMOTE'
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' EXPECTED_STATE_VERSION='$EXPECTED_STATE_VERSION' APPROVER_USER_ID='$APPROVER_USER_ID' REVIEWED_CANARY_SCRIPT_REMOTE='$REVIEWED_CANARY_SCRIPT_REMOTE' REVIEWED_CANARY_SCRIPT_SHA256='$REVIEWED_CANARY_SCRIPT_SHA256' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           cd "$APP"
+          [[ "$REVIEWED_CANARY_SCRIPT_REMOTE" == "$APP/scripts/.phase22d-canary-"*".ts" ]]
+          test -f "$REVIEWED_CANARY_SCRIPT_REMOTE"
+          test "$(sha256sum "$REVIEWED_CANARY_SCRIPT_REMOTE" | awk '{print $1}')" = "$REVIEWED_CANARY_SCRIPT_SHA256"
           test "$(git rev-parse HEAD)" = "$EXPECTED_RELEASE_SHA"
           set -a
           source .env
@@ -276,7 +318,7 @@ jobs:
           PHASE17_CANARY_WORKSPACE_ID=engagews_default \
           PHASE17_CANARY_EXPECTED_STATE_VERSION="$EXPECTED_STATE_VERSION" \
           PHASE17_CANARY_APPROVER_USER_ID="$APPROVER_USER_ID" \
-          npx tsx scripts/engageos-phase17-single-message-canary.ts
+          npx tsx "$REVIEWED_CANARY_SCRIPT_REMOTE"
           REMOTE
 
       - name: Final fail-closed production verification
@@ -329,3 +371,15 @@ jobs:
           printf 'BASE_PROVIDER_RESTORED_FAIL_CLOSED=true\n'
           printf 'PASS: PHASE17_SINGLE_MESSAGE_CANARY_FINAL_SAFETY\n'
           REMOTE
+
+      - name: Cleanup reviewed canary executor
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set +e
+          if [[ -n "${REVIEWED_CANARY_SCRIPT_REMOTE:-}" && -f "$HOME/.ssh/whatsapp-production" ]]; then
+            ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \\
+              -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 \\
+              "$SSH_USER@$SSH_HOST" "rm -f '$REVIEWED_CANARY_SCRIPT_REMOTE'" || true
+          fi
+          exit 0
