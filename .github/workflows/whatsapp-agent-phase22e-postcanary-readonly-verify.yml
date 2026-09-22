@@ -31,6 +31,20 @@ jobs:
       QUALIFIED_CANARY_MESSAGE_ID: cmuce80nn0005kwodm06mj7kf
 
     steps:
+      - name: Checkout reviewed control-plane evidence
+        uses: actions/checkout@v4
+
+      - name: Capture reviewed out-of-scope drift hashes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          internal_test="apps/whatsapp-agent-dashboard/scripts/email-automation-production-internal-test.sh"
+          readiness="apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts"
+          test -f "$internal_test"
+          test -f "$readiness"
+          printf 'REVIEWED_EMAIL_INTERNAL_TEST_SHA256=%s\n' "$(sha256sum "$internal_test" | awk '{print $1}')" >> "$GITHUB_ENV"
+          printf 'REVIEWED_EMAIL_READINESS_SHA256=%s\n' "$(sha256sum "$readiness" | awk '{print $1}')" >> "$GITHUB_ENV"
+
       - name: Configure pinned production SSH
         shell: bash
         run: |
@@ -64,7 +78,7 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
             "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_RUNTIME_SHA='$EXPECTED_RUNTIME_SHA' QUALIFIED_CANARY_MESSAGE_ID='$QUALIFIED_CANARY_MESSAGE_ID' bash -s" <<'REMOTE' | tee phase22e-post-canary-readonly.txt
+            "EXPECTED_RUNTIME_SHA='$EXPECTED_RUNTIME_SHA' QUALIFIED_CANARY_MESSAGE_ID='$QUALIFIED_CANARY_MESSAGE_ID' REVIEWED_EMAIL_INTERNAL_TEST_SHA256='$REVIEWED_EMAIL_INTERNAL_TEST_SHA256' REVIEWED_EMAIL_READINESS_SHA256='$REVIEWED_EMAIL_READINESS_SHA256' bash -s" <<'REMOTE' | tee phase22e-post-canary-readonly.txt
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           cd "$APP"
@@ -81,10 +95,18 @@ jobs:
           if [[ "$tracked_dirty_count" = "0" ]]; then
             printf 'OUT_OF_SCOPE_EMAIL_DRIFT_PRESENT=false\n'
           else
-            allowed_dirty_line=" M apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts"
-            test "$tracked_dirty_count" = "1"
-            test "$tracked_dirty" = "$allowed_dirty_line"
+            expected_dirty="$(printf '%s\n%s\n'               ' M apps/whatsapp-agent-dashboard/scripts/email-automation-production-internal-test.sh'               ' M apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts')"
+            test "$tracked_dirty_count" = "2"
+            test "$tracked_dirty" = "$expected_dirty"
+            [[ "$REVIEWED_EMAIL_INTERNAL_TEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
+            [[ "$REVIEWED_EMAIL_READINESS_SHA256" =~ ^[0-9a-f]{64}$ ]]
+            live_internal_test_sha="$(sha256sum scripts/email-automation-production-internal-test.sh | awk '{print $1}')"
+            live_readiness_sha="$(sha256sum scripts/email-inbound-production-readiness.ts | awk '{print $1}')"
             printf 'OUT_OF_SCOPE_EMAIL_DRIFT_PRESENT=true\n'
+            printf 'EMAIL_INTERNAL_TEST_DRIFT_SHA256=%s\n' "$live_internal_test_sha"
+            printf 'EMAIL_READINESS_DRIFT_SHA256=%s\n' "$live_readiness_sha"
+            test "$live_internal_test_sha" = "$REVIEWED_EMAIL_INTERNAL_TEST_SHA256"
+            test "$live_readiness_sha" = "$REVIEWED_EMAIL_READINESS_SHA256"
           fi
 
           app_state="$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s||"[]");process.stdout.write(a.find(x=>x.name==="sikhadenge-whatsapp-agent")?.pm2_env?.status||"missing")})')"
