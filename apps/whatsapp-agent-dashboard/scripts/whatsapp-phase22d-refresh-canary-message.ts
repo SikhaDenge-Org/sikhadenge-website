@@ -175,7 +175,7 @@ async function main() {
       AND "revokedAt" IS NULL
       AND "expiresAt" > CURRENT_TIMESTAMP
   `;
-  const activeApprovals = Number(approvalRows[0]?.count ?? 0n);
+  const activeApprovals = approvalRows[0] ? Number(approvalRows[0].count) : 0;
   if (activeApprovals !== 0) {
     throw new Error("Stale canary still has an active outbound approval.");
   }
