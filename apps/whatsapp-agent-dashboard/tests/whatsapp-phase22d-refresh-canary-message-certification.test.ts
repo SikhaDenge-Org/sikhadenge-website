@@ -81,3 +81,31 @@ for (const forbidden of [
     `Refresh workflow must not contain unsafe dispatch contract: ${forbidden}`,
   );
 }
+
+
+for (const required of [
+  "REVIEWED_EMAIL_DRIFT_SHA256",
+  "email-inbound-production-readiness.ts",
+  "PRE_REFRESH_REVIEWED_EMAIL_DRIFT=true",
+  "test \"$tracked_dirty_count\" = \"1\"",
+  "test \"$tracked_dirty\" = \"$allowed_dirty_line\"",
+  "test \"$live_email_drift_sha\" = \"$REVIEWED_EMAIL_DRIFT_SHA256\"",
+]) {
+  assert.equal(
+    workflowSource.includes(required),
+    true,
+    `Missing exact reviewed checkout-drift isolation contract: ${required}`,
+  );
+}
+
+for (const forbidden of [
+  "git checkout -- apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts",
+  "git restore apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts",
+  "git reset --hard",
+]) {
+  assert.equal(
+    workflowSource.includes(forbidden),
+    false,
+    `WhatsApp workflow must not mutate unrelated email source: ${forbidden}`,
+  );
+}
