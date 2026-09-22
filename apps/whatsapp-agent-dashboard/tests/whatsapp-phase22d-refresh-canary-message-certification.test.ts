@@ -170,15 +170,6 @@ for (const forbidden of [
 }
 
 
-const singleCanaryWorkflowSource = readFileSync(
-  fileURLToPath(
-    new URL(
-      "../../../.github/workflows/whatsapp-agent-phase17-single-message-canary.yml",
-      import.meta.url,
-    ),
-  ),
-  "utf8",
-);
 const liveDispatcherWorkflowSource = readFileSync(
   fileURLToPath(
     new URL(
