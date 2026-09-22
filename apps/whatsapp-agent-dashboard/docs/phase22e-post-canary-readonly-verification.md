@@ -17,3 +17,5 @@ Required production invariants:
 
 The workflow is safe to rerun manually and also runs once when first merged to the protected WhatsApp release.
 Runtime note: optional automation/journey/campaign flags use the application’s fail-closed semantics, so unset/false/off/disabled are all treated as safely off. The actual provider-dispatch gate, outbound mode, and kill switch remain strict production assertions.
+
+Dirty-path inventory note: the verifier prints the exact tracked dirty paths before enforcing its allowlist. This is read-only evidence collection; unknown drift still fails closed.
