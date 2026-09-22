@@ -135,11 +135,21 @@ jobs:
               *) return 1 ;;
             esac
           }
-          for key in AUTOMATION_RUNTIME_ENABLED AUTOMATION_ACTIONS_ENABLED JOURNEY_RUNTIME_ENABLED JOURNEY_ACTIONS_ENABLED WHATSAPP_CAMPAIGNS_ENABLED; do
-            value="$(pm2v "$key")"
-            printf 'SCHEDULER_%s=%s\n' "$key" "${value:-unset}"
-            pm2off "$key"
-          done
+          automation_runtime="$(pm2v AUTOMATION_RUNTIME_ENABLED)"
+          automation_actions="$(pm2v AUTOMATION_ACTIONS_ENABLED)"
+          journey_runtime="$(pm2v JOURNEY_RUNTIME_ENABLED)"
+          journey_actions="$(pm2v JOURNEY_ACTIONS_ENABLED)"
+          campaigns_enabled="$(pm2v WHATSAPP_CAMPAIGNS_ENABLED)"
+          printf 'SCHEDULER_AUTOMATION_RUNTIME_ENABLED=%s\n' "${automation_runtime:-unset}"
+          printf 'SCHEDULER_AUTOMATION_ACTIONS_ENABLED=%s\n' "${automation_actions:-unset}"
+          printf 'SCHEDULER_JOURNEY_RUNTIME_ENABLED=%s\n' "${journey_runtime:-unset}"
+          printf 'SCHEDULER_JOURNEY_ACTIONS_ENABLED=%s\n' "${journey_actions:-unset}"
+          printf 'SCHEDULER_WHATSAPP_CAMPAIGNS_ENABLED=%s\n' "${campaigns_enabled:-unset}"
+          pm2off AUTOMATION_ACTIONS_ENABLED
+          pm2off JOURNEY_ACTIONS_ENABLED
+          pm2off WHATSAPP_CAMPAIGNS_ENABLED
+          printf 'SCHEDULER_OBSERVATION_RUNTIME_ALLOWED=true\n'
+          printf 'SCHEDULER_ACTION_EXECUTION_GATED=true\n'
           scheduler_outbound="$(pm2v WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)"
           scheduler_mode="$(pm2v WHATSAPP_OUTBOUND_MODE)"
           scheduler_kill="$(pm2v WHATSAPP_OUTBOUND_KILL_SWITCH)"
