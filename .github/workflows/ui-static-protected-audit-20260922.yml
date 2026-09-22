@@ -1,10 +1,10 @@
-name: UI Static Protected Recovery 20260922
+name: Main Site 502 Emergency Recovery 20260922
 
 on:
   workflow_dispatch:
     inputs:
       execute:
-        description: 'Promote validated recovery build to production port 3955'
+        description: 'Restart/recover main site origin if unhealthy'
         required: true
         type: boolean
         default: false
@@ -13,9 +13,9 @@ permissions:
   contents: read
 
 jobs:
-  recover-production:
+  recover:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 12
     environment: whatsapp-agent-production
     env:
       SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
@@ -24,8 +24,9 @@ jobs:
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       EXECUTE: ${{ inputs.execute }}
+
     steps:
-      - name: Configure SSH
+      - name: Configure pinned SSH
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -43,234 +44,233 @@ jobs:
           printf '[%s]:%s %s %s\n' "$SSH_HOST" "$port" "$kt" "$km" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
 
-      - name: Build isolated recovery candidate and optionally promote
+      - name: Diagnose and recover main site origin
         shell: bash
         run: |
           set -Eeuo pipefail
           port="${SSH_PORT:-22}"
           ssh -p "$port" -i "$HOME/.ssh/prod" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-            "$SSH_USER@$SSH_HOST" "EXECUTE='$EXECUTE' bash -s" > ui-static-recovery.txt <<'REMOTE'
+            "$SSH_USER@$SSH_HOST" "EXECUTE='$EXECUTE' bash -s" > main-site-502-recovery.txt <<'REMOTE'
           set -Eeuo pipefail
           export HOME=/root PM2_HOME=/root/.pm2
 
           APP='sikhadenge-checkout-hotfix-3955-20260831-210229'
-          SPACE='/var/www/sikhadenge.in/sikhadenge-website-space'
+          PORT=3955
           TS="$(date +%Y%m%d-%H%M%S)"
-          CAND="/var/tmp/sd-ui-recovery-$TS"
-          RECOVER="/var/www/sikhadenge.in/releases/ui-static-recovery-$TS"
-          BAK="/var/backups/sikhadenge/ui-static-recovery-$TS"
-          ENVFILE="/root/.cache/sd-ui-recovery-env-$TS.sh"
-          TEMP_PORT=3966
-          RECOVERY_NAME="sd-ui-recovery-canary-$TS"
-
-          cleanup() {
-            set +e
-            if [ -n "${TPID:-}" ]; then kill "$TPID" 2>/dev/null || true; wait "$TPID" 2>/dev/null || true; fi
-            rm -f "$ENVFILE"
-            if [ -d "$CAND" ]; then rm -rf "$CAND"; fi
-          }
-          trap cleanup EXIT
-
-          echo '=== PRECHECK ==='
-          hostname; date; df -h /
-          PID="$(pm2 pid "$APP" | tail -1 || true)"
-          echo "APP=$APP PID=$PID EXECUTE=$EXECUTE"
-          [[ "$PID" =~ ^[0-9]+$ ]] && [ "$PID" -gt 1 ]
-          OLD_CWD="$(readlink "/proc/$PID/cwd" || true)"
-          echo "OLD_CWD=$OLD_CWD"
-          case "$OLD_CWD" in *' (deleted)') echo 'DELETED_LIVE_CWD_CONFIRMED=1' ;; *) echo 'INCIDENT_GUARD_FAILED'; exit 3 ;; esac
-
-          test -f "$SPACE/package.json"
-          test -x "$SPACE/node_modules/.bin/next"
-          test -d "$SPACE/public"
-          echo -n 'SPACE_BUILD_ID='; cat "$SPACE/.next/BUILD_ID" 2>/dev/null || true
-          echo -n 'SPACE_STATIC_FILES='; find "$SPACE/.next/static" -type f 2>/dev/null | wc -l || true
-          du -sh "$SPACE" 2>/dev/null || true
-
-          avail_kb="$(df -Pk / | awk 'NR==2{print $4}')"
-          echo "AVAILABLE_KB=$avail_kb"
-          [ "$avail_kb" -gt 2500000 ]
-
-          mkdir -p "$CAND" "$BAK" /root/.cache
-          chmod 700 "$BAK" /root/.cache
-          cp /root/.pm2/dump.pm2 "$BAK/dump.pm2.before" 2>/dev/null || true
-          pm2 jlist > "$BAK/pm2-jlist.before.json" 2>/dev/null || true
-          chmod -R go-rwx "$BAK" || true
-
-          echo '=== PREPARE ISOLATED SOURCE ==='
-          rsync -a --delete \
-            --exclude node_modules --exclude '.next*' --exclude .git \
-            --exclude public --exclude data \
-            "$SPACE/" "$CAND/"
-          ln -s "$SPACE/node_modules" "$CAND/node_modules"
-          ln -s "$SPACE/public" "$CAND/public"
-          if [ -d "$SPACE/data" ]; then ln -s "$SPACE/data" "$CAND/data"; fi
-          test -f "$CAND/package.json"
-          test -x "$CAND/node_modules/.bin/next"
-
-          echo '=== BUILD CANDIDATE ==='
-          cd "$CAND"
-          npm run build
-          test -f "$CAND/.next/BUILD_ID"
-          echo -n 'CANDIDATE_BUILD_ID='; cat "$CAND/.next/BUILD_ID"
-          echo -n 'CANDIDATE_STATIC_FILES='; find "$CAND/.next/static" -type f | wc -l
-          du -sh "$CAND/.next"
-
-          echo '=== TEMPORARY PORT QA ==='
-          "$CAND/node_modules/.bin/next" start -p "$TEMP_PORT" > "/tmp/sd-ui-recovery-$TS.log" 2>&1 &
-          TPID=$!
-          ok=0
-          for i in $(seq 1 45); do
-            if curl -fsS -H 'Host: sikhadenge.in' --max-time 3 "http://127.0.0.1:$TEMP_PORT/?recovery=$TS" -o /tmp/recovery-home.html; then ok=1; break; fi
-            sleep 1
-          done
-          if [ "$ok" != 1 ]; then
-            tail -120 "/tmp/sd-ui-recovery-$TS.log" || true
-            exit 4
-          fi
-
-          python3 - "$TEMP_PORT" /tmp/recovery-home.html <<'PY'
-          import re,subprocess,sys
-          port=sys.argv[1]
-          s=open(sys.argv[2],errors='replace').read()
-          print('TEMP_HOME_BYTES',len(s))
-          for marker in ['Become an AI Expert','AI Tools You Will Master']:
-              print('TEMP_MARKER',repr(marker),marker in s)
-              if marker not in s: raise SystemExit('missing expected homepage marker: '+marker)
-          assets=[]
-          assets += re.findall(r'<link[^>]+href=["\']([^"\']+\.css(?:\?[^"\']*)?)["\']',s)
-          assets += re.findall(r'<script[^>]+src=["\']([^"\']+\.js(?:\?[^"\']*)?)["\']',s)
-          seen=[]
-          for a in assets:
-              if a.startswith('http') or a.startswith('/cdn-cgi/'): continue
-              if a not in seen: seen.append(a)
-          failures=[]
-          for a in seen:
-              p=subprocess.run(['curl','-sS','-o','/dev/null','-w','%{http_code}|%{content_type}|%{size_download}','-H','Host: sikhadenge.in','--max-time','8',f'http://127.0.0.1:{port}{a}'],capture_output=True,text=True)
-              print('TEMP_ASSET',p.stdout,a)
-              if not p.stdout.startswith('200|'): failures.append((a,p.stdout))
-          print('TEMP_ASSET_COUNT',len(seen),'TEMP_ASSET_FAILURES',len(failures))
-          if failures: raise SystemExit('temporary candidate has failed assets')
-          PY
-          kill "$TPID" 2>/dev/null || true
-          wait "$TPID" 2>/dev/null || true
-          TPID=''
-
-          echo 'CANDIDATE_QA_OK=1'
-          if [ "$EXECUTE" != 'true' ]; then
-            echo 'PRECHECK_ONLY=1 PROMOTION_SKIPPED=1'
-            exit 0
-          fi
-
-          echo '=== SNAPSHOT OLD RUNTIME ENV WITHOUT LOGGING VALUES ==='
-          python3 - "$PID" "$ENVFILE" <<'PY'
-          import os,re,shlex,sys
-          pid,out=sys.argv[1],sys.argv[2]
-          raw=open(f'/proc/{pid}/environ','rb').read().split(b'\0')
-          skip={'PWD','OLDPWD','SHLVL','_','PORT'}
-          lines=['set -a']
-          count=0
-          for item in raw:
-              if b'=' not in item: continue
-              k,v=item.split(b'=',1)
-              try:
-                  ks=k.decode(); vs=v.decode()
-              except UnicodeDecodeError:
-                  continue
-              if ks in skip or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*',ks): continue
-              lines.append(f'{ks}={shlex.quote(vs)}')
-              count+=1
-          lines += ['set +a']
-          open(out,'w').write('\n'.join(lines)+'\n')
-          os.chmod(out,0o600)
-          print('ENV_KEYS_CAPTURED',count)
-          PY
-
-          echo '=== PROMOTE VALIDATED BUILD ==='
-          mv "$CAND" "$RECOVER"
+          ENVFILE="/root/.cache/main-site-502-env-$TS.sh"
+          mkdir -p /root/.cache
+          chmod 700 /root/.cache
           trap 'rm -f "$ENVFILE"' EXIT
-          test -f "$RECOVER/.next/BUILD_ID"
-          source "$ENVFILE"
-          export PORT=3955
 
-          pm2 stop "$APP"
-          pm2 start "$RECOVER/node_modules/next/dist/bin/next" \
-            --name "$RECOVERY_NAME" --cwd "$RECOVER" -- start -p 3955
-          canary=0
-          for i in $(seq 1 35); do
-            if curl -fsS -H 'Host: sikhadenge.in' --max-time 3 "http://127.0.0.1:3955/?promote_canary=$TS" -o /tmp/promote-canary.html; then canary=1; break; fi
-            sleep 1
-          done
-          if [ "$canary" != 1 ]; then
-            pm2 logs "$RECOVERY_NAME" --lines 120 --nostream || true
-            exit 5
+          echo '=== HOST ==='
+          hostname
+          date
+          df -h /
+          free -h || true
+          echo "EXECUTE=$EXECUTE"
+
+          echo '=== NGINX ==='
+          nginx -t
+          systemctl is-active nginx || true
+
+          echo '=== PM2 BEFORE ==='
+          pm2 jlist > /tmp/main-site-pm2-before.json
+          node - /tmp/main-site-pm2-before.json "$APP" <<'NODE'
+          const fs=require('fs');
+          const [file,name]=process.argv.slice(2);
+          const p=JSON.parse(fs.readFileSync(file,'utf8')).find(x=>x.name===name);
+          if(!p){ console.log('PM2_PRESENT=false'); process.exit(0); }
+          const e=p.pm2_env||{};
+          console.log('PM2_PRESENT=true');
+          console.log('PM2_STATUS='+(e.status||''));
+          console.log('PM2_CWD='+(e.pm_cwd||''));
+          console.log('PM2_RESTARTS='+(e.restart_time??''));
+          console.log('PM2_UNSTABLE_RESTARTS='+(e.unstable_restarts??''));
+          console.log('PM2_PID='+(p.pid||0));
+          NODE
+
+          PM2_STATUS="$(node - /tmp/main-site-pm2-before.json "$APP" <<'NODE'
+          const fs=require('fs'); const [f,n]=process.argv.slice(2);
+          const p=JSON.parse(fs.readFileSync(f,'utf8')).find(x=>x.name===n);
+          process.stdout.write(String(p?.pm2_env?.status||'missing'));
+          NODE
+          )"
+          PM2_CWD="$(node - /tmp/main-site-pm2-before.json "$APP" <<'NODE'
+          const fs=require('fs'); const [f,n]=process.argv.slice(2);
+          const p=JSON.parse(fs.readFileSync(f,'utf8')).find(x=>x.name===n);
+          process.stdout.write(String(p?.pm2_env?.pm_cwd||''));
+          NODE
+          )"
+          PID="$(pm2 pid "$APP" | tail -1 || true)"
+          PROC_CWD=''
+          if [[ "$PID" =~ ^[0-9]+$ ]] && [ "$PID" -gt 1 ]; then
+            PROC_CWD="$(readlink "/proc/$PID/cwd" 2>/dev/null || true)"
+          fi
+          echo "PROC_CWD=$PROC_CWD"
+
+          echo '=== CANDIDATE RELEASES ==='
+          mapfile -t CANDS < <(find /var/www/sikhadenge.in/releases -maxdepth 1 -mindepth 1 -type d -name 'ui-static-recovery-*' -printf '%T@|%p\n' 2>/dev/null | sort -nr | cut -d'|' -f2-)
+          TARGET=''
+          if [ -n "$PM2_CWD" ] && [ -d "$PM2_CWD" ] && [ -f "$PM2_CWD/.next/BUILD_ID" ] && [ -x "$PM2_CWD/node_modules/.bin/next" ]; then
+            TARGET="$PM2_CWD"
+          else
+            for d in "${CANDS[@]}"; do
+              if [ -f "$d/.next/BUILD_ID" ] && [ -d "$d/.next/static" ] && [ -x "$d/node_modules/.bin/next" ]; then
+                TARGET="$d"; break
+              fi
+            done
+          fi
+          echo "TARGET=$TARGET"
+          test -n "$TARGET"
+          echo -n 'TARGET_BUILD_ID='; cat "$TARGET/.next/BUILD_ID"
+          echo -n 'TARGET_STATIC_FILES='; find "$TARGET/.next/static" -type f | wc -l
+
+          probe_direct() {
+            curl -sS -H 'Host: sikhadenge.in' --connect-timeout 3 --max-time 8 -o /tmp/main-home.html -w '%{http_code}' "http://127.0.0.1:$PORT/?origin_probe=$TS" 2>/dev/null || true
+          }
+          DIRECT_BEFORE="$(probe_direct)"
+          echo "DIRECT_BEFORE=$DIRECT_BEFORE"
+
+          HEALTHY=false
+          if [ "$PM2_STATUS" = 'online' ] && [ "$DIRECT_BEFORE" = '200' ] && [ -d "$TARGET" ]; then HEALTHY=true; fi
+          echo "ORIGIN_HEALTHY_BEFORE=$HEALTHY"
+
+          if [ "$HEALTHY" != 'true' ]; then
+            echo '=== ERROR LOG TAIL BEFORE RECOVERY ==='
+            pm2 logs "$APP" --lines 80 --nostream 2>&1 | tail -160 || true
+
+            if [ "$EXECUTE" != 'true' ]; then
+              echo 'RECOVERY_REQUIRED=true EXECUTION_SKIPPED=true'
+              exit 20
+            fi
+
+            echo '=== CAPTURE PM2 ENV ==='
+            node - /tmp/main-site-pm2-before.json "$APP" "$ENVFILE" <<'NODE'
+            const fs=require('fs'), sh=require('node:util');
+            const [file,name,out]=process.argv.slice(2);
+            const p=JSON.parse(fs.readFileSync(file,'utf8')).find(x=>x.name===name);
+            const e=p?.pm2_env||{};
+            const skip=new Set(['PWD','OLDPWD','SHLVL','_','PORT','PM2_HOME']);
+            const q=s=>"'"+String(s).replace(/'/g,"'\\''")+"'";
+            const lines=['set -a']; let n=0;
+            for(const [k,v] of Object.entries(e)){
+              if(!/^[A-Z_][A-Z0-9_]*$/.test(k) || skip.has(k)) continue;
+              if(typeof v!=='string' && typeof v!=='number' && typeof v!=='boolean') continue;
+              lines.push(k+'='+q(v)); n++;
+            }
+            lines.push('set +a');
+            fs.writeFileSync(out,lines.join('\n')+'\n',{mode:0o600});
+            console.log('ENV_KEYS_CAPTURED='+n);
+            NODE
+
+            echo '=== FIRST RECOVERY: PM2 RESTART ==='
+            if pm2 describe "$APP" >/dev/null 2>&1; then
+              pm2 restart "$APP" --update-env || true
+              for i in $(seq 1 25); do
+                code="$(probe_direct)"
+                echo "RESTART_PROBE_$i=$code"
+                [ "$code" = '200' ] && break
+                sleep 1
+              done
+            fi
+
+            code="$(probe_direct)"
+            if [ "$code" != '200' ]; then
+              echo '=== SECOND RECOVERY: RECREATE PM2 FROM VALIDATED RELEASE ==='
+              pm2 delete "$APP" >/dev/null 2>&1 || true
+              if [ -s "$ENVFILE" ]; then source "$ENVFILE"; fi
+              export PORT=3955
+              pm2 start "$TARGET/node_modules/next/dist/bin/next" \
+                --name "$APP" --cwd "$TARGET" -- start -p 3955
+              for i in $(seq 1 30); do
+                code="$(probe_direct)"
+                echo "RECREATE_PROBE_$i=$code"
+                [ "$code" = '200' ] && break
+                sleep 1
+              done
+            fi
+
+            test "$(probe_direct)" = '200'
+            pm2 save
           fi
 
-          python3 - /tmp/promote-canary.html <<'PY'
+          echo '=== DIRECT CONTENT / ASSET QA ==='
+          curl -fsS -H 'Host: sikhadenge.in' --max-time 10 "http://127.0.0.1:$PORT/?direct_qa=$TS" -o /tmp/main-direct.html
+          python3 - /tmp/main-direct.html "$PORT" <<'PY'
           import re,subprocess,sys
-          s=open(sys.argv[1],errors='replace').read()
-          assets=re.findall(r'<link[^>]+href=["\']([^"\']+\.css(?:\?[^"\']*)?)["\']',s)+re.findall(r'<script[^>]+src=["\']([^"\']+\.js(?:\?[^"\']*)?)["\']',s)
-          failures=[]
+          s=open(sys.argv[1],errors='replace').read(); port=sys.argv[2]
+          for marker in ['Become an AI Expert','AI Tools You Will Master']:
+              if marker not in s: raise SystemExit('missing '+marker)
+          assets=[]
+          assets+=re.findall(r'<link[^>]+href=["\']([^"\']+\.css(?:\?[^"\']*)?)["\']',s)
+          assets+=re.findall(r'<script[^>]+src=["\']([^"\']+\.js(?:\?[^"\']*)?)["\']',s)
+          fails=[]
           for a in dict.fromkeys(assets):
               if a.startswith('http') or a.startswith('/cdn-cgi/'): continue
-              p=subprocess.run(['curl','-sS','-o','/dev/null','-w','%{http_code}','-H','Host: sikhadenge.in','--max-time','8','http://127.0.0.1:3955'+a],capture_output=True,text=True)
-              if p.stdout!='200': failures.append((a,p.stdout))
-          print('PORT3955_ASSET_FAILURES',len(failures))
-          if failures: print(failures); raise SystemExit(1)
+              p=subprocess.run(['curl','-sS','-o','/dev/null','-w','%{http_code}','-H','Host: sikhadenge.in','--max-time','8',f'http://127.0.0.1:{port}{a}'],capture_output=True,text=True)
+              if p.stdout!='200': fails.append((a,p.stdout))
+          print('DIRECT_ASSET_COUNT',len(list(dict.fromkeys(assets))))
+          print('DIRECT_ASSET_FAILURES',len(fails))
+          if fails: print(fails); raise SystemExit(1)
           PY
 
-          echo '=== FINALIZE PM2 NAME ==='
-          pm2 stop "$RECOVERY_NAME"
-          pm2 delete "$RECOVERY_NAME"
-          pm2 delete "$APP"
-          source "$ENVFILE"
-          export PORT=3955
-          pm2 start "$RECOVER/node_modules/next/dist/bin/next" \
-            --name "$APP" --cwd "$RECOVER" -- start -p 3955
-          pm2 save
-          rm -f "$ENVFILE"
-
-          final=0
-          for i in $(seq 1 35); do
-            if curl -fsS -H 'Host: sikhadenge.in' --max-time 3 "http://127.0.0.1:3955/?final=$TS" -o /tmp/final-direct.html; then final=1; break; fi
-            sleep 1
+          for img in \
+            /assets/home/ai-jobs-data-banner/ai-jobs-data-banner-desktop.webp \
+            /assets/home/process-section/process-section-ai-digital-growth-desktop.png \
+            /assets/home/ai-growth-system-section/ai-growth-system-desktop.webp
+          do
+            c="$(curl -sS -o /dev/null -w '%{http_code}|%{content_type}|%{size_download}' -H 'Host: sikhadenge.in' --max-time 12 "http://127.0.0.1:$PORT$img" || true)"
+            echo "DIRECT_IMAGE=$c $img"
+            [[ "$c" == 200\|image/* ]]
           done
-          [ "$final" = 1 ]
-          curl -kfsSL --max-time 15 "https://sikhadenge.in/?final=$TS" -o /tmp/final-public.html
 
-          python3 - /tmp/final-direct.html /tmp/final-public.html <<'PY'
-          import re,subprocess,sys
-          for label,path,base in [('DIRECT',sys.argv[1],'http://127.0.0.1:3955'),('PUBLIC',sys.argv[2],'https://sikhadenge.in')]:
-              s=open(path,errors='replace').read()
-              for marker in ['Become an AI Expert','AI Tools You Will Master']:
-                  if marker not in s: raise SystemExit(f'{label} missing {marker}')
-              assets=re.findall(r'<link[^>]+href=["\']([^"\']+\.css(?:\?[^"\']*)?)["\']',s)+re.findall(r'<script[^>]+src=["\']([^"\']+\.js(?:\?[^"\']*)?)["\']',s)
-              failures=[]
-              for a in dict.fromkeys(assets):
-                  if a.startswith('http') or a.startswith('/cdn-cgi/'): continue
-                  cmd=['curl','-k' if label=='PUBLIC' else '-s','-sS','-o','/dev/null','-w','%{http_code}','--max-time','8',base+a]
-                  cmd=[x for x in cmd if x]
-                  p=subprocess.run(cmd,capture_output=True,text=True)
-                  print(label+'_ASSET',p.stdout,a)
-                  if p.stdout!='200': failures.append((a,p.stdout))
-              print(label+'_ASSET_FAILURES',len(failures))
-              if failures: raise SystemExit(f'{label} failed assets: {failures}')
-          PY
+          echo '=== PUBLIC QA ==='
+          public_code=''
+          for i in $(seq 1 10); do
+            public_code="$(curl -k -sS -L --connect-timeout 5 --max-time 15 -o /tmp/main-public.html -w '%{http_code}' "https://sikhadenge.in/?public_qa=$TS" || true)"
+            echo "PUBLIC_PROBE_$i=$public_code"
+            [ "$public_code" = '200' ] && break
+            sleep 3
+          done
+          if [ "$public_code" != '200' ] && [ "$EXECUTE" = 'true' ]; then
+            echo 'PUBLIC_STILL_BAD_RELOADING_NGINX=1'
+            nginx -t
+            systemctl reload nginx
+            sleep 3
+            for i in $(seq 1 8); do
+              public_code="$(curl -k -sS -L --connect-timeout 5 --max-time 15 -o /tmp/main-public.html -w '%{http_code}' "https://sikhadenge.in/?public_qa_reload=$TS" || true)"
+              echo "PUBLIC_RELOAD_PROBE_$i=$public_code"
+              [ "$public_code" = '200' ] && break
+              sleep 3
+            done
+          fi
+          test "$public_code" = '200'
 
-          NEWPID="$(pm2 pid "$APP" | tail -1)"
-          NEWCWD="$(readlink -f "/proc/$NEWPID/cwd")"
-          echo "FINAL_PID=$NEWPID FINAL_CWD=$NEWCWD RECOVER=$RECOVER"
-          [ "$NEWCWD" = "$RECOVER" ]
-          echo 'UI_STATIC_RECOVERY_PROMOTED=1'
+          echo '=== PM2 AFTER ==='
+          pm2 jlist > /tmp/main-site-pm2-after.json
+          node - /tmp/main-site-pm2-after.json "$APP" <<'NODE'
+          const fs=require('fs'); const [f,n]=process.argv.slice(2);
+          const p=JSON.parse(fs.readFileSync(f,'utf8')).find(x=>x.name===n);
+          if(!p) process.exit(2);
+          const e=p.pm2_env||{};
+          console.log('FINAL_PM2_STATUS='+(e.status||''));
+          console.log('FINAL_PM2_CWD='+(e.pm_cwd||''));
+          console.log('FINAL_PM2_PID='+(p.pid||0));
+          console.log('FINAL_RESTARTS='+(e.restart_time??''));
+          if(e.status!=='online') process.exit(3);
+          NODE
+          echo "FINAL_DIRECT=$(probe_direct)"
+          echo "FINAL_PUBLIC=$public_code"
+          echo 'MAIN_SITE_502_RECOVERY_OK=1'
           REMOTE
-          cat ui-static-recovery.txt
+          cat main-site-502-recovery.txt
 
-      - name: Upload recovery evidence
+      - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ui-static-recovery-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ui-static-recovery.txt
+          name: main-site-502-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: main-site-502-recovery.txt
           if-no-files-found: error
           retention-days: 7
