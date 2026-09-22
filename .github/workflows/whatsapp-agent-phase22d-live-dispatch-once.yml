@@ -31,7 +31,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
-          previous_id="$(gh run list -R "$GITHUB_REPOSITORY" --workflow "$TARGET_WORKFLOW" --branch "$TARGET_REF" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+          previous_ids="$(gh run list -R "$GITHUB_REPOSITORY" --workflow "$TARGET_WORKFLOW" --branch "$TARGET_REF" --event workflow_dispatch --limit 20 --json databaseId --jq '.[].databaseId' | tr '\n' ' ')"
           gh workflow run "$TARGET_WORKFLOW" -R "$GITHUB_REPOSITORY" --ref "$TARGET_REF" \
             -f expected_release_sha="$EXPECTED_LIVE_SHA" \
             -f expected_state_version="$EXPECTED_STATE_VERSION" \
@@ -41,13 +41,15 @@ jobs:
             -f execute=true
 
           run_id=""
-          for attempt in $(seq 1 30); do
+          for attempt in $(seq 1 40); do
             sleep 3
-            candidate="$(gh run list -R "$GITHUB_REPOSITORY" --workflow "$TARGET_WORKFLOW" --branch "$TARGET_REF" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
-            if [[ "$candidate" != "0" && "$candidate" != "$previous_id" ]]; then
-              run_id="$candidate"
-              break
-            fi
+            while read -r candidate; do
+              [[ -n "$candidate" ]] || continue
+              if [[ " $previous_ids " != *" $candidate "* ]]; then
+                run_id="$candidate"
+                break 2
+              fi
+            done < <(gh run list -R "$GITHUB_REPOSITORY" --workflow "$TARGET_WORKFLOW" --branch "$TARGET_REF" --event workflow_dispatch --limit 20 --json databaseId --jq '.[].databaseId')
           done
           test -n "$run_id"
           echo "TARGET_RUN_ID=$run_id" >> "$GITHUB_ENV"
