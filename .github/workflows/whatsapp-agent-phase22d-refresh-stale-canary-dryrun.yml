@@ -1,4 +1,5 @@
 name: WhatsApp Phase22D Refresh Stale Canary And DRY_RUN
+# Phase22D retry marker: prior same-push refresh correctly hit the <30m freshness guard; retry preserves the gate.
 
 on:
   push:
