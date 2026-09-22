@@ -21,7 +21,10 @@ for (const required of [
   "phase22d-internal-canary:",
   "queueOutboundMessage",
   "externalWhatsAppWriteSent: false",
-  "EngageControlledLaunchOutboundApproval",
+  "prisma.engageControlledLaunchOutboundApproval.count",
+  "prisma.whatsAppMessageStatusEvent.create",
+  "prisma.auditLog.create",
+  "failureCode: SUPERSEDE_CODE",
 ]) {
   assert.equal(source.includes(required), true, `Missing refresh safety contract: ${required}`);
 }
