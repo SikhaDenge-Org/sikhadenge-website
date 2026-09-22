@@ -1,0 +1,51 @@
+name: UI Critical Pages Verify 20260922
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ui-critical-pages-verify-20260922.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Verify critical routes and their CSS JS
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import concurrent.futures,re,subprocess,urllib.parse
+          BASE='https://sikhadenge.in'
+          routes=['/','/about-us','/admission','/affiliate','/ai-tools','/blog','/masterclass/claude/free','/masterclass/ai-video']
+          assets=set(); fails=[]
+          def get(url):
+              p=subprocess.run(['curl','-k','-sS','-L','--retry','4','--retry-all-errors','--retry-delay','2','--max-time','25','-A','SikhaDenge-Critical-Verify/1.0','-o','-','-w','\n__META__%{http_code}|%{content_type}',url],capture_output=True,text=True)
+              if '\n__META__' not in p.stdout: return '000','', '', p.stderr[-500:]
+              body,meta=p.stdout.rsplit('\n__META__',1); x=meta.strip().split('|',1)
+              return x[0], x[1] if len(x)>1 else '', body, p.stderr[-500:]
+          for route in routes:
+              code,ctype,body,err=get(BASE+route)
+              print('ROUTE',code,ctype,route,'BYTES',len(body))
+              if code!='200' or ('text/html' in ctype and len(body)<500):
+                  fails.append(('route',route,code,err)); continue
+              for a in re.findall(r'<link[^>]+href=["\']([^"\']+\.css(?:\?[^"\']*)?)["\']',body):
+                  assets.add(urllib.parse.urljoin(BASE,a))
+              for a in re.findall(r'<script[^>]+src=["\']([^"\']+\.js(?:\?[^"\']*)?)["\']',body):
+                  if '/cdn-cgi/' not in a: assets.add(urllib.parse.urljoin(BASE,a))
+          def chk(u):
+              code,ctype,body,err=get(u); return u,code,ctype,err
+          with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+              for u,code,ctype,err in ex.map(chk,sorted(assets)):
+                  print('ASSET',code,ctype,u.replace(BASE,''))
+                  if code!='200': fails.append(('asset',u,code,err))
+          print('CRITICAL_ROUTE_COUNT',len(routes),'UNIQUE_ASSET_COUNT',len(assets),'FAILURES',len(fails))
+          if fails:
+              print('FAILURE_DETAILS',fails)
+              raise SystemExit(1)
+          print('CRITICAL_PAGES_VERIFY_OK=1')
+          PY
