@@ -1,0 +1,63 @@
+name: Home Missing Images Public Audit 20260922
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/home-missing-images-public-audit-20260922.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Extract target image tags and probe sources
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl -fsSL --retry 3 --retry-all-errors --retry-delay 1 --max-time 30 \
+            'https://sikhadenge.in/?image_audit=20260922' -o home.html
+          python3 - <<'PY'
+          import re, html, subprocess, urllib.parse
+          s=open('home.html',errors='replace').read()
+          targets=[
+            '2025-26 AI job market shift',
+            'AI Digital Growth Creator Program section',
+            'Complete AI-Driven Growth System'
+          ]
+          urls=[]
+          for t in targets:
+              print('\nTARGET',t)
+              pos=s.find(t)
+              print('POS',pos)
+              if pos<0:
+                  continue
+              start=max(0,pos-2500); end=min(len(s),pos+2500)
+              chunk=s[start:end]
+              tags=re.findall(r'<(?:img|source)\b[^>]*>',chunk,re.I)
+              for tag in tags:
+                  dec=html.unescape(tag)
+                  if t in dec or any(x in dec for x in ['ai-jobs-data-banner','process-section-ai-digital-growth','ai-growth-system']):
+                      print('TAG',dec)
+                      for attr in ['src','srcset']:
+                          m=re.search(r'\b'+attr+r'=["\']([^"\']+)["\']',dec,re.I)
+                          if m:
+                              for part in m.group(1).split(','):
+                                  u=part.strip().split()[0]
+                                  if u.startswith('/'):
+                                      u=urllib.parse.urljoin('https://sikhadenge.in',u)
+                                  if u.startswith('http') and u not in urls:
+                                      urls.append(u)
+          print('\nURL_COUNT',len(urls))
+          failures=[]
+          for u in urls:
+              p=subprocess.run(['curl','-k','-sS','-L','--retry','3','--retry-all-errors','--retry-delay','1','--max-time','15','-o','/dev/null','-w','%{http_code}|%{content_type}|%{size_download}',u],capture_output=True,text=True)
+              print('PROBE',p.stdout,u)
+              if not p.stdout.startswith('200|image/'):
+                  failures.append((u,p.stdout,p.stderr[-300:]))
+          print('IMAGE_FAILURES',len(failures))
+          if failures: print('FAILURES',failures)
+          PY
