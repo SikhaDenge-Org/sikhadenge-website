@@ -33,6 +33,29 @@ if grep -Fq 'github.event.before' "$internal_workflow"; then
   exit 1
 fi
 
+internal_workflow_restore_required=(
+  'Reconcile post-test runtime to verified DRY_RUN'
+  'bash scripts/email-automation-production-dryrun-activate.sh'
+  'bash scripts/email-automation-scheduler-verify.sh'
+  'POST_TEST_DRYRUN_RECONCILE=PASS'
+  'RUNTIME_MODE=DRY_RUN'
+  'EXTERNAL_WRITES=false'
+  'SCHEDULER_ACTIVE=true'
+  'email-internal-post-test-restore.log'
+)
+
+for marker in "${internal_workflow_restore_required[@]}"; do
+  grep -Fq "$marker" "$internal_workflow" || {
+    echo "Missing internal-test workflow post-test DRY_RUN restore contract: $marker" >&2
+    exit 1
+  }
+done
+
+if ! awk '/- name: Reconcile post-test runtime to verified DRY_RUN/{getline; if($0 ~ /if: always\(\)/) found=1} END{exit found?0:1}' "$internal_workflow"; then
+  echo "Internal Email workflow post-test DRY_RUN reconciliation must run with if: always()." >&2
+  exit 1
+fi
+
 internal_script_required=(
   'sync_pm2_email_env_from_file'
   'APPLY=1 bash scripts/email-automation-scheduler-deactivate.sh'
