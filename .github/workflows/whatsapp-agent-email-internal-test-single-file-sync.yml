@@ -1,0 +1,154 @@
+name: Email Internal Test Single File Live Sync
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - "apps/whatsapp-agent-dashboard/docs/email-internal-test-single-file-sync-trigger.md"
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    concurrency:
+      group: whatsapp-agent-production
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_LIVE_SHA: 4e4bcb0119f2096ee2f95c95862c5c0d797c1021
+      EXPECTED_OLD_BLOB: b716b75f366a6e9d32e8fce413e3d42ebbc79ab6
+      EXPECTED_NEW_BLOB: a04e7aa5942cc212413d90a862c600722f2a90b1
+      SOURCE_FILE: apps/whatsapp-agent-dashboard/scripts/email-automation-production-internal-test.sh
+      REMOTE_APP: /var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+      RUN_ID: email-internal-test-script-sync-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Checkout reviewed release source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify reviewed source blob
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -f "$SOURCE_FILE"
+          actual="$(git hash-object "$SOURCE_FILE")"
+          printf 'REVIEWED_SOURCE_BLOB=%s\n' "$actual"
+          test "$actual" = "$EXPECTED_NEW_BLOB"
+
+      - name: Validate production secrets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          missing=0
+          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            [[ -n "${!variable_name:-}" ]] || { echo "Missing production secret: $variable_name" >&2; missing=1; }
+          done
+          test "$missing" = "0"
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Upload reviewed internal-test script
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
+            "$SOURCE_FILE" "$SSH_USER@$SSH_HOST:/tmp/email-automation-production-internal-test.sh.$RUN_ID"
+
+      - name: Guarded single-file production sync
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' EXPECTED_OLD_BLOB='$EXPECTED_OLD_BLOB' EXPECTED_NEW_BLOB='$EXPECTED_NEW_BLOB' APP='$REMOTE_APP' RUN_ID='$RUN_ID' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          test "$(id -u)" = "0"
+          cd "$APP"
+          target="scripts/email-automation-production-internal-test.sh"
+          incoming="/tmp/email-automation-production-internal-test.sh.$RUN_ID"
+          backup="/root/sikhadenge-backups/$RUN_ID"
+          install -d -m 700 "$backup"
+
+          current_sha="$(git rev-parse HEAD)"
+          current_blob="$(git hash-object "$target")"
+          incoming_blob="$(git hash-object "$incoming")"
+          printf 'LIVE_SHA=%s\n' "$current_sha"
+          printf 'OLD_BLOB=%s\n' "$current_blob"
+          printf 'INCOMING_BLOB=%s\n' "$incoming_blob"
+          test "$current_sha" = "$EXPECTED_LIVE_SHA"
+          test "$current_blob" = "$EXPECTED_OLD_BLOB"
+          test "$incoming_blob" = "$EXPECTED_NEW_BLOB"
+
+          EXPECTED_RELEASE_SHA="$EXPECTED_LIVE_SHA" \
+            ENV_FILE="$APP/.env" \
+            MAX_FAILED_EVENTS=0 \
+            bash scripts/email-automation-scheduler-verify.sh > "$backup/pre-sync-verify.log" 2>&1
+
+          cp -a "$target" "$backup/email-automation-production-internal-test.sh.before"
+          rollback() {
+            cp -a "$backup/email-automation-production-internal-test.sh.before" "$target"
+            rm -f "$incoming"
+            printf 'ROLLBACK=APPLIED\n' | tee -a "$backup/result.txt"
+          }
+          trap 'rollback' ERR
+
+          install -m 0755 "$incoming" "$target"
+          rm -f "$incoming"
+          new_blob="$(git hash-object "$target")"
+          printf 'NEW_BLOB=%s\n' "$new_blob"
+          test "$new_blob" = "$EXPECTED_NEW_BLOB"
+
+          EXPECTED_RELEASE_SHA="$EXPECTED_LIVE_SHA" \
+            ENV_FILE="$APP/.env" \
+            MAX_FAILED_EVENTS=0 \
+            bash scripts/email-automation-scheduler-verify.sh > "$backup/post-sync-verify.log" 2>&1
+
+          {
+            printf 'SYNC=PASS\n'
+            printf 'LIVE_SHA=%s\n' "$current_sha"
+            printf 'OLD_BLOB=%s\n' "$current_blob"
+            printf 'NEW_BLOB=%s\n' "$new_blob"
+            printf 'RUNTIME_MODE=DRY_RUN\n'
+            printf 'EXTERNAL_WRITES=false\n'
+            printf 'SCHEDULER_ACTIVE=true\n'
+          } | tee "$backup/result.txt"
+          chmod 600 "$backup"/*
+          printf 'ROLLBACK=NOT_APPLIED\n' >> "$backup/result.txt"
+          trap - ERR
+          REMOTE
+
+      - name: Verify live blob after sync
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
+            "$SSH_USER@$SSH_HOST" \
+            "cd '$REMOTE_APP' && test \"\$(git rev-parse HEAD)\" = '$EXPECTED_LIVE_SHA' && test \"\$(git hash-object scripts/email-automation-production-internal-test.sh)\" = '$EXPECTED_NEW_BLOB' && EXPECTED_RELEASE_SHA='$EXPECTED_LIVE_SHA' ENV_FILE='$REMOTE_APP/.env' MAX_FAILED_EVENTS=0 bash scripts/email-automation-scheduler-verify.sh >/dev/null && printf 'LIVE_EMAIL_INTERNAL_TEST_SCRIPT_SYNC=PASS\\nRUNTIME_MODE=DRY_RUN\\nEXTERNAL_WRITES=false\\nSCHEDULER_ACTIVE=true\\n'"
