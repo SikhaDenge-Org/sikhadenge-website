@@ -74,6 +74,9 @@ jobs:
           tracked_dirty_count="$(printf '%s\n' "$tracked_dirty" | sed '/^$/d' | wc -l | tr -d ' ')"
           printf 'LIVE_RUNTIME_SHA=%s\n' "$live_sha"
           printf 'TRACKED_DIRTY_COUNT=%s\n' "$tracked_dirty_count"
+          printf '%s\n' 'TRACKED_DIRTY_PATHS_BEGIN'
+          printf '%s\n' "$tracked_dirty"
+          printf '%s\n' 'TRACKED_DIRTY_PATHS_END'
           test "$live_sha" = "$EXPECTED_RUNTIME_SHA"
           if [[ "$tracked_dirty_count" = "0" ]]; then
             printf 'OUT_OF_SCOPE_EMAIL_DRIFT_PRESENT=false\n'
