@@ -1,0 +1,255 @@
+name: WhatsApp Phase22F Live Causal Dispatch Hotfix
+
+on:
+  push:
+    branches:
+      - production/whatsapp-runtime-phase22f-20260922
+    paths:
+      - .github/workflows/whatsapp-agent-phase22f-live-hotfix.yml
+      - apps/whatsapp-agent-dashboard/lib/outbound/outbound-service.ts
+      - apps/whatsapp-agent-dashboard/modules/automations/application/whatsapp-automation-scheduler.ts
+      - apps/whatsapp-agent-dashboard/ecosystem.automation-scheduler.cjs
+      - apps/whatsapp-agent-dashboard/tests/whatsapp-automation-scheduler-certification.test.ts
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_OLD_SHA: 4e4bcb0119f2096ee2f95c95862c5c0d797c1021
+      TARGET_REF: production/whatsapp-runtime-phase22f-20260922
+      REVIEWED_EMAIL_INTERNAL_TEST_SHA256: d7dc9e6950379aca830830680778d71fc083bfeaa5fea67dd3117fc0696eda0e
+      REVIEWED_EMAIL_READINESS_SHA256: a3c15e6b03e31ed9f4df38391a737a56a36625ae89c36f185a3d7df13fa8254c
+      EXPECTED_TARGETED_PREFIX: phase21g-canary:35627603829:1:4e4bcb0119f2096ee2f95c95862c5c0d797c1021
+      QUALIFIED_CANARY_MESSAGE_ID: cmuce80nn0005kwodm06mj7kf
+
+    steps:
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for value in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            test -n "${!value:-}"
+          done
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            SSH_PORT=22
+            echo 'SSH_PORT=22' >> "$GITHUB_ENV"
+          fi
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          ssh-keygen -y -f "$key" >/dev/null
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Fast-forward exact live runtime hotfix and restart scheduler only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          target_sha="$GITHUB_SHA"
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 -o ConnectionAttempts=3 -o ServerAliveInterval=10 -o ServerAliveCountMax=2 \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_OLD_SHA='$EXPECTED_OLD_SHA' TARGET_REF='$TARGET_REF' TARGET_SHA='$target_sha' REVIEWED_EMAIL_INTERNAL_TEST_SHA256='$REVIEWED_EMAIL_INTERNAL_TEST_SHA256' REVIEWED_EMAIL_READINESS_SHA256='$REVIEWED_EMAIL_READINESS_SHA256' EXPECTED_TARGETED_PREFIX='$EXPECTED_TARGETED_PREFIX' QUALIFIED_CANARY_MESSAGE_ID='$QUALIFIED_CANARY_MESSAGE_ID' bash -s" <<'REMOTE' | tee phase22f-live-hotfix.txt
+          set -Eeuo pipefail
+          ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          APP="$ROOT/apps/whatsapp-agent-dashboard"
+          SCHEDULER=sikhadenge-whatsapp-automation-scheduler
+          cd "$ROOT"
+
+          deployed=false
+          rollback() {
+            rc=$?
+            set +e
+            if [[ "$deployed" = "true" ]]; then
+              git reset --keep "$EXPECTED_OLD_SHA"
+              pm2 restart "$SCHEDULER" >/dev/null 2>&1 || true
+              sleep 2
+            fi
+            printf 'ROLLBACK_ATTEMPTED=%s\n' "$deployed"
+            exit "$rc"
+          }
+          trap rollback ERR
+
+          current_sha="$(git rev-parse HEAD)"
+          printf 'PRE_DEPLOY_SHA=%s\n' "$current_sha"
+          test "$current_sha" = "$EXPECTED_OLD_SHA"
+
+          tracked_dirty="$(git status --porcelain --untracked-files=no | sed '/^$/d')"
+          expected_dirty="$(printf '%s\n%s\n' \
+            ' M apps/whatsapp-agent-dashboard/scripts/email-automation-production-internal-test.sh' \
+            ' M apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts' | sort)"
+          actual_dirty="$(printf '%s\n' "$tracked_dirty" | sort)"
+          test "$(printf '%s\n' "$actual_dirty" | sed '/^$/d' | wc -l | tr -d ' ')" = "2"
+          test "$actual_dirty" = "$expected_dirty"
+
+          live_internal_test_sha="$(sha256sum "$APP/scripts/email-automation-production-internal-test.sh" | awk '{print $1}')"
+          live_readiness_sha="$(sha256sum "$APP/scripts/email-inbound-production-readiness.ts" | awk '{print $1}')"
+          test "$live_internal_test_sha" = "$REVIEWED_EMAIL_INTERNAL_TEST_SHA256"
+          test "$live_readiness_sha" = "$REVIEWED_EMAIL_READINESS_SHA256"
+          printf 'REVIEWED_EMAIL_DRIFT_PRESERVED=true\n'
+
+          pm2_json="$(pm2 jlist)"
+          pm2v() {
+            printf '%s' "$pm2_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const [name,key]=process.argv.slice(1);const p=JSON.parse(s||"[]").find(x=>x.name===name);process.stdout.write(String(p?.pm2_env?.[key]??""))})' "$1" "$2"
+          }
+          pm2off() {
+            case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+              ""|0|false|no|off|disabled) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          app_state="$(pm2v sikhadenge-whatsapp-agent status)"
+          scheduler_state="$(pm2v "$SCHEDULER" status)"
+          test "$app_state" = "online"
+          test "$scheduler_state" = "online"
+
+          pre_runtime="$(pm2v "$SCHEDULER" AUTOMATION_RUNTIME_ENABLED)"
+          pre_actions="$(pm2v "$SCHEDULER" AUTOMATION_ACTIONS_ENABLED)"
+          pre_prefix="$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX)"
+          pre_dispatch="$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)"
+          pre_mode="$(pm2v "$SCHEDULER" WHATSAPP_OUTBOUND_MODE)"
+          pre_kill="$(pm2v "$SCHEDULER" WHATSAPP_OUTBOUND_KILL_SWITCH)"
+          test "$pre_actions" = "false"
+          test "$pre_prefix" = "$EXPECTED_TARGETED_PREFIX"
+          test "$pre_dispatch" = "false"
+          test "$pre_mode" = "disabled"
+          test "$pre_kill" = "on"
+          printf 'PRE_DEPLOY_SCHEDULER_FAIL_CLOSED=true\n'
+
+          set -a
+          source "$APP/.env"
+          set +a
+          test "${WHATSAPP_OUTBOUND_MODE:-disabled}" != "live"
+          test "${WHATSAPP_CUTOVER_APPROVED:-false}" != "true"
+          test -z "${WHATSAPP_OUTBOUND_LIVE_ACK:-}"
+          test "${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}" = "on"
+
+          DB="$(node "$APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")"
+          state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,COALESCE((\"scope\"->>'externalWritesRequested'),'false'),\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='engagews_default';")"
+          printf 'PRE_DEPLOY_CONTROLLED_LAUNCH_STATE=%s\n' "$state"
+          IFS='|' read -r stage mode policy external requested version <<< "$state"
+          test "$stage" = "ONE_CONNECTED_ACCOUNT"
+          test "$mode" = "SHADOW"
+          test "$policy" = "NO_EXTERNAL_WRITES"
+          test "$external" = "false"
+          test "$requested" = "false"
+
+          approvals="$(psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "SELECT COUNT(*) FROM \"EngageControlledLaunchOutboundApproval\" WHERE \"workspaceId\"='engagews_default' AND \"consumedAt\" IS NULL AND \"revokedAt\" IS NULL AND \"expiresAt\">NOW();")"
+          test "$approvals" = "0"
+
+          git fetch --no-tags origin "$TARGET_REF"
+          fetched_sha="$(git rev-parse FETCH_HEAD)"
+          printf 'FETCHED_TARGET_SHA=%s\n' "$fetched_sha"
+          test "$fetched_sha" = "$TARGET_SHA"
+
+          actual_diff="$(git diff --name-only "$EXPECTED_OLD_SHA" "$TARGET_SHA" | sort)"
+          expected_diff="$(printf '%s\n%s\n%s\n%s\n%s\n' \
+            '.github/workflows/whatsapp-agent-phase22f-live-hotfix.yml' \
+            'apps/whatsapp-agent-dashboard/ecosystem.automation-scheduler.cjs' \
+            'apps/whatsapp-agent-dashboard/lib/outbound/outbound-service.ts' \
+            'apps/whatsapp-agent-dashboard/modules/automations/application/whatsapp-automation-scheduler.ts' \
+            'apps/whatsapp-agent-dashboard/tests/whatsapp-automation-scheduler-certification.test.ts' | sort)"
+          printf 'HOTFIX_DIFF_BEGIN\n%s\nHOTFIX_DIFF_END\n' "$actual_diff"
+          test "$actual_diff" = "$expected_diff"
+
+          git merge --ff-only "$TARGET_SHA"
+          deployed=true
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+
+          cd "$APP"
+          npm exec -- tsx tests/whatsapp-automation-scheduler-certification.test.ts
+
+          pm2 restart "$SCHEDULER" >/dev/null
+          sleep 5
+          pm2_json="$(pm2 jlist)"
+          test "$(pm2v "$SCHEDULER" status)" = "online"
+          test "$(pm2v sikhadenge-whatsapp-agent status)" = "online"
+          test "$(pm2v "$SCHEDULER" AUTOMATION_RUNTIME_ENABLED)" = "$pre_runtime"
+          test "$(pm2v "$SCHEDULER" AUTOMATION_ACTIONS_ENABLED)" = "$pre_actions"
+          test "$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX)" = "$pre_prefix"
+          test "$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)" = "$pre_dispatch"
+          test "$(pm2v "$SCHEDULER" WHATSAPP_OUTBOUND_MODE)" = "$pre_mode"
+          test "$(pm2v "$SCHEDULER" WHATSAPP_OUTBOUND_KILL_SWITCH)" = "$pre_kill"
+          pm2off "$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_ALLOW_GLOBAL_QUEUED_DISPATCH)"
+          printf 'POST_DEPLOY_SCHEDULER_FAIL_CLOSED=true\n'
+
+          cd "$ROOT"
+          post_dirty="$(git status --porcelain --untracked-files=no | sed '/^$/d' | sort)"
+          test "$post_dirty" = "$expected_dirty"
+          test "$(sha256sum "$APP/scripts/email-automation-production-internal-test.sh" | awk '{print $1}')" = "$REVIEWED_EMAIL_INTERNAL_TEST_SHA256"
+          test "$(sha256sum "$APP/scripts/email-inbound-production-readiness.ts" | awk '{print $1}')" = "$REVIEWED_EMAIL_READINESS_SHA256"
+
+          login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login)"
+          test "$login_http" = "200"
+          printf 'LOGIN_HTTP=%s\n' "$login_http"
+
+          post_state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,COALESCE((\"scope\"->>'externalWritesRequested'),'false'),\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='engagews_default';")"
+          test "$post_state" = "$state"
+          test "$(psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "SELECT COUNT(*) FROM \"EngageControlledLaunchOutboundApproval\" WHERE \"workspaceId\"='engagews_default' AND \"consumedAt\" IS NULL AND \"revokedAt\" IS NULL AND \"expiresAt\">NOW();")" = "0"
+
+          canary_state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT m.\"status\",CASE WHEN m.\"metaMessageId\" IS NULL THEN 'false' ELSE 'true' END FROM \"WhatsAppMessage\" m WHERE m.id='$QUALIFIED_CANARY_MESSAGE_ID';")"
+          printf 'QUALIFIED_CANARY_STATE=%s\n' "$canary_state"
+          IFS='|' read -r canary_status canary_meta <<< "$canary_state"
+          case "$canary_status" in SENT|DELIVERED|READ) ;; *) exit 41 ;; esac
+          test "$canary_meta" = "true"
+
+          parity="$(cd "$APP" && npx tsx scripts/engageos-whatsapp-provider-binding-reconcile.ts)"
+          printf '%s' "$parity" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const o=JSON.parse(s);if(o.mappingsNeedingRepairBefore!==0||o.mappingsNeedingRepairAfter!==0||o.externalWhatsAppWriteSent!==false||o.parityPassed!==true)process.exit(2);console.log("PASS: PROVIDER_BINDING_PARITY contactsScanned="+o.contactsScanned);})'
+
+          printf 'POST_DEPLOY_SHA=%s\n' "$(git rev-parse HEAD)"
+          printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          printf 'PASS: PHASE22F_LIVE_CAUSAL_DISPATCH_HOTFIX\n'
+          trap - ERR
+          REMOTE
+
+      - name: Record Phase22F live hotfix evidence
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          {
+            printf '## Phase22F live causal-dispatch hotfix\n\n'
+            printf '%s\n' "- Workflow run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            printf '%s\n' "- Previous live SHA: `$EXPECTED_OLD_SHA`"
+            printf '%s\n' "- Deployed hotfix SHA: `$GITHUB_SHA`"
+            printf '%s\n' "- Scope: causal targeted scheduler dispatch only"
+            printf '%s\n' "- Application PM2 restart: **no**"
+            printf '%s\n' "- Scheduler PM2 restart: **yes**"
+            printf '%s\n' "- General outbound enabled: **no**"
+            printf '%s\n' "- External WhatsApp write requested: **false**"
+          } > phase22f-live-hotfix-ledger.md
+          gh issue comment 65 -R "$GITHUB_REPOSITORY" --body-file phase22f-live-hotfix-ledger.md
+
+      - name: Upload Phase22F deployment evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase22f-live-hotfix-${{ github.run_id }}
+          path: phase22f-live-hotfix.txt
+          if-no-files-found: error
+          retention-days: 30

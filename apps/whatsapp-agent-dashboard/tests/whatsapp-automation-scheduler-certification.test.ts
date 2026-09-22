@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 
 const outbox = readFileSync("modules/automations/application/whatsapp-automation-event-outbox.ts", "utf8");
 const scheduler = readFileSync("modules/automations/application/whatsapp-automation-scheduler.ts", "utf8");
+const outbound = readFileSync("lib/outbound/outbound-service.ts", "utf8");
 const worker = readFileSync("scripts/whatsapp-automation-scheduler.ts", "utf8");
 const ecosystem = readFileSync("ecosystem.automation-scheduler.cjs", "utf8");
 const webhook = readFileSync("lib/meta/webhook-processor.ts", "utf8");
@@ -25,6 +26,15 @@ assert.match(ecosystem, /WHATSAPP_AUTOMATION_SCHEDULER_ENABLED: "true"/);
 assert.match(ecosystem, /AUTOMATION_RUNTIME_ENABLED: "false"/);
 assert.match(ecosystem, /AUTOMATION_ACTIONS_ENABLED: "false"/);
 assert.match(ecosystem, /WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX: ""/);
+
+assert.match(scheduler, /WHATSAPP_AUTOMATION_ALLOW_GLOBAL_QUEUED_DISPATCH/);
+assert.match(scheduler, /messageIds: automationEvents\.queuedMessageIds/);
+assert.match(scheduler, /Global queued outbound dispatch requires WHATSAPP_AUTOMATION_ALLOW_GLOBAL_QUEUED_DISPATCH=true/);
+assert.match(scheduler, /queuedMessageIds: \[\.\.\.new Set\(results\.flatMap/);
+assert.match(outbound, /messageIds\?: string\[\]/);
+assert.match(outbound, /messageIdsProvided && messageIds\.length === 0/);
+assert.match(outbound, /where\.id = \{ in: messageIds \}/);
+assert.match(ecosystem, /WHATSAPP_AUTOMATION_ALLOW_GLOBAL_QUEUED_DISPATCH: "false"/);
 assert.match(ecosystem, /WHATSAPP_OUTBOUND_MODE: "disabled"/);
 assert.match(webhook, /enqueueWhatsAppAutomationEvent/);
 assert.match(webhook, /trigger: "INCOMING_KEYWORD"/);

@@ -118,10 +118,10 @@ async function processAutomationEvent(eventId: string, now: Date) {
     where: { id: eventId, status: "PENDING", availableAt: { lte: now } },
     data: { status: "PROCESSING", claimedAt: now, attemptCount: { increment: 1 }, lastError: null },
   });
-  if (claimed.count !== 1) return { claimed: false, matched: 0, executed: 0 };
+  if (claimed.count !== 1) return { claimed: false, matched: 0, executed: 0, queuedMessageIds: [] as string[] };
 
   const event = await prisma.engageWhatsAppAutomationEvent.findUnique({ where: { id: eventId } });
-  if (!event) return { claimed: false, matched: 0, executed: 0 };
+  if (!event) return { claimed: false, matched: 0, executed: 0, queuedMessageIds: [] as string[] };
   try {
     const conversation = await resolveConversation({ conversationId: event.conversationId, contactId: event.contactId });
     if (!conversation) throw new Error("WhatsApp automation event has no resolvable conversation.");
@@ -131,6 +131,7 @@ async function processAutomationEvent(eventId: string, now: Date) {
     const flows = (await listAutomationFlowsForWorkspace(event.workspaceId, true)).filter((flow) => flow.status === "ACTIVE");
     let matched = 0;
     let executed = 0;
+    const queuedMessageIds = new Set<string>();
     for (const flow of flows) {
       if (targetFlowId && flow.flowId !== targetFlowId) continue;
       if (targetFlowId && Number.isFinite(targetFlowVersion) && flow.version !== targetFlowVersion) continue;
@@ -144,7 +145,7 @@ async function processAutomationEvent(eventId: string, now: Date) {
         payload,
       })) continue;
       matched += 1;
-      await executePublishedAutomation({
+      const execution = await executePublishedAutomation({
         flowId: flow.flowId,
         eventId: event.eventKey,
         conversationId: conversation.id,
@@ -159,13 +160,14 @@ async function processAutomationEvent(eventId: string, now: Date) {
         },
         now,
       });
+      for (const messageId of execution.run.queuedMessageIds) queuedMessageIds.add(messageId);
       executed += 1;
     }
     await prisma.engageWhatsAppAutomationEvent.update({
       where: { id: event.id },
       data: { status: "PROCESSED", claimedAt: null, processedAt: now, lastError: null },
     });
-    return { claimed: true, matched, executed };
+    return { claimed: true, matched, executed, queuedMessageIds: [...queuedMessageIds] };
   } catch (error) {
     const current = await prisma.engageWhatsAppAutomationEvent.findUnique({ where: { id: event.id }, select: { attemptCount: true } });
     const attempts = current?.attemptCount ?? MAX_EVENT_ATTEMPTS;
@@ -179,7 +181,7 @@ async function processAutomationEvent(eventId: string, now: Date) {
         lastError: (error instanceof Error ? error.message : "Automation event processing failed.").slice(0, 1_000),
       },
     });
-    return { claimed: true, matched: 0, executed: 0, error: error instanceof Error ? error.message : "Automation event processing failed." };
+    return { claimed: true, matched: 0, executed: 0, queuedMessageIds: [] as string[], error: error instanceof Error ? error.message : "Automation event processing failed." };
   }
 }
 
@@ -202,6 +204,7 @@ async function processDueAutomationEvents(now: Date, limit: number, sourceEventP
     matched: results.reduce((sum, item) => sum + item.matched, 0),
     executed: results.reduce((sum, item) => sum + item.executed, 0),
     failed: results.filter((item) => "error" in item).length,
+    queuedMessageIds: [...new Set(results.flatMap((item) => item.queuedMessageIds))],
   };
 }
 
@@ -238,6 +241,7 @@ export function getWhatsAppAutomationSchedulerStatus() {
     journey,
     campaignsEnabled: enabled("WHATSAPP_CAMPAIGNS_ENABLED", false),
     outboundDispatchEnabled: enabled("WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED", false),
+    allowGlobalQueuedDispatch: enabled("WHATSAPP_AUTOMATION_ALLOW_GLOBAL_QUEUED_DISPATCH", false),
     systemActorIdConfigured: Boolean(process.env.WHATSAPP_AUTOMATION_SYSTEM_ACTOR_ID?.trim()),
     eventSourcePrefix: process.env.WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX?.trim() || "",
   };
@@ -287,7 +291,18 @@ export async function runWhatsAppAutomationSchedulerCycle(input?: { now?: Date; 
     if (status.automation.outboundMode !== "live") {
       throw new Error("WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED requires WHATSAPP_OUTBOUND_MODE=live.");
     }
-    outbound = await dispatchQueuedOutboundBatch(limit);
+    if (targetedEventCohort) {
+      outbound = await dispatchQueuedOutboundBatch(limit, {
+        messageIds: automationEvents.queuedMessageIds,
+      });
+    } else {
+      if (!status.allowGlobalQueuedDispatch) {
+        throw new Error(
+          "Global queued outbound dispatch requires WHATSAPP_AUTOMATION_ALLOW_GLOBAL_QUEUED_DISPATCH=true.",
+        );
+      }
+      outbound = await dispatchQueuedOutboundBatch(limit);
+    }
   }
 
   return { status, paused: false, recoveredClaims, timeTriggers, automationEvents, resumedRuns, journeys, campaigns, outbound };
