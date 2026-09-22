@@ -23,10 +23,11 @@ jobs:
           set -Eeuo pipefail
           gh workflow run ui-static-protected-audit-20260922.yml \
             --repo "$GITHUB_REPOSITORY" \
-            --ref release/whatsapp-instagram-agent-flow-20260731 \
+            --ref ops/main-site-502-emergency-recovery-20260922 \
             -f execute=true
           echo 'PROTECTED_UI_STATIC_AUDIT_DISPATCHED=1'
 # preflight-dispatch-20260922-01
 # execute-recovery-20260922-01
 # execute-recovery-20260922-02
 # execute-recovery-20260922-03
+# dispatch-emergency-ops-20260922-01
