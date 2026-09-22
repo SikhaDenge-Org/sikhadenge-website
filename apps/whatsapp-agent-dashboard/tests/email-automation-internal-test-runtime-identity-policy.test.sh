@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-workflow="../../../.github/workflows/whatsapp-agent-email-internal-test.yml"
+workflow="../../.github/workflows/whatsapp-agent-email-internal-test.yml"
 
 test -f "$workflow"
 
