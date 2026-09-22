@@ -10,3 +10,5 @@ Guardrails:
 - backup + rollback on any sync/verification failure
 - post-sync DRY_RUN scheduler verification required
 - no app build, no database migration, no customer/cohort activation, no email send
+
+Retry note (2026-09-22): initial production run stopped before mutation because SCP/SFTP could not write the remote /tmp staging file. Retry 2 streams the reviewed file over the already-pinned SSH session into the protected root backup directory; all live SHA/blob/DRY_RUN guards remain unchanged.
