@@ -29,6 +29,7 @@ jobs:
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       EXPECTED_RUNTIME_SHA: 4e4bcb0119f2096ee2f95c95862c5c0d797c1021
       QUALIFIED_CANARY_MESSAGE_ID: cmuce80nn0005kwodm06mj7kf
+      EXPECTED_TARGETED_SOURCE_EVENT_PREFIX: phase21g-canary:35627603829:1:4e4bcb0119f2096ee2f95c95862c5c0d797c1021
 
     steps:
       - name: Checkout reviewed control-plane evidence
@@ -79,7 +80,7 @@ jobs:
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             -o ConnectTimeout=20 -o ConnectionAttempts=3 -o ServerAliveInterval=10 -o ServerAliveCountMax=2 \
             "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_RUNTIME_SHA='$EXPECTED_RUNTIME_SHA' QUALIFIED_CANARY_MESSAGE_ID='$QUALIFIED_CANARY_MESSAGE_ID' REVIEWED_EMAIL_INTERNAL_TEST_SHA256='$REVIEWED_EMAIL_INTERNAL_TEST_SHA256' REVIEWED_EMAIL_READINESS_SHA256='$REVIEWED_EMAIL_READINESS_SHA256' bash -s" <<'REMOTE' | tee phase22e-post-canary-readonly.txt
+            "EXPECTED_RUNTIME_SHA='$EXPECTED_RUNTIME_SHA' QUALIFIED_CANARY_MESSAGE_ID='$QUALIFIED_CANARY_MESSAGE_ID' EXPECTED_TARGETED_SOURCE_EVENT_PREFIX='$EXPECTED_TARGETED_SOURCE_EVENT_PREFIX' REVIEWED_EMAIL_INTERNAL_TEST_SHA256='$REVIEWED_EMAIL_INTERNAL_TEST_SHA256' REVIEWED_EMAIL_READINESS_SHA256='$REVIEWED_EMAIL_READINESS_SHA256' bash -s" <<'REMOTE' | tee phase22e-post-canary-readonly.txt
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           cd "$APP"
@@ -140,14 +141,29 @@ jobs:
           journey_runtime="$(pm2v JOURNEY_RUNTIME_ENABLED)"
           journey_actions="$(pm2v JOURNEY_ACTIONS_ENABLED)"
           campaigns_enabled="$(pm2v WHATSAPP_CAMPAIGNS_ENABLED)"
+          event_source_prefix="$(pm2v WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX)"
           printf 'SCHEDULER_AUTOMATION_RUNTIME_ENABLED=%s\n' "${automation_runtime:-unset}"
           printf 'SCHEDULER_AUTOMATION_ACTIONS_ENABLED=%s\n' "${automation_actions:-unset}"
           printf 'SCHEDULER_JOURNEY_RUNTIME_ENABLED=%s\n' "${journey_runtime:-unset}"
           printf 'SCHEDULER_JOURNEY_ACTIONS_ENABLED=%s\n' "${journey_actions:-unset}"
           printf 'SCHEDULER_WHATSAPP_CAMPAIGNS_ENABLED=%s\n' "${campaigns_enabled:-unset}"
-          pm2off AUTOMATION_ACTIONS_ENABLED
+          printf 'SCHEDULER_WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX=%s\n' "${event_source_prefix:-unset}"
           pm2off JOURNEY_ACTIONS_ENABLED
           pm2off WHATSAPP_CAMPAIGNS_ENABLED
+
+          automation_runtime_norm="$(printf '%s' "$automation_runtime" | tr '[:upper:]' '[:lower:]')"
+          automation_actions_norm="$(printf '%s' "$automation_actions" | tr '[:upper:]' '[:lower:]')"
+          if [[ "$automation_actions_norm" = "true" ]]; then
+            test "$automation_runtime_norm" = "true"
+            test "$event_source_prefix" = "$EXPECTED_TARGETED_SOURCE_EVENT_PREFIX"
+            printf 'SCHEDULER_TARGETED_AUTOMATION_ACTION_MODE=true\n'
+          else
+            pm2off AUTOMATION_ACTIONS_ENABLED
+            if [[ -n "$event_source_prefix" ]]; then
+              test "$event_source_prefix" = "$EXPECTED_TARGETED_SOURCE_EVENT_PREFIX"
+            fi
+            printf 'SCHEDULER_TARGETED_AUTOMATION_ACTION_MODE=false\n'
+          fi
           printf 'SCHEDULER_OBSERVATION_RUNTIME_ALLOWED=true\n'
           printf 'SCHEDULER_ACTION_EXECUTION_GATED=true\n'
           scheduler_outbound="$(pm2v WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)"
@@ -171,6 +187,19 @@ jobs:
           printf 'BASE_OUTBOUND_FAIL_CLOSED=true\n'
 
           DB="$(node scripts/prisma-postgres-cli-url.mjs "$DATABASE_URL")"
+
+          if [[ "$automation_actions_norm" = "true" ]]; then
+            targeted_event_state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT COUNT(*),COALESCE(MIN(\"status\"),''),COALESCE(MIN(\"attemptCount\"),0),SUM(CASE WHEN \"status\"='PENDING' THEN 1 ELSE 0 END),SUM(CASE WHEN \"lastError\" IS NOT NULL THEN 1 ELSE 0 END) FROM \"EngageWhatsAppAutomationEvent\" WHERE \"workspaceId\"='engagews_default' AND \"sourceEventId\" LIKE '$EXPECTED_TARGETED_SOURCE_EVENT_PREFIX%';")"
+            printf 'TARGETED_AUTOMATION_EVENT_STATE=%s\n' "$targeted_event_state"
+            IFS='|' read -r targeted_count targeted_status targeted_attempts targeted_pending targeted_errors <<< "$targeted_event_state"
+            test "$targeted_count" = "1"
+            test "$targeted_status" = "PROCESSED"
+            test "$targeted_attempts" = "1"
+            test "$targeted_pending" = "0"
+            test "$targeted_errors" = "0"
+            printf 'TARGETED_AUTOMATION_COHORT_DORMANT=true\n'
+          fi
+
           state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,COALESCE((\"scope\"->>'externalWritesRequested'),'false'),\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='engagews_default';")"
           printf 'CONTROLLED_LAUNCH_STATE=%s\n' "$state"
           IFS='|' read -r stage mode policy external requested version <<< "$state"
