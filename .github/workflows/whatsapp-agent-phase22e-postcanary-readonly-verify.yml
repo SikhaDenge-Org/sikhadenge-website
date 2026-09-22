@@ -76,7 +76,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
-            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 -o ConnectionAttempts=3 -o ServerAliveInterval=10 -o ServerAliveCountMax=2 \
             "$SSH_USER@$SSH_HOST" \
             "EXPECTED_RUNTIME_SHA='$EXPECTED_RUNTIME_SHA' QUALIFIED_CANARY_MESSAGE_ID='$QUALIFIED_CANARY_MESSAGE_ID' REVIEWED_EMAIL_INTERNAL_TEST_SHA256='$REVIEWED_EMAIL_INTERNAL_TEST_SHA256' REVIEWED_EMAIL_READINESS_SHA256='$REVIEWED_EMAIL_READINESS_SHA256' bash -s" <<'REMOTE' | tee phase22e-post-canary-readonly.txt
           set -Eeuo pipefail
