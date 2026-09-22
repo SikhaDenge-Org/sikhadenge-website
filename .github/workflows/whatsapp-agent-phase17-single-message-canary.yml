@@ -1,5 +1,4 @@
 name: WhatsApp Agent Phase17 Single Message Canary
-run-name: WhatsApp Phase17 Canary ${{ inputs.correlation_id || github.run_id }}
 
 on:
   workflow_dispatch:
@@ -30,10 +29,6 @@ on:
         required: true
         default: false
         type: boolean
-      correlation_id:
-        description: Optional control-plane correlation token; does not affect send authorization
-        required: false
-        type: string
 
 permissions:
   contents: read
@@ -81,9 +76,6 @@ jobs:
           [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
           if [[ -n "$MESSAGE_ID" ]]; then
             [[ "$MESSAGE_ID" =~ ^[A-Za-z0-9_-]{1,200}$ ]]
-          fi
-          if [[ -n "${{ inputs.correlation_id }}" ]]; then
-            [[ "${{ inputs.correlation_id }}" =~ ^[A-Za-z0-9_-]{1,120}$ ]]
           fi
           if [[ "$EXECUTE" == "true" ]]; then
             test -n "$MESSAGE_ID"
