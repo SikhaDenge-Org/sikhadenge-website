@@ -1,4 +1,4 @@
-name: UI Static Repair Audit 20260922
+name: UI Public Asset Verify 20260922
 
 on:
   push:
@@ -10,42 +10,45 @@ permissions:
   contents: read
 
 jobs:
-  audit:
-    runs-on: [self-hosted, Linux, X64, voice-prod-srv1232861]
+  verify:
+    runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - name: Read-only static/runtime alignment audit
+      - name: Verify current homepage and every linked CSS JS asset
         shell: bash
         run: |
           set -Eeuo pipefail
-          export HOME=/root PM2_HOME=/root/.pm2
-          echo '=== HOST ==='; hostname; date; whoami; df -h /
-          echo '=== PM2 ==='
-          pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{for(const x of JSON.parse(s)){const e=x.pm2_env||{}; console.log([x.name||"",e.status||"",e.pm_cwd||"",e.pm_exec_path||"",e.PORT||""].join("|"))}})' || true
-          echo '=== NGINX NEXT ROUTES ==='
-          nginx -T 2>/dev/null | grep -nE 'server_name.*sikhadenge\.in|location .*_next|/_next/static|alias .*\.next|proxy_pass' | head -260 || true
-          echo '=== RELEASE LINKS ==='
-          find /var/www /opt -maxdepth 5 -type l -printf '%p -> %l\n' 2>/dev/null | grep -E 'sikhadenge|current|release' | head -220 || true
-          echo '=== BUILD IDS ==='
-          find /var/www /opt -maxdepth 7 -path '*/.next/BUILD_ID' -type f -print -exec sh -c 'printf "  "; cat "$1"' _ {} \; 2>/dev/null | head -300 || true
-          echo '=== BROKEN PUBLIC ASSETS ==='
-          for u in             '/_next/static/css/a27533918508dbe3.css'             '/_next/static/css/e69e5f6c5b9af5ee.css'             '/_next/static/chunks/main-app-acedf842f6d2ac77.js'             '/_next/static/chunks/app/page-0aa0d32a71eb4a20.js'             '/_next/static/chunks/webpack-306a82c98f4f7895.js'
-          do
-            printf '%s ' "$u"
-            curl -sS -o /dev/null -w '%{http_code}|%{content_type}|%{size_download}\n' --max-time 10 "https://sikhadenge.in$u" || true
-          done
-          echo '=== FIND EXPECTED ASSETS ON DISK ==='
-          for f in a27533918508dbe3.css e69e5f6c5b9af5ee.css main-app-acedf842f6d2ac77.js page-0aa0d32a71eb4a20.js webpack-306a82c98f4f7895.js; do
-            echo "--- $f"
-            find /var/www /opt -type f -name "$f" -printf '%p %s bytes\n' 2>/dev/null | head -40 || true
-          done
-          echo '=== DIRECT PORTS ==='
-          for p in 3000 3001 3930 3955; do
-            f="/tmp/home-$p.$$"
-            code=$(curl -sS -o "$f" -w '%{http_code}' -H 'Host: sikhadenge.in' --max-time 4 "http://127.0.0.1:$p/" || true)
-            echo "PORT=$p HTTP=$code BYTES=$(wc -c <"$f" 2>/dev/null || echo 0)"
-            if [[ "$code" == 200 ]]; then
-              grep -oE '/_next/static/css/[a-f0-9]+\.css' "$f" | sort -u | head -20 || true
-            fi
-            rm -f "$f"
-          done
+          curl -fsSL --retry 4 --retry-all-errors --retry-delay 2 --max-time 30 \
+            -A 'SikhaDenge-PostRecovery-Verify/1.0' \
+            'https://sikhadenge.in/?post_recovery_verify=20260922' -o home.html
+          python3 - <<'PY'
+          import re,subprocess
+          s=open('home.html',errors='replace').read()
+          print('HOME_BYTES',len(s))
+          for marker in ['Become an AI Expert','AI Tools You Will Master']:
+              ok=marker in s
+              print('MARKER',repr(marker),ok)
+              if not ok: raise SystemExit('missing marker '+marker)
+          assets=[]
+          assets += re.findall(r'<link[^>]+href=["\']([^"\']+\.css(?:\?[^"\']*)?)["\']',s)
+          assets += re.findall(r'<script[^>]+src=["\']([^"\']+\.js(?:\?[^"\']*)?)["\']',s)
+          seen=[]
+          for a in assets:
+              if a.startswith('/cdn-cgi/'): continue
+              if a not in seen: seen.append(a)
+          failures=[]
+          for a in seen:
+              url=a if a.startswith('http') else 'https://sikhadenge.in'+a
+              p=subprocess.run([
+                'curl','-k','-sS','-L','--retry','5','--retry-all-errors','--retry-delay','2',
+                '--max-time','20','-o','/dev/null','-w','%{http_code}|%{content_type}|%{size_download}',url
+              ],capture_output=True,text=True)
+              print('ASSET',p.stdout,a)
+              if not p.stdout.startswith('200|'): failures.append((a,p.stdout,p.stderr[-500:]))
+          print('ASSET_COUNT',len(seen))
+          print('ASSET_FAILURES',len(failures))
+          if failures:
+              print('FAILURES',failures)
+              raise SystemExit(1)
+          print('PUBLIC_ASSET_VERIFY_OK=1')
+          PY
