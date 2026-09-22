@@ -1,0 +1,80 @@
+name: SEO Dashboard Domain Audit Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/seo-dashboard-domain-audit-once.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: [self-hosted, Linux, X64, sikhadenge-ci]
+    timeout-minutes: 10
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SSH_PORT="${SSH_PORT:-22}"
+          echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
+          install -d -m 700 "$HOME/.ssh"
+          KEY="$HOME/.ssh/prod"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"; fi
+          chmod 600 "$KEY"
+          read -r _ kt km _ <<< "$SSH_HOST_KEY"
+          test "$kt" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Read-only production domain audit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          export HOME=/root PM2_HOME=/root/.pm2
+
+          echo "DOMAIN_AUDIT=START"
+          echo "PM2_START"
+          pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{for(const x of JSON.parse(s)){const e=x.pm2_env||{};console.log([x.name||"",e.status||"",e.pm_cwd||"",e.PORT||""].join("|"))}})'
+          echo "PM2_END"
+
+          echo "NGINX_START"
+          nginx -T 2>/dev/null | awk '
+            /server_name/ && ($0 ~ /seo\.sikhadenge\.in/ || $0 ~ /dashboard\.sikhadenge\.in/) {print}
+            /proxy_pass/ {print}
+          ' | sed -n '1,180p'
+          echo "NGINX_END"
+
+          probe() {
+            label="$1"; url="$2"
+            h=$(mktemp); b=$(mktemp)
+            code=$(curl -ksS -D "$h" -o "$b" -w '%{http_code}' --max-time 12 "$url" || true)
+            loc=$(awk -F': ' 'tolower($1)=="location"{gsub(/\r/,"",$2);print $2;exit}' "$h")
+            title=$(grep -o -m1 '<title[^>]*>[^<]*' "$b" | sed -E 's/<title[^>]*>//' | head -1)
+            [ -n "$loc" ] || loc=NO_LOCATION
+            [ -n "$title" ] || title=NO_TITLE
+            echo "$label=$code|$loc|$title"
+            rm -f "$h" "$b"
+          }
+          probe SEO_ROOT https://seo.sikhadenge.in/
+          probe SEO_DASHBOARD https://seo.sikhadenge.in/dashboard
+          probe SEO_CONTROL https://seo.sikhadenge.in/dashboard/seo-control-plane
+          probe SEO_API https://seo.sikhadenge.in/api/seo-control-plane/health
+          probe DASH_ROOT https://dashboard.sikhadenge.in/
+          probe DASH_APP https://dashboard.sikhadenge.in/dashboard
+          probe DASH_CONTROL https://dashboard.sikhadenge.in/dashboard/seo-control-plane
+          probe DASH_API https://dashboard.sikhadenge.in/api/seo-control-plane/health
+          echo "DOMAIN_AUDIT=PASS"
+          REMOTE
