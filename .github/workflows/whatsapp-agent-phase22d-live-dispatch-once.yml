@@ -18,13 +18,42 @@ jobs:
     timeout-minutes: 20
     env:
       TARGET_WORKFLOW: whatsapp-agent-phase17-single-message-canary.yml
+      REFRESH_WORKFLOW: whatsapp-agent-phase22d-refresh-stale-canary-dryrun.yml
       TARGET_REF: release/whatsapp-instagram-agent-flow-20260731
       EXPECTED_LIVE_SHA: 4e4bcb0119f2096ee2f95c95862c5c0d797c1021
       EXPECTED_STATE_VERSION: "2"
-      CANARY_MESSAGE_ID: cmucaz4wy0005kwqb99jodzqx
       APPROVER_USER_ID: cmrxpasm00000kwyj1gcd6q3d
       APPROVAL_REASON: Phase22D exact designated internal canary production qualification; one message only.
     steps:
+      - name: Wait for same-push fresh canary qualification
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          refresh_run_id=""
+          for attempt in $(seq 1 40); do
+            sleep 3
+            candidate="$(gh run list -R "$GITHUB_REPOSITORY" --workflow "$REFRESH_WORKFLOW" --branch "$TARGET_REF" --event push --commit "$GITHUB_SHA" --limit 5 --json databaseId --jq '.[0].databaseId // 0')"
+            if [[ "$candidate" != "0" ]]; then
+              refresh_run_id="$candidate"
+              break
+            fi
+          done
+          test -n "$refresh_run_id"
+          gh run watch "$refresh_run_id" -R "$GITHUB_REPOSITORY" --exit-status
+
+          ledger_body="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/65/comments?per_page=100" --jq '.[] | select(.body | contains("actions/runs/'"$refresh_run_id"'")) | .body' | tail -n1)"
+          test -n "$ledger_body"
+          fresh_message_id="$(printf '%s\n' "$ledger_body" | sed -n 's/^- Fresh message ID: `\([A-Za-z0-9_-]*\)`.*/\1/p' | tail -n1)"
+          [[ "$fresh_message_id" =~ ^[A-Za-z0-9_-]{1,200}$ ]]
+          test "$fresh_message_id" != "not-created"
+
+          echo "REFRESH_RUN_ID=$refresh_run_id" >> "$GITHUB_ENV"
+          echo "REFRESH_RUN_URL=https://github.com/$GITHUB_REPOSITORY/actions/runs/$refresh_run_id" >> "$GITHUB_ENV"
+          echo "CANARY_MESSAGE_ID=$fresh_message_id" >> "$GITHUB_ENV"
+          printf 'PHASE22D_FRESH_CANARY_READY=true\nREFRESH_RUN_ID=%s\nCANARY_MESSAGE_ID=%s\n' "$refresh_run_id" "$fresh_message_id"
+
       - name: Dispatch exact Phase22D one-message canary
         shell: bash
         env:
@@ -76,6 +105,7 @@ jobs:
           conclusion="$(gh run view "$TARGET_RUN_ID" -R "$GITHUB_REPOSITORY" --json conclusion --jq '.conclusion')"
           {
             printf '## Phase22D exact internal canary live qualification\n\n'
+            printf '%s\n' "- Refresh workflow run: $REFRESH_RUN_URL"
             printf '%s\n' "- Workflow run: $TARGET_RUN_URL"
             printf '%s\n' "- Run ID: $TARGET_RUN_ID"
             printf '%s\n' "- Expected live SHA: \`$EXPECTED_LIVE_SHA\`"
