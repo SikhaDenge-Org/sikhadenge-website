@@ -1,0 +1,90 @@
+name: UI CSS Production Audit 20260922
+
+on:
+  push:
+    paths:
+      - .github/workflows/ui-css-production-audit-20260922.yml
+
+permissions:
+  contents: read
+
+env:
+  SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+  SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+  SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+  SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+  SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+jobs:
+  audit:
+    runs-on: [self-hosted, Linux, X64, sikhadenge-ci]
+    timeout-minutes: 10
+    environment: whatsapp-agent-production
+    steps:
+      - name: Audit public HTML and CSS
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import re, subprocess, urllib.parse, urllib.request
+          base='https://sikhadenge.in/'
+          req=urllib.request.Request(base,headers={'User-Agent':'SikhaDenge-UI-Audit/1.0'})
+          with urllib.request.urlopen(req,timeout=25) as r:
+              html=r.read().decode('utf-8','replace')
+              print('HOME_STATUS',r.status,'HOME_BYTES',len(html))
+          css=re.findall(r'<link[^>]+href=["\']([^"\']+\.css(?:\?[^"\']*)?)["\']',html)
+          print('CSS_COUNT',len(css))
+          for href in css:
+              u=urllib.parse.urljoin(base,href)
+              try:
+                  rr=urllib.request.urlopen(urllib.request.Request(u,headers={'User-Agent':'SikhaDenge-UI-Audit/1.0'}),timeout=20)
+                  body=rr.read()
+                  print('CSS',rr.status,len(body),rr.headers.get('content-type'),u)
+              except Exception as e:
+                  print('CSS_ERROR',u,repr(e))
+          m=re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',html,re.S)
+          if m:
+              import json,html as h
+              d=json.loads(h.unescape(m.group(1)))
+              print('PUBLIC_BUILD_ID',d.get('buildId'),'PUBLIC_PAGE',d.get('page'))
+          else:
+              print('PUBLIC_BUILD_ID_NOT_FOUND')
+          PY
+
+      - name: Audit production runtime and static routing
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ -n "${SSH_PORT:-}" ]] || SSH_PORT=22
+          install -d -m 700 "$HOME/.ssh"; KEY="$HOME/.ssh/prod"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"; fi
+          chmod 600 "$KEY"; read -r _ kt km _ <<< "$SSH_HOST_KEY"; test "$kt" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"; chmod 600 "$HOME/.ssh/known_hosts"
+          ssh -p "$SSH_PORT" -i "$KEY" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          echo '=== DATE / DISK ==='; date; df -h /
+          echo '=== NGINX CONFIG ==='
+          grep -RniE 'server_name.*sikhadenge\.in|location .*_next|/_next/static|alias .*\.next|proxy_pass' /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null | head -240 || true
+          echo '=== PM2 ==='; pm2 jlist 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); [print(x.get("name"),x.get("pm2_env",{}).get("status"),x.get("pm2_env",{}).get("pm_cwd"),x.get("pm2_env",{}).get("pm_exec_path")) for x in d]' || pm2 ls || true
+          echo '=== WEB ROOTS / RELEASE LINKS ==='
+          find /var/www -maxdepth 4 -type l -lname '*' -printf '%p -> %l\n' 2>/dev/null | grep -E 'sikhadenge|current|release' | head -160 || true
+          echo '=== NEXT BUILD IDS ==='
+          find /var/www /opt -maxdepth 6 -path '*/.next/BUILD_ID' -type f -print -exec sh -c 'printf "  "; cat "$1"' _ {} \; 2>/dev/null | head -200 || true
+          echo '=== DIRECT HOME PROBES ==='
+          for p in 3000 3001 3930 3955; do
+            code=$(curl -sS -o /tmp/h.$$ -w '%{http_code}' -H 'Host: sikhadenge.in' --max-time 5 "http://127.0.0.1:$p/" || true)
+            echo "PORT=$p HTTP=$code BYTES=$(wc -c </tmp/h.$$ 2>/dev/null || echo 0)"
+            if [[ "$code" == 200 ]]; then
+              python3 - /tmp/h.$$ <<'PY'
+          import re,json,html,sys
+          s=open(sys.argv[1],errors='replace').read()
+          m=re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',s,re.S)
+          if m:
+              d=json.loads(html.unescape(m.group(1))); print('DIRECT_BUILD',d.get('buildId'),'PAGE',d.get('page'))
+          css=re.findall(r'<link[^>]+href=["\']([^"\']+\.css[^"\']*)["\']',s)
+          print('DIRECT_CSS',css[:10])
+          PY
+            fi
+          done
+          rm -f /tmp/h.$$
+          REMOTE
