@@ -1,4 +1,4 @@
-name: UI CSS Production Audit 20260922
+name: UI CSS Public Audit 20260922
 
 on:
   push:
@@ -10,85 +10,33 @@ permissions:
   contents: read
 
 jobs:
-  audit:
-    runs-on: [self-hosted, Linux, X64, sikhadenge-ci]
-    timeout-minutes: 10
-    environment: whatsapp-agent-production
-    env:
-      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
-      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
-      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
-      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
-      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
-
+  public-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - name: Configure SSH
+      - name: Probe homepage and all linked CSS assets
         shell: bash
         run: |
           set -Eeuo pipefail
-          SSH_PORT="${SSH_PORT:-22}"
-          echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
-          install -d -m 700 "$HOME/.ssh"
-          KEY="$HOME/.ssh/prod"
-          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"; fi
-          chmod 600 "$KEY"
-          read -r _ kt km _ <<< "$SSH_HOST_KEY"
-          test "$kt" = ssh-ed25519
-          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"
-          chmod 600 "$HOME/.ssh/known_hosts"
-
-      - name: Audit public HTML and CSS
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          curl -fsS --max-time 25 -A 'SikhaDenge-UI-Audit/1.0' https://sikhadenge.in/ -o /tmp/public-home.html
-          python3 - /tmp/public-home.html <<'PY'
-          import re,json,html,sys,subprocess
-          s=open(sys.argv[1],errors='replace').read()
+          curl -fsS -L --max-time 30 -A 'SikhaDenge-UI-Audit/1.0' https://sikhadenge.in/ -o public-home.html
+          python3 - <<'PY'
+          import re,json,html,subprocess
+          s=open('public-home.html',errors='replace').read()
           print('HOME_BYTES',len(s))
+          m=re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',s,re.S)
+          if m:
+              d=json.loads(html.unescape(m.group(1)))
+              print('BUILD_ID',d.get('buildId'),'PAGE',d.get('page'))
           css=re.findall(r'<link[^>]+href=["\']([^"\']+\.css(?:\?[^"\']*)?)["\']',s)
           print('CSS_COUNT',len(css))
           for href in css:
-              u=href if href.startswith('http') else 'https://sikhadenge.in'+href
-              p=subprocess.run(['curl','-sS','-L','--max-time','20','-o','/tmp/c.css','-w','%{http_code}|%{content_type}|%{size_download}',u],text=True,capture_output=True)
-              print('CSS',p.stdout,u)
-          m=re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',s,re.S)
-          if m:
-              d=json.loads(html.unescape(m.group(1))); print('PUBLIC_BUILD_ID',d.get('buildId'),'PUBLIC_PAGE',d.get('page'))
-          else: print('PUBLIC_BUILD_ID_NOT_FOUND')
+              url=href if href.startswith('http') else 'https://sikhadenge.in'+href
+              p=subprocess.run(['curl','-sS','-L','--max-time','20','-o','asset.css','-w','%{http_code}|%{content_type}|%{size_download}',url],capture_output=True,text=True)
+              print('CSS_PROBE',p.stdout,url)
+          scripts=re.findall(r'<script[^>]+src=["\']([^"\']+\.js(?:\?[^"\']*)?)["\']',s)
+          print('JS_COUNT',len(scripts))
+          for href in scripts[:40]:
+              url=href if href.startswith('http') else 'https://sikhadenge.in'+href
+              p=subprocess.run(['curl','-sS','-L','--max-time','20','-o','asset.js','-w','%{http_code}|%{content_type}|%{size_download}',url],capture_output=True,text=True)
+              print('JS_PROBE',p.stdout,url)
           PY
-
-      - name: Audit production runtime and static routing
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
-          set -Eeuo pipefail
-          export HOME=/root PM2_HOME=/root/.pm2
-          echo '=== DATE / DISK ==='; date; df -h /
-          echo '=== NGINX CONFIG ==='
-          nginx -T 2>/dev/null | grep -nE 'server_name.*sikhadenge\.in|location .*_next|/_next/static|alias .*\.next|proxy_pass' | head -260 || true
-          echo '=== PM2 ==='
-          pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{for(const x of JSON.parse(s)){const e=x.pm2_env||{};console.log([x.name||"",e.status||"",e.pm_cwd||"",e.pm_exec_path||"",e.PORT||""].join("|"))}})' || true
-          echo '=== RELEASE LINKS ==='
-          find /var/www /opt -maxdepth 5 -type l -printf '%p -> %l\n' 2>/dev/null | grep -E 'sikhadenge|current|release' | head -200 || true
-          echo '=== BUILD IDS ==='
-          find /var/www /opt -maxdepth 7 -path '*/.next/BUILD_ID' -type f -print -exec sh -c 'printf "  "; cat "$1"' _ {} \; 2>/dev/null | head -260 || true
-          echo '=== DIRECT HOME PROBES ==='
-          for p in 3000 3001 3930 3955; do
-            f="/tmp/home-$p.$$"
-            code=$(curl -sS -o "$f" -w '%{http_code}' -H 'Host: sikhadenge.in' --max-time 5 "http://127.0.0.1:$p/" || true)
-            echo "PORT=$p HTTP=$code BYTES=$(wc -c <"$f" 2>/dev/null || echo 0)"
-            if [[ "$code" == 200 ]]; then
-              python3 - "$f" <<'PY'
-          import re,json,html,sys
-          s=open(sys.argv[1],errors='replace').read()
-          m=re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',s,re.S)
-          if m:
-              d=json.loads(html.unescape(m.group(1))); print('DIRECT_BUILD',d.get('buildId'),'PAGE',d.get('page'))
-          print('DIRECT_CSS',re.findall(r'<link[^>]+href=["\']([^"\']+\.css[^"\']*)["\']',s)[:10])
-          PY
-            fi
-            rm -f "$f"
-          done
-          REMOTE
