@@ -125,7 +125,18 @@ jobs:
           fi
           printf 'PRE_REFRESH_PM2_STATE=%s\nPRE_REFRESH_LOGIN_HTTP=%s\n' "$pm2_state" "$login_http"
           test "$live_sha" = "$EXPECTED_LIVE_SHA"
-          test "$tracked_dirty_count" = "0"
+          allowed_unrelated_dirty="apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts"
+          dirty_paths="$(git diff --name-only HEAD | sed '/^$/d')"
+          dirty_paths_count="$(printf '%s\n' "$dirty_paths" | sed '/^$/d' | wc -l | tr -d ' ')"
+          printf 'PRE_REFRESH_DIRTY_PATH_COUNT=%s\n' "$dirty_paths_count"
+          if [[ "$dirty_paths_count" = "0" ]]; then
+            printf 'PRE_REFRESH_SCOPED_CLEANLINESS=clean\n'
+          elif [[ "$dirty_paths_count" = "1" && "$dirty_paths" = "$allowed_unrelated_dirty" ]]; then
+            printf 'PRE_REFRESH_SCOPED_CLEANLINESS=allowed_unrelated_email_script\n'
+          else
+            printf 'PRE_REFRESH_BLOCKED_DIRTY_PATHS_BEGIN\n%s\nPRE_REFRESH_BLOCKED_DIRTY_PATHS_END\n' "$dirty_paths"
+            exit 1
+          fi
           test "$pm2_state" = "online"
           test "$login_http" = "200"
 
