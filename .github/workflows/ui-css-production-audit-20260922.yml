@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   audit:
-    runs-on: [self-hosted, Linux, X64, sikhadenge-ci]
+    runs-on: [self-hosted, Linux, X64, voice-prod-srv1232861]
     timeout-minutes: 8
     steps:
       - name: Read-only static/runtime alignment audit
