@@ -1,0 +1,138 @@
+name: UI Public Route Sweep 20260922
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ui-public-route-sweep-20260922.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Sweep sitemap routes and unique CSS JS assets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import concurrent.futures, re, subprocess, sys, urllib.parse
+          from xml.etree import ElementTree as ET
+
+          BASE='https://sikhadenge.in'
+          UA='SikhaDenge-Route-Sweep/20260922'
+
+          def curl(url, timeout=20):
+              p=subprocess.run([
+                  'curl','-k','-sS','-L','--retry','2','--retry-all-errors','--retry-delay','1',
+                  '--connect-timeout','8','--max-time',str(timeout),
+                  '-A',UA,'-o','-','-w','\n__META__%{http_code}|%{content_type}|%{url_effective}',url
+              ],capture_output=True,text=True)
+              out=p.stdout
+              if '\n__META__' not in out:
+                  return {'url':url,'code':'000','ctype':'','effective':'','body':'','err':p.stderr[-500:]}
+              body,meta=out.rsplit('\n__META__',1)
+              parts=meta.strip().split('|',2)
+              code=parts[0] if parts else '000'
+              ctype=parts[1] if len(parts)>1 else ''
+              eff=parts[2] if len(parts)>2 else ''
+              return {'url':url,'code':code,'ctype':ctype,'effective':eff,'body':body,'err':p.stderr[-500:]}
+
+          def sitemap_urls(url):
+              r=curl(url,30)
+              print('SITEMAP',url,'HTTP',r['code'],'TYPE',r['ctype'])
+              if r['code']!='200':
+                  return [], [('sitemap',url,r['code'],r['err'])]
+              try:
+                  root=ET.fromstring(r['body'])
+              except Exception as e:
+                  return [], [('sitemap-xml',url,'parse',repr(e))]
+              ns=''
+              if root.tag.startswith('{'): ns=root.tag.split('}')[0]+'}'
+              locs=[(x.text or '').strip() for x in root.findall('.//'+ns+'loc') if (x.text or '').strip()]
+              if root.tag.endswith('sitemapindex'):
+                  urls=[]; fails=[]
+                  for loc in locs[:30]:
+                      u,f=sitemap_urls(loc); urls+=u; fails+=f
+                  return urls,fails
+              return locs,[]
+
+          urls, failures = sitemap_urls(BASE+'/sitemap.xml')
+          critical=[
+              BASE+'/', BASE+'/about-us', BASE+'/admission', BASE+'/affiliate',
+              BASE+'/ai-tools', BASE+'/blog', BASE+'/masterclass/claude/free',
+              BASE+'/masterclass/ai-video', BASE+'/contact-us', BASE+'/privacy-policy',
+              BASE+'/terms-and-conditions'
+          ]
+          urls += critical
+          norm=[]
+          for u in urls:
+              if not u.startswith(BASE): continue
+              if u not in norm: norm.append(u)
+          urls=norm[:750]
+          print('ROUTE_COUNT',len(urls))
+
+          assets=set()
+          route_fail=[]
+          route_ok=0
+
+          def check_route(u):
+              r=curl(u,25)
+              bad = r['code']!='200'
+              if not bad and 'text/html' in r['ctype']:
+                  body=r['body']
+                  if len(body)<500:
+                      bad=True
+                  if 'Application error: a client-side exception has occurred' in body:
+                      bad=True
+              return u,r,bad
+
+          with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+              futs=[ex.submit(check_route,u) for u in urls]
+              for i,fut in enumerate(concurrent.futures.as_completed(futs),1):
+                  u,r,bad=fut.result()
+                  if bad:
+                      route_fail.append((u,r['code'],r['ctype'],r['effective'],r['err']))
+                      print('ROUTE_FAIL',u,r['code'],r['ctype'],r['effective'],r['err'])
+                  else:
+                      route_ok+=1
+                      if 'text/html' in r['ctype']:
+                          body=r['body']
+                          for a in re.findall(r'<link[^>]+href=["\']([^"\']+\.css(?:\?[^"\']*)?)["\']',body):
+                              assets.add(urllib.parse.urljoin(BASE,a))
+                          for a in re.findall(r'<script[^>]+src=["\']([^"\']+\.js(?:\?[^"\']*)?)["\']',body):
+                              if '/cdn-cgi/' not in a:
+                                  assets.add(urllib.parse.urljoin(BASE,a))
+                  if i%100==0: print('ROUTE_PROGRESS',i,'OK',route_ok,'FAIL',len(route_fail))
+
+          print('ROUTE_OK',route_ok)
+          print('ROUTE_FAILURES',len(route_fail))
+          print('UNIQUE_ASSET_COUNT',len(assets))
+
+          asset_fail=[]
+          def check_asset(u):
+              r=curl(u,20)
+              return u,r
+          with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
+              futs=[ex.submit(check_asset,u) for u in sorted(assets)]
+              for i,fut in enumerate(concurrent.futures.as_completed(futs),1):
+                  u,r=fut.result()
+                  if r['code']!='200':
+                      asset_fail.append((u,r['code'],r['ctype'],r['err']))
+                      print('ASSET_FAIL',u,r['code'],r['ctype'],r['err'])
+                  if i%100==0: print('ASSET_PROGRESS',i,'FAIL',len(asset_fail))
+
+          print('ASSET_FAILURES',len(asset_fail))
+          if failures:
+              print('SITEMAP_FAILURES',failures)
+          if route_fail:
+              print('ROUTE_FAILURE_SAMPLE',route_fail[:50])
+          if asset_fail:
+              print('ASSET_FAILURE_SAMPLE',asset_fail[:80])
+          if failures or route_fail or asset_fail:
+              raise SystemExit(1)
+          print('FULL_PUBLIC_ROUTE_SWEEP_OK=1')
+          PY
