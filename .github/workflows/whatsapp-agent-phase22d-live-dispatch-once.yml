@@ -43,9 +43,15 @@ jobs:
           test -n "$refresh_run_id"
           gh run watch "$refresh_run_id" -R "$GITHUB_REPOSITORY" --exit-status
 
-          ledger_body="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/65/comments?per_page=100" --jq '.[] | select(.body | contains("actions/runs/'"$refresh_run_id"'")) | .body' | tail -n1)"
-          test -n "$ledger_body"
-          fresh_message_id="$(printf '%s\n' "$ledger_body" | sed -n 's/^- Fresh message ID: `\([A-Za-z0-9_-]*\)`.*/\1/p' | tail -n1)"
+          fresh_message_id=""
+          for attempt in $(seq 1 20); do
+            refresh_log="$(gh run view "$refresh_run_id" -R "$GITHUB_REPOSITORY" --log 2>/dev/null || true)"
+            fresh_message_id="$(printf '%s\n' "$refresh_log" | sed -n 's/.*FRESH_MESSAGE_ID=\([A-Za-z0-9_-][A-Za-z0-9_-]*\).*/\1/p' | tail -n1)"
+            if [[ "$fresh_message_id" =~ ^[A-Za-z0-9_-]{1,200}$ ]]; then
+              break
+            fi
+            sleep 2
+          done
           [[ "$fresh_message_id" =~ ^[A-Za-z0-9_-]{1,200}$ ]]
           test "$fresh_message_id" != "not-created"
 
