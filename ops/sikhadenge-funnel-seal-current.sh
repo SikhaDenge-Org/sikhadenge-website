@@ -8,11 +8,11 @@ CL_ASSETS='/etc/nginx/snippets/sikhadenge-claude-31aug6pm-assets-final.conf'
 AI_URL='https://sikhadenge.in/masterclass/ai-video'
 CL_URL='https://sikhadenge.in/masterclass/claude/free'
 AI_PORT='3940'
-CL_PORT='3930'
+CL_PORT='3940'
 AI_APP='sikhadenge-ai-video-golden-faq-3940-20260904-130510'
-CL_APP='sikhadenge-ai-video-icons-hotfix-3930'
+CL_APP='sikhadenge-ai-video-golden-faq-3940-20260904-130510'
 AI_CWD='/var/www/sikhadenge.in/releases/production-ai-video-golden-faq-final-20260904-130510'
-CL_CWD='/var/www/sikhadenge.in/releases/production-ai-video-icons-hotfix-20260829-091916'
+CL_CWD='/var/www/sikhadenge.in/releases/production-ai-video-golden-faq-final-20260904-130510'
 TS="$(date +%Y%m%d-%H%M%S)"
 TMP="$ROOT/.seal-$TS-$$"
 
