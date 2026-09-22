@@ -166,15 +166,16 @@ async function main() {
     throw new Error("Current hello_world template is not approved zero-variable en_US.");
   }
 
-  const activeApprovals = await prisma.engageControlledLaunchOutboundApproval.count({
-    where: {
-      workspaceId: WORKSPACE_ID,
-      messageId: staleMessageId,
-      consumedAt: null,
-      revokedAt: null,
-      expiresAt: { gt: new Date() },
-    },
-  });
+  const approvalRows = await prisma.$queryRaw<Array<{ count: bigint }>>`
+    SELECT COUNT(*)::bigint AS count
+    FROM "EngageControlledLaunchOutboundApproval"
+    WHERE "workspaceId" = ${WORKSPACE_ID}
+      AND "messageId" = ${staleMessageId}
+      AND "consumedAt" IS NULL
+      AND "revokedAt" IS NULL
+      AND "expiresAt" > CURRENT_TIMESTAMP
+  `;
+  const activeApprovals = Number(approvalRows[0]?.count ?? 0n);
   if (activeApprovals !== 0) {
     throw new Error("Stale canary still has an active outbound approval.");
   }
