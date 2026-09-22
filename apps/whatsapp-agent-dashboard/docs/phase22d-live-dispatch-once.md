@@ -1,13 +1,22 @@
-# Phase22D refresh-then-live internal canary
+# Phase22D one-time live canary — retired
 
-This control-plane path preserves the 30-minute freshness gate instead of relaxing it.
+The production internal canary qualification is complete.
 
-On the same protected-release merge push:
-1. the Phase22D refresh workflow supersedes the exact stale queued INTERNAL_TEST canary and queues one fresh `hello_world` canary;
-2. the refresh workflow runs the existing single-message operator in DRY_RUN and records the fresh message ID in issue #65;
-3. the one-time live dispatcher waits for that exact same-commit refresh run, resolves its fresh message ID, and immediately invokes the existing reviewed single-message operator with `execute=true`;
-4. the target operator requires the exact designated INTERNAL_TEST recipient, exact active ADMIN approver, state version 2, scheduler isolation, provider parity, one-time persisted approval, and isolated live provider gates;
-5. the operator restores controlled launch to SHADOW / NO_EXTERNAL_WRITES and final verification accepts only a clean checkout or the sole reviewed email-only drift with an exact protected-release SHA-256 match.
+Evidence from the protected release:
+- refresh + DRY_RUN run: `35703229135` — success;
+- exact live single-message operator run: `35703317497` — success;
+- designated internal message: `cmuce80nn0005kwodm06mj7kf`;
+- provider accepted the message and persisted a Meta message ID;
+- final observed message state: `DELIVERED`;
+- active one-time approvals after execution: `0`;
+- provider binding parity remained clean;
+- controlled launch restored to `SHADOW / NO_EXTERNAL_WRITES`;
+- general/batch outbound was not enabled.
 
-The dispatcher itself contains no Meta provider call and does not enable batch/general outbound or mutate PM2/.env.
-Retry note: the protected-release retry preserves the existing 30-minute freshness threshold; it changes no provider or runtime authorization logic.
+The two push-triggered Phase22D helper workflows were intentionally one-time qualification machinery and are retired after successful qualification:
+- `.github/workflows/whatsapp-agent-phase22d-live-dispatch-once.yml`
+- `.github/workflows/whatsapp-agent-phase22d-refresh-stale-canary-dryrun.yml`
+
+The reviewed Phase17 single-message canary operator remains available as the explicitly invoked, fail-closed control-plane path. Its exact-recipient, active-ADMIN approval, provider-parity, scheduler-isolation, one-time approval, restore-to-SHADOW, and final-safety gates remain in force.
+
+Do not reintroduce automatic push dispatch for the completed Phase22D one-time canary. Any later production outbound expansion requires a separate reviewed rollout phase.
