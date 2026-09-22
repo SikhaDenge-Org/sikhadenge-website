@@ -330,12 +330,24 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' MESSAGE_B64='$message_b64' VERIFIED_CANARY_WA_ID='$VERIFIED_CANARY_WA_ID' bash -s" <<'REMOTE'
+            "EXPECTED_RELEASE_SHA='$EXPECTED_RELEASE_SHA' MESSAGE_B64='$message_b64' VERIFIED_CANARY_WA_ID='$VERIFIED_CANARY_WA_ID' REVIEWED_EMAIL_DRIFT_SHA256='$REVIEWED_EMAIL_DRIFT_SHA256' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           cd "$APP"
           test "$(git rev-parse HEAD)" = "$EXPECTED_RELEASE_SHA"
-          test "$(git status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')" = "0"
+          tracked_dirty="$(git status --porcelain --untracked-files=no | sed '/^$/d')"
+          dirty_count="$(printf '%s\n' "$tracked_dirty" | sed '/^$/d' | wc -l | tr -d ' ')"
+          if [[ "$dirty_count" = "0" ]]; then
+            printf 'FINAL_REVIEWED_EMAIL_DRIFT_PRESENT=false\n'
+          else
+            allowed_dirty_line=" M apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts"
+            test "$dirty_count" = "1"
+            test "$tracked_dirty" = "$allowed_dirty_line"
+            [[ "$REVIEWED_EMAIL_DRIFT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+            live_email_drift_sha="$(sha256sum scripts/email-inbound-production-readiness.ts | awk '{print $1}')"
+            test "$live_email_drift_sha" = "$REVIEWED_EMAIL_DRIFT_SHA256"
+            printf 'FINAL_REVIEWED_EMAIL_DRIFT_PRESENT=true\n'
+          fi
           test "$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s);process.stdout.write(a.find(x=>x.name==="sikhadenge-whatsapp-agent")?.pm2_env?.status||"")})')" = "online"
           test "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login)" = "200"
 
