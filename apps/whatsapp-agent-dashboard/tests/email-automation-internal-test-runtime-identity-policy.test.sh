@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 internal_workflow="../../.github/workflows/whatsapp-agent-email-internal-test.yml"
 dryrun_workflow="../../.github/workflows/whatsapp-agent-email-dryrun-activation.yml"
-internal_script="../scripts/email-automation-production-internal-test.sh"
+internal_script="scripts/email-automation-production-internal-test.sh"
 
 test -f "$internal_workflow"
 test -f "$dryrun_workflow"
