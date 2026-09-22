@@ -106,22 +106,48 @@ jobs:
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           cd "$APP"
-          test "$(git rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
-          test "$(git status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')" = "0"
-          test "$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s);process.stdout.write(a.find(x=>x.name==="sikhadenge-whatsapp-agent")?.pm2_env?.status||"")})')" = "online"
-          test "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login)" = "200"
+          live_sha="$(git rev-parse HEAD)"
+          tracked_dirty="$(git status --porcelain --untracked-files=no | sed '/^$/d')"
+          tracked_dirty_count="$(printf '%s\n' "$tracked_dirty" | sed '/^$/d' | wc -l | tr -d ' ')"
+          pm2_state="$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s);process.stdout.write(a.find(x=>x.name==="sikhadenge-whatsapp-agent")?.pm2_env?.status||"")})')"
+          login_http=""
+          for attempt in 1 2 3 4 5; do
+            login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login || true)"
+            if [[ "$login_http" = "200" ]]; then
+              break
+            fi
+            sleep 2
+          done
+          printf 'PRE_REFRESH_LIVE_SHA=%s\n' "$live_sha"
+          printf 'PRE_REFRESH_TRACKED_DIRTY_COUNT=%s\n' "$tracked_dirty_count"
+          if [[ "$tracked_dirty_count" != "0" ]]; then
+            printf 'PRE_REFRESH_TRACKED_DIRTY_FILES_BEGIN\n%s\nPRE_REFRESH_TRACKED_DIRTY_FILES_END\n' "$tracked_dirty"
+          fi
+          printf 'PRE_REFRESH_PM2_STATE=%s\nPRE_REFRESH_LOGIN_HTTP=%s\n' "$pm2_state" "$login_http"
+          test "$live_sha" = "$EXPECTED_LIVE_SHA"
+          test "$tracked_dirty_count" = "0"
+          test "$pm2_state" = "online"
+          test "$login_http" = "200"
 
           set -a
           source .env
           set +a
-          test "${WHATSAPP_OUTBOUND_MODE:-disabled}" != "live"
-          test "${WHATSAPP_CUTOVER_APPROVED:-false}" != "true"
-          test -z "${WHATSAPP_OUTBOUND_LIVE_ACK:-}"
-          test "${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}" = "on"
+          outbound_mode="${WHATSAPP_OUTBOUND_MODE:-disabled}"
+          cutover_approved="${WHATSAPP_CUTOVER_APPROVED:-false}"
+          live_ack="${WHATSAPP_OUTBOUND_LIVE_ACK:-}"
+          kill_switch="${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}"
+          printf 'PRE_REFRESH_OUTBOUND_MODE=%s\nPRE_REFRESH_CUTOVER_APPROVED=%s\nPRE_REFRESH_LIVE_ACK_SET=%s\nPRE_REFRESH_KILL_SWITCH=%s\n' \
+            "$outbound_mode" "$cutover_approved" "$([[ -n "$live_ack" ]] && echo true || echo false)" "$kill_switch"
+          test "$outbound_mode" != "live"
+          test "$cutover_approved" != "true"
+          test -z "$live_ack"
+          test "$kill_switch" = "on"
 
           scheduler_outbound="$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED??""))})')"
           scheduler_mode="$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.WHATSAPP_OUTBOUND_MODE??""))})')"
           scheduler_kill="$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.WHATSAPP_OUTBOUND_KILL_SWITCH??""))})')"
+          printf 'PRE_REFRESH_SCHEDULER_OUTBOUND=%s\nPRE_REFRESH_SCHEDULER_MODE=%s\nPRE_REFRESH_SCHEDULER_KILL=%s\n' \
+            "$scheduler_outbound" "$scheduler_mode" "$scheduler_kill"
           test "$scheduler_outbound" = "false"
           test "$scheduler_mode" = "disabled"
           test "$scheduler_kill" = "on"
