@@ -1,4 +1,4 @@
-# Email DRY_RUN scheduler activation checkpoint: 2026-09-21
+# Email DRY_RUN scheduler activation checkpoint: 2026-09-22
 name: WhatsApp Agent Email DRY_RUN Activation
 
 on:
@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-
 
 jobs:
   email-dryrun-activation:
@@ -25,14 +24,12 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
-      DEPLOYED_SHA: ${{ github.event.before }}
       ACTIVATION_RUN_ID: email-dryrun-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Validate trigger and production secrets
         shell: bash
         run: |
           set -Eeuo pipefail
-          [[ "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
           missing=0
           for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
             [[ -n "${!variable_name:-}" ]] || { echo "Missing production secret: $variable_name" >&2; missing=1; }
@@ -58,28 +55,134 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
           ssh-keygen -y -f "$key" >/dev/null
 
-      - name: Activate email automation in DRY_RUN
+      - name: Reconcile production email runtime to verified DRY_RUN
         shell: bash
         run: |
           set -Eeuo pipefail
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            "DEPLOYED_SHA='$DEPLOYED_SHA' RUN_ID='$ACTIVATION_RUN_ID' bash -s" <<'REMOTE' | tee email-dryrun-activation.log
+            "RUN_ID='$ACTIVATION_RUN_ID' bash -s" <<'REMOTE' | tee email-dryrun-activation.log
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ENV_FILE="$APP/.env"
+          PM2_PROCESS_NAME=sikhadenge-whatsapp-agent
+          SERVICE_NAME=sikhadenge-email-automation-scheduler
           test "$(id -u)" = "0"
           cd "$APP"
-          test "$(git rev-parse HEAD)" = "$DEPLOYED_SHA"
+
+          DEPLOYED_SHA="$(git rev-parse HEAD)"
+          [[ "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          latest_evidence=""
+          latest_mtime=0
+          shopt -s nullglob
+          for candidate in /root/sikhadenge-backups/engageos-github-*/post-deploy-evidence.txt; do
+            candidate_mtime="$(stat -c %Y "$candidate" 2>/dev/null || printf '0')"
+            if [[ "$candidate_mtime" =~ ^[0-9]+$ ]] && (( candidate_mtime > latest_mtime )); then
+              latest_mtime="$candidate_mtime"
+              latest_evidence="$candidate"
+            fi
+          done
+          shopt -u nullglob
+          test -n "$latest_evidence"
+
+          read_evidence_value() {
+            local key="$1"
+            awk -F= -v key="$key" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "$latest_evidence"
+          }
+
+          CERTIFIED_RELEASE_SHA="$(read_evidence_value RELEASE_SHA)"
+          CERTIFIED_BUILD_ID="$(read_evidence_value BUILD_ID)"
+          CERTIFIED_PM2_STATUS="$(read_evidence_value PM2_STATUS)"
+          CERTIFIED_PM2_CWD="$(read_evidence_value PM2_CWD)"
+          LIVE_BUILD_ID="$(cat "$APP/.next/BUILD_ID")"
+
+          test "$CERTIFIED_RELEASE_SHA" = "$DEPLOYED_SHA"
+          test -n "$CERTIFIED_BUILD_ID"
+          test "$CERTIFIED_PM2_STATUS" = "online"
+          test "$LIVE_BUILD_ID" = "$CERTIFIED_BUILD_ID"
+
+          PM2_SNAPSHOT="$(mktemp)"
+          trap 'rm -f "$PM2_SNAPSHOT"' RETURN
+          pm2 jlist > "$PM2_SNAPSHOT"
+          IFS='|' read -r LIVE_PM2_PID LIVE_PM2_STATUS LIVE_PM2_CWD < <(
+            node - "$PM2_SNAPSHOT" <<'NODE'
+          const fs=require('node:fs');
+          const rows=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const p=rows.find(x=>x.name==='sikhadenge-whatsapp-agent');
+          process.stdout.write(p ? [p.pid||'',p.pm2_env?.status||'',p.pm2_env?.pm_cwd||''].join('|') + '\n' : '||\n');
+          NODE
+          )
+          rm -f "$PM2_SNAPSHOT"
+          trap - RETURN
+          test -n "$LIVE_PM2_PID"
+          test "$LIVE_PM2_STATUS" = "online"
+          test "$LIVE_PM2_CWD" = "$CERTIFIED_PM2_CWD"
+          test "$(cat "$LIVE_PM2_CWD/.next/BUILD_ID")" = "$CERTIFIED_BUILD_ID"
+
+          printf 'DISCOVERED_DEPLOYED_SHA=%s\n' "$DEPLOYED_SHA"
+          printf 'CERTIFIED_BUILD_ID=%s\n' "$CERTIFIED_BUILD_ID"
+          printf 'LIVE_PM2_PID=%s\n' "$LIVE_PM2_PID"
+
+          force_fail_closed() {
+            code=$?
+            trap - ERR EXIT
+            if [[ "$code" != "0" ]]; then
+              printf 'EMAIL_DRYRUN_RECONCILE_FALLBACK=BEGIN\n' >&2
+              node - "$ENV_FILE" <<'NODE'
+          const fs=require('node:fs'),path=require('node:path');
+          const file=process.argv[2],original=fs.readFileSync(file,'utf8'),stat=fs.statSync(file);
+          const desired={
+            EMAIL_RUNTIME_ENABLED:'true',
+            EMAIL_AUTOMATION_ENABLED:'false',
+            EMAIL_RUNTIME_MODE:'DRY_RUN',
+            EMAIL_EXTERNAL_WRITES_ENABLED:'false',
+            EMAIL_INBOUND_SYNC_ENABLED:'false'
+          };
+          const keys=new Set(Object.keys(desired));
+          const kept=original.split(/\r?\n/).filter(raw=>{
+            const line=raw.trim();
+            if(!line||line.startsWith('#')) return true;
+            const n=line.startsWith('export ')?line.slice(7).trim():line;
+            const i=n.indexOf('=');
+            return i<1||!keys.has(n.slice(0,i).trim());
+          });
+          while(kept.length&&kept.at(-1)==='') kept.pop();
+          for(const [k,v] of Object.entries(desired)) kept.push(`${k}=${v}`);
+          kept.push('');
+          const tmp=path.join(path.dirname(file),`.${path.basename(file)}.${process.pid}.tmp`);
+          fs.writeFileSync(tmp,kept.join('\n'),{mode:stat.mode});
+          fs.chmodSync(tmp,stat.mode);
+          try{fs.chownSync(tmp,stat.uid,stat.gid)}catch{}
+          fs.renameSync(tmp,file);
+          NODE
+              unset EMAIL_RUNTIME_ENABLED EMAIL_AUTOMATION_ENABLED EMAIL_RUNTIME_MODE EMAIL_EXTERNAL_WRITES_ENABLED EMAIL_INBOUND_SYNC_ENABLED EMAIL_INTERNAL_RECIPIENT_ALLOWLIST
+              export EMAIL_RUNTIME_ENABLED=true EMAIL_AUTOMATION_ENABLED=false EMAIL_RUNTIME_MODE=DRY_RUN EMAIL_EXTERNAL_WRITES_ENABLED=false EMAIL_INBOUND_SYNC_ENABLED=false
+              pm2 restart "$PM2_PROCESS_NAME" --update-env >/dev/null 2>&1 || true
+              printf 'EMAIL_DRYRUN_RECONCILE_FALLBACK=DRY_RUN_EXTERNAL_WRITES_OFF\n' >&2
+            fi
+            exit "$code"
+          }
+          trap force_fail_closed ERR EXIT
+
+          APPLY=1 SERVICE_NAME="$SERVICE_NAME" bash scripts/email-automation-scheduler-deactivate.sh
           APPLY=1 \
           LIVE_APP="$APP" \
-          ENV_FILE="$APP/.env" \
+          ENV_FILE="$ENV_FILE" \
           EXPECTED_RELEASE_SHA="$DEPLOYED_SHA" \
           RUN_ID="$RUN_ID" \
           MAX_FAILED_EVENTS=0 \
           bash scripts/email-automation-production-dryrun-activate.sh
-          printf 'GMAIL_CLIENT_CONFIGURED=%s\n' "$(node -e 'process.stdout.write(process.env.GOOGLE_GMAIL_CLIENT_ID?"yes":"no")')"
-          printf 'GMAIL_INBOUND_SYNC_ENABLED=%s\n' "$(node -e 'process.stdout.write(process.env.EMAIL_INBOUND_SYNC_ENABLED||"false")')"
+
+          EXPECTED_RELEASE_SHA="$DEPLOYED_SHA" \
+          ENV_FILE="$ENV_FILE" \
+          SERVICE_NAME="$SERVICE_NAME" \
+          MAX_FAILED_EVENTS=0 \
+          bash scripts/email-automation-scheduler-verify.sh
+
+          trap - ERR EXIT
+          printf 'EMAIL_DRYRUN_RECONCILE=PASS\nRUNTIME_MODE=DRY_RUN\nEXTERNAL_WRITES=false\nSCHEDULER_ACTIVE=true\n'
           REMOTE
 
       - name: Collect activation evidence
