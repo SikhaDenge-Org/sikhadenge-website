@@ -1,0 +1,155 @@
+name: Claude Asset Guarded Repair 20260922
+
+on:
+  workflow_dispatch:
+    inputs:
+      execute:
+        description: 'Apply minimal filesystem permission repair for the two exact 403 assets'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXECUTE: ${{ inputs.execute }}
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/prod"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"
+          read -r _ kt km _ <<< "$SSH_HOST_KEY"; test "$kt" = ssh-ed25519
+          port="${SSH_PORT:-22}"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$port" "$kt" "$km" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Audit and optionally repair exact Claude assets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          port="${SSH_PORT:-22}"
+          ssh -p "$port" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "EXECUTE='$EXECUTE' bash -s" > claude-assets-repair.txt <<'REMOTE'
+          set -Eeuo pipefail
+          export HOME=/root PM2_HOME=/root/.pm2
+
+          CHUNK_URL='/_next/static/chunks/pages/masterclass/claude/free-802d96fd8696db68-v315r-20260830-204006-v316-20260830-204806-hero-v1-trust-v1-outcomes-v1-agenda-v1-audience-v1b-closing-v1-20260910.js'
+          FAQ_URL='/claude-faq-conversion-v1-20260910.js?v=faq-conversion-v1-20260910'
+          CHUNK_FILE='/var/www/sikhadenge.in/releases/production-ai-video-icons-hotfix-20260829-091916/.next/static/chunks/pages/masterclass/claude/free-802d96fd8696db68-v315r-20260830-204006-v316-20260830-204806-hero-v1-trust-v1-outcomes-v1-agenda-v1-audience-v1b-closing-v1-20260910.js'
+
+          echo '=== HOST ==='; hostname; date
+          echo "EXECUTE=$EXECUTE"
+          echo '=== PUBLIC/DIRECT STATUS BEFORE ==='
+          for u in "$CHUNK_URL" "$FAQ_URL"; do
+            pub="$(curl -ksS -o /dev/null -w '%{http_code}|%{content_type}|%{size_download}' --max-time 15 "https://sikhadenge.in$u" || true)"
+            p3930="$(curl -sS -o /dev/null -w '%{http_code}|%{content_type}|%{size_download}' -H 'Host: sikhadenge.in' --max-time 10 "http://127.0.0.1:3930$u" || true)"
+            p3955="$(curl -sS -o /dev/null -w '%{http_code}|%{content_type}|%{size_download}' -H 'Host: sikhadenge.in' --max-time 10 "http://127.0.0.1:3955$u" || true)"
+            echo "$u PUBLIC=$pub P3930=$p3930 P3955=$p3955"
+          done
+
+          echo '=== NGINX EXACT CONTEXT ==='
+          nginx -T 2>/dev/null | grep -n -B4 -A8 -E 'closing-v1-20260910\.js|claude-faq-conversion-v1-20260910\.js' || true
+
+          echo '=== FILE DISCOVERY ==='
+          test -f "$CHUNK_FILE"
+          printf 'CHUNK_FILE=%s\n' "$CHUNK_FILE"
+          find /var/www/sikhadenge.in /var/backups/sikhadenge /opt -type f -name 'claude-faq-conversion-v1-20260910.js' -printf 'FAQ_FILE=%p|%s\n' 2>/dev/null | head -30
+
+          mapfile -t FAQ_FILES < <(find /var/www/sikhadenge.in -type f -name 'claude-faq-conversion-v1-20260910.js' -print 2>/dev/null)
+          [ "${#FAQ_FILES[@]}" -ge 1 ]
+
+          echo '=== NAMEI / MODES BEFORE ==='
+          namei -l "$CHUNK_FILE"
+          stat -c 'CHUNK %a %U:%G %s %n' "$CHUNK_FILE"
+          for f in "${FAQ_FILES[@]}"; do
+            namei -l "$f"
+            stat -c 'FAQ %a %U:%G %s %n' "$f"
+          done
+
+          NGINX_USER="$(nginx -T 2>/dev/null | awk '$1=="user"{gsub(";","",$2);print $2;exit}')"
+          [ -n "$NGINX_USER" ] || NGINX_USER=www-data
+          echo "NGINX_USER=$NGINX_USER"
+          if id "$NGINX_USER" >/dev/null 2>&1; then
+            if runuser -u "$NGINX_USER" -- test -r "$CHUNK_FILE"; then echo CHUNK_READABLE_BEFORE=1; else echo CHUNK_READABLE_BEFORE=0; fi
+            for f in "${FAQ_FILES[@]}"; do
+              if runuser -u "$NGINX_USER" -- test -r "$f"; then echo "FAQ_READABLE_BEFORE=1 $f"; else echo "FAQ_READABLE_BEFORE=0 $f"; fi
+            done
+          fi
+
+          if [ "$EXECUTE" != 'true' ]; then
+            echo 'AUDIT_ONLY=1'
+            exit 0
+          fi
+
+          echo '=== GUARDED MINIMAL PERMISSION REPAIR ==='
+          # Scope guards: exact legacy release chunk plus FAQ assets under Sikhadenge web root only.
+          case "$CHUNK_FILE" in /var/www/sikhadenge.in/releases/production-ai-video-icons-hotfix-20260829-091916/*) ;; *) exit 21 ;; esac
+          for f in "${FAQ_FILES[@]}"; do case "$f" in /var/www/sikhadenge.in/*) ;; *) exit 22 ;; esac; done
+
+          repair_path() {
+            file="$1"
+            # Make only path traversal/read bits available; never add write bits.
+            python3 - "$file" <<'PY'
+          import os,sys
+          p=os.path.abspath(sys.argv[1])
+          parts=p.split(os.sep)
+          cur='/'
+          for part in parts[1:-1]:
+              cur=os.path.join(cur,part)
+              st=os.stat(cur)
+              mode=st.st_mode & 0o7777
+              if not (mode & 0o001):
+                  os.chmod(cur, mode | 0o001)
+                  print('DIR_ADD_OTHER_X',oct(mode),'=>',oct(mode|0o001),cur)
+          st=os.stat(p); mode=st.st_mode & 0o7777
+          if not (mode & 0o004):
+              os.chmod(p, mode | 0o004)
+              print('FILE_ADD_OTHER_R',oct(mode),'=>',oct(mode|0o004),p)
+          PY
+          }
+
+          repair_path "$CHUNK_FILE"
+          for f in "${FAQ_FILES[@]}"; do repair_path "$f"; done
+
+          echo '=== MODES AFTER ==='
+          namei -l "$CHUNK_FILE"
+          stat -c 'CHUNK %a %U:%G %s %n' "$CHUNK_FILE"
+          for f in "${FAQ_FILES[@]}"; do stat -c 'FAQ %a %U:%G %s %n' "$f"; done
+          if id "$NGINX_USER" >/dev/null 2>&1; then
+            runuser -u "$NGINX_USER" -- test -r "$CHUNK_FILE"
+          fi
+
+          echo '=== PUBLIC STATUS AFTER ==='
+          fail=0
+          for u in "$CHUNK_URL" "$FAQ_URL"; do
+            code="$(curl -ksS -L --retry 5 --retry-all-errors --retry-delay 2 -o /dev/null -w '%{http_code}' --max-time 20 "https://sikhadenge.in$u" || true)"
+            echo "$u HTTP=$code"
+            [ "$code" = 200 ] || fail=1
+          done
+          [ "$fail" = 0 ]
+          echo 'CLAUDE_ASSET_REPAIR_OK=1'
+          REMOTE
+          cat claude-assets-repair.txt
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-assets-repair-${{ github.run_id }}-${{ github.run_attempt }}
+          path: claude-assets-repair.txt
+          if-no-files-found: error
+          retention-days: 7
