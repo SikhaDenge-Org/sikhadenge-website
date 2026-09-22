@@ -23,7 +23,8 @@ jobs:
           set -Eeuo pipefail
           gh workflow run ui-static-protected-audit-20260922.yml \
             --repo "$GITHUB_REPOSITORY" \
-            --ref ops/emergency-disk-deep-audit-20260922
+            --ref release/whatsapp-instagram-agent-flow-20260731 \
+            -f execute=true
           echo 'PROTECTED_UI_STATIC_AUDIT_DISPATCHED=1'
 # preflight-dispatch-20260922-01
 # execute-recovery-20260922-01
@@ -35,3 +36,4 @@ jobs:
 # execute-emergency-disk-cleanup-20260922-02
 # dispatch-deep-disk-audit-20260922-01
 # execute-global-vps-recovery-20260922-01
+# execute-global-vps-recovery-20260922-02
