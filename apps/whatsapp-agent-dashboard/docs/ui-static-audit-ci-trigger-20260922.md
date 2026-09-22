@@ -1,0 +1,3 @@
+# UI static audit CI trigger
+
+Non-runtime marker used only to trigger the protected branch's required WhatsApp Agent CI checks for PR #501. No application behavior, schema, configuration, or production runtime is changed.
