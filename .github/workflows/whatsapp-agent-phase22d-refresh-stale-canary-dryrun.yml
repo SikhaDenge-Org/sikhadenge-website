@@ -25,7 +25,7 @@ jobs:
       VERIFIED_CANARY_WA_ID: ${{ secrets.WHATSAPP_INTERNAL_CANARY_WA_ID }}
       EXPECTED_LIVE_SHA: 4e4bcb0119f2096ee2f95c95862c5c0d797c1021
       EXPECTED_STATE_VERSION: "2"
-      STALE_MESSAGE_ID: cmubjhi1j0002kwh6ulh85bun
+      STALE_MESSAGE_ID: cmucaz4wy0005kwqb99jodzqx
 
     steps:
       - name: Checkout reviewed refresh operators

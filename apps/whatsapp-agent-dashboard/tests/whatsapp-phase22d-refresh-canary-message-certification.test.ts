@@ -168,3 +168,52 @@ for (const forbidden of [
     `Single-canary operator must not mutate unrelated email source: ${forbidden}`,
   );
 }
+
+
+const liveDispatcherWorkflowSource = readFileSync(
+  fileURLToPath(
+    new URL(
+      "../../../.github/workflows/whatsapp-agent-phase22d-live-dispatch-once.yml",
+      import.meta.url,
+    ),
+  ),
+  "utf8",
+);
+
+assert.equal(
+  workflowSource.includes("STALE_MESSAGE_ID: cmucaz4wy0005kwqb99jodzqx"),
+  true,
+  "Refresh workflow must supersede the previously qualified canary once it becomes stale.",
+);
+
+for (const required of [
+  "REFRESH_WORKFLOW: whatsapp-agent-phase22d-refresh-stale-canary-dryrun.yml",
+  '--commit "$GITHUB_SHA"',
+  'gh run watch "$refresh_run_id"',
+  "Fresh message ID:",
+  'echo "CANARY_MESSAGE_ID=$fresh_message_id"',
+  "-f execute=true",
+]) {
+  assert.equal(
+    liveDispatcherWorkflowSource.includes(required),
+    true,
+    `Missing refresh-then-live dispatcher contract: ${required}`,
+  );
+}
+assert.equal(
+  liveDispatcherWorkflowSource.includes("CANARY_MESSAGE_ID: cmucaz4wy0005kwqb99jodzqx"),
+  false,
+  "Live dispatcher must consume the same-push fresh canary instead of a stale hard-coded message.",
+);
+
+for (const required of [
+  "FINAL_REVIEWED_EMAIL_DRIFT_PRESENT=true",
+  'test "$tracked_dirty" = "$allowed_dirty_line"',
+  'test "$live_email_drift_sha" = "$REVIEWED_EMAIL_DRIFT_SHA256"',
+]) {
+  assert.equal(
+    singleCanaryWorkflowSource.includes(required),
+    true,
+    `Missing final reviewed-drift safety contract: ${required}`,
+  );
+}

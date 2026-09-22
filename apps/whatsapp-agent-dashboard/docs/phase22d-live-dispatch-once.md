@@ -1,13 +1,12 @@
-# Phase22D one-time live canary dispatcher
+# Phase22D refresh-then-live internal canary
 
-This control-plane marker invokes the already-reviewed Phase17 single-message canary operator exactly once after protected-release CI and merge.
+This control-plane path preserves the 30-minute freshness gate instead of relaxing it.
 
-Fixed scope:
-- deployed production SHA: `4e4bcb0119f2096ee2f95c95862c5c0d797c1021`
-- controlled-launch state version: `2`
-- exact fresh internal canary message: `cmucaz4wy0005kwqb99jodzqx`
-- exact sole active ADMIN principal previously evidenced by Phase22D production provision runs
-- explicit one-message approval reason
-- `execute=true`
+On the same protected-release merge push:
+1. the Phase22D refresh workflow supersedes the exact stale queued INTERNAL_TEST canary and queues one fresh `hello_world` canary;
+2. the refresh workflow runs the existing single-message operator in DRY_RUN and records the fresh message ID in issue #65;
+3. the one-time live dispatcher waits for that exact same-commit refresh run, resolves its fresh message ID, and immediately invokes the existing reviewed single-message operator with `execute=true`;
+4. the target operator requires the exact designated INTERNAL_TEST recipient, exact active ADMIN approver, state version 2, scheduler isolation, provider parity, one-time persisted approval, and isolated live provider gates;
+5. the operator restores controlled launch to SHADOW / NO_EXTERNAL_WRITES and final verification accepts only a clean checkout or the sole reviewed email-only drift with an exact protected-release SHA-256 match.
 
-The dispatcher itself performs no Meta/provider call, does not change PM2 or `.env`, and does not enable batch/general outbound. All production mutation/send authority remains inside the existing reviewed single-message operator, including exact INTERNAL_TEST recipient/template checks, scheduler isolation, one-time approval consumption, provider-boundary enforcement, and automatic restore to SHADOW/no-external-writes.
+The dispatcher itself contains no Meta provider call and does not enable batch/general outbound or mutate PM2/.env.
