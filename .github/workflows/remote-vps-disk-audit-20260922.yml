@@ -1,0 +1,92 @@
+name: Remote VPS Disk Audit 2026-09-22
+on:
+  push:
+    branches: [ops/remote-disk-audit-20260922]
+    paths:
+      - ".github/workflows/remote-vps-disk-audit-20260922.yml"
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.SSH_HOST_KEY }}
+      SSH_PORT: ${{ secrets.SSH_PORT }}
+    steps:
+      - name: Verify SSH secret availability
+        run: |
+          set -Eeuo pipefail
+          for k in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            if [[ -z "${!k:-}" ]]; then
+              echo "MISSING_SECRET=$k"
+              exit 3
+            fi
+          done
+          echo "SSH_SECRETS_AVAILABLE=YES"
+      - name: Configure SSH
+        run: |
+          set -Eeuo pipefail
+          : "${SSH_PORT:=22}"
+          echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
+          install -d -m 700 "$HOME/.ssh"
+          KEY="$HOME/.ssh/prod"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"
+          fi
+          chmod 600 "$KEY"
+          read -r _ kt km _ <<< "$SSH_HOST_KEY"
+          test "$kt" = ssh-ed25519
+          if [[ "$SSH_PORT" == "22" ]]; then
+            printf '%s %s %s\n' "$SSH_HOST" "$kt" "$km" > "$HOME/.ssh/known_hosts"
+          else
+            printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$kt" "$km" > "$HOME/.ssh/known_hosts"
+          fi
+          chmod 600 "$HOME/.ssh/known_hosts"
+      - name: Read-only production disk audit
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/prod" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          test "$(hostname -s)" = "srv1232861"
+          echo "===== FILESYSTEM ====="
+          date -u
+          id
+          df -B1 /
+          df -hT /
+          echo "===== TOP ====="
+          du -x -B1 -d 1 / 2>/dev/null | sort -n | tail -50
+          echo "===== VARWWW ====="
+          du -x -B1 -d 3 /var/www 2>/dev/null | sort -n | tail -260
+          echo "===== OPT ====="
+          du -x -B1 -d 3 /opt 2>/dev/null | sort -n | tail -320
+          echo "===== TMP ====="
+          du -x -B1 -d 2 /tmp 2>/dev/null | sort -n | tail -200
+          echo "===== BACKUPS ====="
+          du -x -B1 -d 3 /var/backups 2>/dev/null | sort -n | tail -200
+          echo "===== RUNNER ====="
+          du -x -B1 -d 5 /opt/actions-runner-org 2>/dev/null | sort -n | tail -320
+          echo "===== DASHBOARD RELEASES ====="
+          du -x -B1 -d 1 /opt/sikhadenge-dashboard-releases 2>/dev/null | sort -nr | head -220 || true
+          echo "===== SITE RELEASES ====="
+          du -x -B1 -d 1 /var/www/sikhadenge.in/releases 2>/dev/null | sort -nr | head -180 || true
+          echo "===== WA RELEASES ====="
+          du -x -B1 -d 1 /var/www/sikhadenge-whatsapp-agent/releases 2>/dev/null | sort -nr | head -200 || true
+          echo "===== PM2 ====="
+          pm2 jlist 2>/dev/null | python3 -c 'import json,sys; rows=json.load(sys.stdin); print("\n".join(f"{x.get(\"name\")}\t{x.get(\"pm2_env\",{}).get(\"pm_cwd\",\"\")}" for x in rows))' || true
+          echo "===== DOCKER ====="
+          docker system df -v 2>/dev/null || true
+          echo "===== BIGFILES ====="
+          find /var/www /opt /tmp /var/backups -xdev -type f -size +250M -printf '%s\t%TY-%Tm-%Td %TH:%TM:%TS\t%p\n' 2>/dev/null | sort -nr | head -300
+          echo "===== HEALTH ====="
+          systemctl --failed --no-pager || true
+          for u in http://127.0.0.1:3400/api/health http://127.0.0.1:3411/health http://127.0.0.1:3220/health http://127.0.0.1:3230/health; do
+            echo "$(curl -k -sS -o /dev/null -w '%{http_code}' --max-time 5 "$u" || true) $u"
+          done
+          echo "$(curl -k -sS -o /dev/null -w '%{http_code}' --max-time 10 https://sikhadenge.in/ || true) https://sikhadenge.in/"
+          REMOTE
