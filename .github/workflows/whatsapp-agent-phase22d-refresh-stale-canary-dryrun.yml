@@ -136,7 +136,7 @@ jobs:
             test "$tracked_dirty_count" = "1"
             test "$tracked_dirty" = "$allowed_dirty_line"
             [[ "$REVIEWED_EMAIL_DRIFT_SHA256" =~ ^[0-9a-f]{64}$ ]]
-            live_email_drift_sha="$(sha256sum apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts | awk '{print $1}')"
+            live_email_drift_sha="$(sha256sum scripts/email-inbound-production-readiness.ts | awk '{print $1}')"
             printf 'PRE_REFRESH_REVIEWED_EMAIL_DRIFT=true\n'
             printf 'PRE_REFRESH_REVIEWED_EMAIL_DRIFT_SHA256=%s\n' "$live_email_drift_sha"
             test "$live_email_drift_sha" = "$REVIEWED_EMAIL_DRIFT_SHA256"

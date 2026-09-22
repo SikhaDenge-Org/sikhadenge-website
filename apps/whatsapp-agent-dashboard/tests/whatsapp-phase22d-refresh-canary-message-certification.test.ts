@@ -121,3 +121,15 @@ assert.equal(
   true,
   "Reviewed drift SHA must use Bash regex syntax",
 );
+
+
+assert.equal(
+  workflowSource.includes("sha256sum scripts/email-inbound-production-readiness.ts"),
+  true,
+  "Reviewed live drift hash must use app-relative path",
+);
+assert.equal(
+  workflowSource.includes("sha256sum apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts"),
+  false,
+  "Reviewed live drift hash must not duplicate the app path from inside APP",
+);
