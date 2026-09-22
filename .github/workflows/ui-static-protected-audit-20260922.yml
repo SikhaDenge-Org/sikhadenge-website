@@ -55,6 +55,43 @@ jobs:
           set -Eeuo pipefail
           export HOME=/root PM2_HOME=/root/.pm2
 
+          echo '=== EMERGENCY DISK PRESSURE GUARD ==='
+          KEEP_LIVE='/var/www/sikhadenge.in/releases/ui-static-recovery-20260922-141554'
+          test -d "$KEEP_LIVE"
+          test -f "$KEEP_LIVE/.next/BUILD_ID"
+          test -x "$KEEP_LIVE/node_modules/.bin/next"
+          before_avail_kb="$(df -Pk / | awk 'NR==2{print $4}')"
+          echo "DISK_AVAILABLE_KB_BEFORE=$before_avail_kb"
+          if [ "$EXECUTE" = 'true' ] && [ "$before_avail_kb" -lt 3145728 ]; then
+            echo "DISK_PRESSURE_CLEANUP_REQUIRED=1"
+            for d in /var/www/sikhadenge.in/releases/ui-static-recovery-*; do
+              [ -d "$d" ] || continue
+              [ "$d" = "$KEEP_LIVE" ] && continue
+              case "$d" in
+                /var/www/sikhadenge.in/releases/ui-static-recovery-*) ;;
+                *) echo "REFUSE_UNEXPECTED_RELEASE_PATH=$d"; exit 70 ;;
+              esac
+              echo -n "STALE_RELEASE_DELETE=$d SIZE="
+              du -sh "$d" 2>/dev/null | awk '{print $1}' || true
+              rm -rf --one-file-system -- "$d"
+            done
+            find /var/tmp -maxdepth 1 -mindepth 1 -type d -name 'sd-ui-recovery-*' -mmin +30 -print0 2>/dev/null |
+              while IFS= read -r -d '' d; do
+                case "$d" in
+                  /var/tmp/sd-ui-recovery-*) ;;
+                  *) echo "REFUSE_UNEXPECTED_TEMP_PATH=$d"; exit 71 ;;
+                esac
+                echo -n "STALE_TEMP_DELETE=$d SIZE="
+                du -sh "$d" 2>/dev/null | awk '{print $1}' || true
+                rm -rf --one-file-system -- "$d"
+              done
+            sync || true
+          fi
+          after_avail_kb="$(df -Pk / | awk 'NR==2{print $4}')"
+          echo "DISK_AVAILABLE_KB_AFTER=$after_avail_kb"
+          df -h /
+          [ "$after_avail_kb" -gt 524288 ]
+
           APP='sikhadenge-checkout-hotfix-3955-20260831-210229'
           PORT=3955
           TS="$(date +%Y%m%d-%H%M%S)"
