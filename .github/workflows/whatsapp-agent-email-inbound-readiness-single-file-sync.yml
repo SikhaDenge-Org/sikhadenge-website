@@ -71,13 +71,15 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
           ssh-keygen -y -f "$key" >/dev/null
 
-      - name: Upload reviewed Email readiness script
+      - name: Stream reviewed Email readiness script to protected staging
         shell: bash
         run: |
           set -Eeuo pipefail
-          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
-            "$SOURCE_FILE" "$SSH_USER@$SSH_HOST:/tmp/email-inbound-production-readiness.ts.$RUN_ID"
+            "$SSH_USER@$SSH_HOST" \
+            "set -Eeuo pipefail; test \"\$(id -u)\" = \"0\"; install -d -m 700 '/root/sikhadenge-backups/$RUN_ID'; umask 077; cat > '/root/sikhadenge-backups/$RUN_ID/incoming-email-inbound-production-readiness.ts'; chmod 600 '/root/sikhadenge-backups/$RUN_ID/incoming-email-inbound-production-readiness.ts'" \
+            < "$SOURCE_FILE"
 
       - name: Guarded single-file production sync
         shell: bash
@@ -91,8 +93,8 @@ jobs:
           test "$(id -u)" = "0"
           cd "$APP"
           target="scripts/email-inbound-production-readiness.ts"
-          incoming="/tmp/email-inbound-production-readiness.ts.$RUN_ID"
           backup="/root/sikhadenge-backups/$RUN_ID"
+          incoming="$backup/incoming-email-inbound-production-readiness.ts"
           install -d -m 700 "$backup"
 
           current_sha="$(git rev-parse HEAD)"
