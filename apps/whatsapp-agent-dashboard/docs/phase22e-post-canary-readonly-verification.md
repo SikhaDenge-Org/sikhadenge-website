@@ -19,3 +19,4 @@ The workflow is safe to rerun manually and also runs once when first merged to t
 Runtime note: optional automation/journey/campaign flags use the application’s fail-closed semantics, so unset/false/off/disabled are all treated as safely off. The actual provider-dispatch gate, outbound mode, and kill switch remain strict production assertions.
 
 Dirty-path inventory note: the verifier prints the exact tracked dirty paths before enforcing its allowlist. This is read-only evidence collection; unknown drift still fails closed.
+Production drift note: current production contains exactly two tracked out-of-scope Email-only modifications. Phase22E does not modify them; it permits them only when both exact paths are present and each live SHA-256 matches the protected-release reviewed copy. Any missing, additional, reordered, or hash-mismatched tracked drift fails closed.
