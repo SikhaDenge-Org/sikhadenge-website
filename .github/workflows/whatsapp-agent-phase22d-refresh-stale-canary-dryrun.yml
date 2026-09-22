@@ -71,8 +71,12 @@ jobs:
           set -Eeuo pipefail
           refresh_local="apps/whatsapp-agent-dashboard/scripts/whatsapp-phase22d-refresh-canary-message.ts"
           canary_local="apps/whatsapp-agent-dashboard/scripts/engageos-phase17-single-message-canary.ts"
+          reviewed_email_drift_local="apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts"
           test -f "$refresh_local"
           test -f "$canary_local"
+          test -f "$reviewed_email_drift_local"
+          reviewed_email_drift_sha="$(sha256sum "$reviewed_email_drift_local" | awk '{print $1}')"
+          echo "REVIEWED_EMAIL_DRIFT_SHA256=$reviewed_email_drift_sha" >> "$GITHUB_ENV"
 
           refresh_remote="/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard/scripts/.phase22d-refresh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.ts"
           canary_remote="/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard/scripts/.phase22d-canary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.ts"
@@ -102,7 +106,7 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
             "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' bash -s" <<'REMOTE'
+            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' REVIEWED_EMAIL_DRIFT_SHA256='$REVIEWED_EMAIL_DRIFT_SHA256' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           cd "$APP"
@@ -125,7 +129,18 @@ jobs:
           fi
           printf 'PRE_REFRESH_PM2_STATE=%s\nPRE_REFRESH_LOGIN_HTTP=%s\n' "$pm2_state" "$login_http"
           test "$live_sha" = "$EXPECTED_LIVE_SHA"
-          test "$tracked_dirty_count" = "0"
+          if [[ "$tracked_dirty_count" = "0" ]]; then
+            printf 'PRE_REFRESH_REVIEWED_EMAIL_DRIFT=false\n'
+          else
+            allowed_dirty_line=" M apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts"
+            test "$tracked_dirty_count" = "1"
+            test "$tracked_dirty" = "$allowed_dirty_line"
+            test "$REVIEWED_EMAIL_DRIFT_SHA256" =~ ^[0-9a-f]{64}$
+            live_email_drift_sha="$(sha256sum apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts | awk '{print $1}')"
+            printf 'PRE_REFRESH_REVIEWED_EMAIL_DRIFT=true\n'
+            printf 'PRE_REFRESH_REVIEWED_EMAIL_DRIFT_SHA256=%s\n' "$live_email_drift_sha"
+            test "$live_email_drift_sha" = "$REVIEWED_EMAIL_DRIFT_SHA256"
+          fi
           test "$pm2_state" = "online"
           test "$login_http" = "200"
 
