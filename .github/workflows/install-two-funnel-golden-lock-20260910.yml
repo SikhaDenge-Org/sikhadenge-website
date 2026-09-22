@@ -41,7 +41,8 @@ jobs:
           # Whole website Nginx must never be overwritten by the guard.
           ! grep -F 'cp -a "$GOLD/config/site' ops/sikhadenge-funnel-golden-guard.sh
           grep -Fq 'replace_claude_route' ops/sikhadenge-funnel-golden-guard.sh
-          grep -Fq 'OnUnitActiveSec=60s' ops/install-two-funnel-golden-lock-20260910.sh
+          grep -Fq 'OnActiveSec=30s' ops/install-two-funnel-golden-lock-20260910.sh
+          grep -Fq 'OnUnitInactiveSec=60s' ops/install-two-funnel-golden-lock-20260910.sh
           grep -Fq 'minute % 5' ops/sikhadenge-funnel-golden-guard.sh
           grep -Fq 'HTTP_000_LOCAL_HTTPS_FALLBACK=ENABLED' ops/harden-funnel-golden-network-checks-20260910.sh
           grep -Fq 'WRONG_HTTP_OR_SHA_STILL_FAILS=YES' ops/harden-funnel-golden-network-checks-20260910.sh
