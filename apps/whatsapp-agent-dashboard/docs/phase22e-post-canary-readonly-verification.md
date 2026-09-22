@@ -19,3 +19,4 @@ The workflow is safe to rerun manually and also runs once when first merged to t
 Runtime note: optional automation/journey/campaign flags use the application’s fail-closed semantics, so unset/false/off/disabled are all treated as safely off. The actual provider-dispatch gate, outbound mode, and kill switch remain strict production assertions.
 
 Dirty-path inventory note: the verifier prints the exact tracked dirty paths before enforcing its allowlist. This is read-only evidence collection; unknown drift still fails closed.
+Reviewed drift note: production currently has exactly two tracked Email-only files differing from the deployed runtime commit. The verifier permits only those two exact paths and requires each live file to match the current protected-release Git blob. Any additional dirty path or content mismatch still fails closed; the verifier does not modify those files.
