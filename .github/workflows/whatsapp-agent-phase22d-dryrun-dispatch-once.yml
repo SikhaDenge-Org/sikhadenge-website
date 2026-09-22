@@ -69,18 +69,16 @@ jobs:
           status="$(gh run view "$TARGET_RUN_ID" -R "$GITHUB_REPOSITORY" --json status --jq '.status')"
           conclusion="$(gh run view "$TARGET_RUN_ID" -R "$GITHUB_REPOSITORY" --json conclusion --jq '.conclusion')"
           {
-            echo "## Phase22D exact internal canary DRY_RUN"
-            echo
-            echo "- Workflow run: $TARGET_RUN_URL"
-            echo "- Run ID: $TARGET_RUN_ID"
-            echo "- Expected live SHA: `$EXPECTED_LIVE_SHA`"
-            echo "- Exact message ID: `$CANARY_MESSAGE_ID`"
-            echo "- execute: `false`"
-            echo "- Status: `$status`"
-            echo "- Conclusion: `$conclusion`"
-            echo "- External WhatsApp write requested: **false**"
-            echo
-            echo "This one-time dispatcher does not enable persistent outbound flags and does not request a provider send."
+            printf '## Phase22D exact internal canary DRY_RUN\n\n'
+            printf '%s\n' "- Workflow run: $TARGET_RUN_URL"
+            printf '%s\n' "- Run ID: $TARGET_RUN_ID"
+            printf '%s\n' "- Expected live SHA: \`$EXPECTED_LIVE_SHA\`"
+            printf '%s\n' "- Exact message ID: \`$CANARY_MESSAGE_ID\`"
+            printf '%s\n' "- execute: \`false\`"
+            printf '%s\n' "- Status: \`$status\`"
+            printf '%s\n' "- Conclusion: \`$conclusion\`"
+            printf '%s\n\n' "- External WhatsApp write requested: **false**"
+            printf '%s\n' "This one-time dispatcher does not enable persistent outbound flags and does not request a provider send."
           } > phase22d-dryrun-ledger.md
           gh issue comment 65 -R "$GITHUB_REPOSITORY" --body-file phase22d-dryrun-ledger.md
           test "$status" = "completed"
