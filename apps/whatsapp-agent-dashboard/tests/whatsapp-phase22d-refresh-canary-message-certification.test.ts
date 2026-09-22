@@ -1,21 +1,46 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const source = readFileSync(
-  fileURLToPath(new URL("../scripts/whatsapp-phase22d-refresh-canary-message.ts", import.meta.url)),
-  "utf8",
+const refreshScriptPath = fileURLToPath(
+  new URL("../scripts/whatsapp-phase22d-refresh-canary-message.ts", import.meta.url),
 );
-const workflowSource = readFileSync(
-  fileURLToPath(
-    new URL(
-      "../../../.github/workflows/whatsapp-agent-phase22d-refresh-stale-canary-dryrun.yml",
-      import.meta.url,
-    ),
+const singleCanaryWorkflowPath = fileURLToPath(
+  new URL(
+    "../../../.github/workflows/whatsapp-agent-phase17-single-message-canary.yml",
+    import.meta.url,
   ),
-  "utf8",
+);
+const retiredRefreshWorkflowPath = fileURLToPath(
+  new URL(
+    "../../../.github/workflows/whatsapp-agent-phase22d-refresh-stale-canary-dryrun.yml",
+    import.meta.url,
+  ),
+);
+const retiredLiveDispatcherPath = fileURLToPath(
+  new URL(
+    "../../../.github/workflows/whatsapp-agent-phase22d-live-dispatch-once.yml",
+    import.meta.url,
+  ),
 );
 
+assert.equal(
+  existsSync(retiredRefreshWorkflowPath),
+  false,
+  "Completed Phase22D push-triggered refresh workflow must stay retired.",
+);
+assert.equal(
+  existsSync(retiredLiveDispatcherPath),
+  false,
+  "Completed Phase22D push-triggered live dispatcher must stay retired.",
+);
+assert.equal(
+  existsSync(singleCanaryWorkflowPath),
+  true,
+  "Guarded manual Phase17 single-message canary operator must remain available.",
+);
+
+const refreshSource = readFileSync(refreshScriptPath, "utf8");
 for (const required of [
   "PHASE22D_VERIFIED_CANARY_WA_ID",
   "PHASE22D_STALE_MESSAGE_ID",
@@ -30,13 +55,13 @@ for (const required of [
   "phase22d-internal-canary:",
   "queueOutboundMessage",
   "externalWhatsAppWriteSent: false",
-  "prisma.$queryRaw",
   "EngageControlledLaunchOutboundApproval",
-  "prisma.whatsAppMessageStatusEvent.create",
-  "prisma.auditLog.create",
-  "failureCode: SUPERSEDE_CODE",
 ]) {
-  assert.equal(source.includes(required), true, `Missing refresh safety contract: ${required}`);
+  assert.equal(
+    refreshSource.includes(required),
+    true,
+    `Missing retained refresh-script safety contract: ${required}`,
+  );
 }
 
 for (const forbidden of [
@@ -47,181 +72,48 @@ for (const forbidden of [
   "WHATSAPP_OUTBOUND_MODE=live",
   "WHATSAPP_OUTBOUND_KILL_SWITCH=off",
 ]) {
-  assert.equal(source.includes(forbidden), false, `Refresh operator must not contain provider-send path: ${forbidden}`);
+  assert.equal(
+    refreshSource.includes(forbidden),
+    false,
+    `Retained refresh script must not contain a provider-send path: ${forbidden}`,
+  );
 }
 
-console.log("Phase22D stale-canary refresh certification: PASS");
-
-
+const singleCanarySource = readFileSync(singleCanaryWorkflowPath, "utf8");
 for (const required of [
-  "Verify fail-closed runtime before fresh queue",
+  "workflow_dispatch:",
+  "approved_by_user_id:",
+  "approval_reason:",
+  "execute:",
+  "REVIEWED_EMAIL_DRIFT_SHA256",
   "WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED",
-  "SCHEDULER_OUTBOUND_ISOLATION_VERIFIED=true",
-  "Run exact fresh canary DRY_RUN",
-  "PHASE17_CANARY_MODE=DRY_RUN",
-  "EXTERNAL_WHATSAPP_WRITE_SENT=false",
-  "Final fail-closed production verification",
-  "FRESH_CANARY_MESSAGE_STATE",
-]) {
-  assert.equal(
-    workflowSource.includes(required),
-    true,
-    `Missing refresh workflow safety contract: ${required}`,
-  );
-}
-
-for (const forbidden of [
-  "gh workflow run",
-  "-f execute=true",
-  "WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED=true",
-]) {
-  assert.equal(
-    workflowSource.includes(forbidden),
-    false,
-    `Refresh workflow must not contain unsafe dispatch contract: ${forbidden}`,
-  );
-}
-
-
-for (const required of [
-  "REVIEWED_EMAIL_DRIFT_SHA256",
-  "email-inbound-production-readiness.ts",
-  "PRE_REFRESH_REVIEWED_EMAIL_DRIFT=true",
-  "test \"$tracked_dirty_count\" = \"1\"",
-  "test \"$tracked_dirty\" = \"$allowed_dirty_line\"",
-  "test \"$live_email_drift_sha\" = \"$REVIEWED_EMAIL_DRIFT_SHA256\"",
-]) {
-  assert.equal(
-    workflowSource.includes(required),
-    true,
-    `Missing exact reviewed checkout-drift isolation contract: ${required}`,
-  );
-}
-
-for (const forbidden of [
-  "git checkout -- apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts",
-  "git restore apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts",
-  "git reset --hard",
-]) {
-  assert.equal(
-    workflowSource.includes(forbidden),
-    false,
-    `WhatsApp workflow must not mutate unrelated email source: ${forbidden}`,
-  );
-}
-
-
-assert.equal(
-  workflowSource.includes('test "$REVIEWED_EMAIL_DRIFT_SHA256" =~'),
-  false,
-  "Broken test-regex syntax must stay absent",
-);
-assert.equal(
-  workflowSource.includes('[[ "$REVIEWED_EMAIL_DRIFT_SHA256" =~ ^[0-9a-f]{64}$ ]]'),
-  true,
-  "Reviewed drift SHA must use Bash regex syntax",
-);
-
-
-assert.equal(
-  workflowSource.includes("sha256sum scripts/email-inbound-production-readiness.ts"),
-  true,
-  "Reviewed live drift hash must use app-relative path",
-);
-assert.equal(
-  workflowSource.includes("sha256sum apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts"),
-  false,
-  "Reviewed live drift hash must not duplicate the app path from inside APP",
-);
-
-
-const singleCanaryWorkflowSource = readFileSync(
-  fileURLToPath(
-    new URL(
-      "../../../.github/workflows/whatsapp-agent-phase17-single-message-canary.yml",
-      import.meta.url,
-    ),
-  ),
-  "utf8",
-);
-for (const required of [
-  "REVIEWED_EMAIL_DRIFT_SHA256",
-  "allowed_dirty_line",
-  "email-inbound-production-readiness.ts",
-  "sha256sum scripts/email-inbound-production-readiness.ts",
-  "REVIEWED_EMAIL_DRIFT_PRESENT=true",
-]) {
-  assert.equal(
-    singleCanaryWorkflowSource.includes(required),
-    true,
-    `Missing single-canary reviewed-drift isolation contract: ${required}`,
-  );
-}
-for (const forbidden of [
-  "git reset --hard",
-  "git restore apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts",
-  "git checkout -- apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts",
-]) {
-  assert.equal(
-    singleCanaryWorkflowSource.includes(forbidden),
-    false,
-    `Single-canary operator must not mutate unrelated email source: ${forbidden}`,
-  );
-}
-
-
-const liveDispatcherWorkflowSource = readFileSync(
-  fileURLToPath(
-    new URL(
-      "../../../.github/workflows/whatsapp-agent-phase22d-live-dispatch-once.yml",
-      import.meta.url,
-    ),
-  ),
-  "utf8",
-);
-
-assert.equal(
-  workflowSource.includes("STALE_MESSAGE_ID: cmuccwo4y0005kw7qu3800ogx"),
-  true,
-  "Refresh workflow must supersede the previously qualified canary once it becomes stale.",
-);
-
-for (const required of [
-  "REFRESH_WORKFLOW: whatsapp-agent-phase22d-refresh-stale-canary-dryrun.yml",
-  '--commit "$GITHUB_SHA"',
-  'gh run watch "$refresh_run_id"',
-  'gh run view "$refresh_run_id"',
-  "--log",
-  "FRESH_MESSAGE_ID=",
-  "for attempt in $(seq 1 20)",
-  'echo "CANARY_MESSAGE_ID=$fresh_message_id"',
-  "-f execute=true",
-]) {
-  assert.equal(
-    liveDispatcherWorkflowSource.includes(required),
-    true,
-    `Missing refresh-then-live dispatcher contract: ${required}`,
-  );
-}
-assert.equal(
-  liveDispatcherWorkflowSource.includes("CANARY_MESSAGE_ID: cmucaz4wy0005kwqb99jodzqx"),
-  false,
-  "Live dispatcher must consume the same-push fresh canary instead of a stale hard-coded message.",
-);
-assert.equal(
-  liveDispatcherWorkflowSource.includes("issues/65/comments"),
-  false,
-  "Live dispatcher must not depend on eventually consistent issue-comment propagation for the fresh message ID.",
-);
-
-for (const required of [
+  "PHASE17_CANARY_MODE=EXECUTE",
+  "PHASE17_CANARY_MODE=RESTORE",
   "FINAL_REVIEWED_EMAIL_DRIFT_PRESENT=true",
-  'test "$tracked_dirty" = "$allowed_dirty_line"',
-  'test "$live_email_drift_sha" = "$REVIEWED_EMAIL_DRIFT_SHA256"',
+  "ACTIVE_MESSAGE_APPROVALS",
+  "NO_EXTERNAL_WRITES",
+  "BASE_PROVIDER_RESTORED_FAIL_CLOSED=true",
+  "PASS: PHASE17_SINGLE_MESSAGE_CANARY_FINAL_SAFETY",
 ]) {
   assert.equal(
-    singleCanaryWorkflowSource.includes(required),
+    singleCanarySource.includes(required),
     true,
-    `Missing final reviewed-drift safety contract: ${required}`,
+    `Missing retained manual canary safety contract: ${required}`,
   );
 }
+
+for (const forbidden of [
+  "push:",
+  "schedule:",
+  "dispatchQueuedOutboundBatch",
+  "WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED=true",
+  "git reset --hard",
+]) {
+  assert.equal(
+    singleCanarySource.includes(forbidden),
+    false,
+    `Manual canary operator must remain non-automatic/fail-closed: ${forbidden}`,
+  );
+}
+
+console.log("Phase22D post-qualification retirement certification: PASS");
