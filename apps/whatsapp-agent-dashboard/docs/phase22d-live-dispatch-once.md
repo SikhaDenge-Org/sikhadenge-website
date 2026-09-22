@@ -10,3 +10,4 @@ On the same protected-release merge push:
 5. the operator restores controlled launch to SHADOW / NO_EXTERNAL_WRITES and final verification accepts only a clean checkout or the sole reviewed email-only drift with an exact protected-release SHA-256 match.
 
 The dispatcher itself contains no Meta provider call and does not enable batch/general outbound or mutate PM2/.env.
+Retry note: the protected-release retry preserves the existing 30-minute freshness threshold; it changes no provider or runtime authorization logic.
