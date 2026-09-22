@@ -20,6 +20,7 @@ on:
       - "apps/whatsapp-agent-dashboard/prisma/schema.prisma"
       - "apps/whatsapp-agent-dashboard/prisma/migrations/**"
       - ".github/workflows/email-automation-ci.yml"
+      - ".github/workflows/whatsapp-agent-email-internal-test.yml"
       - ".github/workflows/whatsapp-agent-email-inbound-*.yml"
       - ".github/workflows/whatsapp-agent-email-lifecycle-*.yml"
 
@@ -90,6 +91,9 @@ jobs:
 
       - name: Run email automation production preflight policy
         run: bash tests/email-automation-production-preflight-policy.test.sh
+
+      - name: Run email internal test runtime identity policy
+        run: bash tests/email-automation-internal-test-runtime-identity-policy.test.sh
 
       - name: Run production staging disk guard policy
         run: bash tests/email-automation-production-disk-guard-policy.test.sh
