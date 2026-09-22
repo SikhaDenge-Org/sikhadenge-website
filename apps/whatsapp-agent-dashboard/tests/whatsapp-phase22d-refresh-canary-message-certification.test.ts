@@ -181,7 +181,7 @@ const liveDispatcherWorkflowSource = readFileSync(
 );
 
 assert.equal(
-  workflowSource.includes("STALE_MESSAGE_ID: cmucaz4wy0005kwqb99jodzqx"),
+  workflowSource.includes("STALE_MESSAGE_ID: cmuccwo4y0005kw7qu3800ogx"),
   true,
   "Refresh workflow must supersede the previously qualified canary once it becomes stale.",
 );
@@ -190,7 +190,10 @@ for (const required of [
   "REFRESH_WORKFLOW: whatsapp-agent-phase22d-refresh-stale-canary-dryrun.yml",
   '--commit "$GITHUB_SHA"',
   'gh run watch "$refresh_run_id"',
-  "Fresh message ID:",
+  'gh run view "$refresh_run_id"',
+  "--log",
+  "FRESH_MESSAGE_ID=",
+  "for attempt in $(seq 1 20)",
   'echo "CANARY_MESSAGE_ID=$fresh_message_id"',
   "-f execute=true",
 ]) {
@@ -204,6 +207,11 @@ assert.equal(
   liveDispatcherWorkflowSource.includes("CANARY_MESSAGE_ID: cmucaz4wy0005kwqb99jodzqx"),
   false,
   "Live dispatcher must consume the same-push fresh canary instead of a stale hard-coded message.",
+);
+assert.equal(
+  liveDispatcherWorkflowSource.includes("issues/65/comments"),
+  false,
+  "Live dispatcher must not depend on eventually consistent issue-comment propagation for the fresh message ID.",
 );
 
 for (const required of [
