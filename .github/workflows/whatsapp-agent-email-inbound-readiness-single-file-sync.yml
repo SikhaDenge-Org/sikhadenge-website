@@ -1,6 +1,7 @@
 name: Email Inbound Readiness Single File Sync
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - release/whatsapp-instagram-agent-flow-20260731
@@ -101,21 +102,38 @@ jobs:
           current_blob="$(git hash-object "$target")"
           incoming_blob="$(git hash-object "$incoming")"
           printf 'LIVE_SHA=%s\n' "$current_sha"
-          printf 'OLD_BLOB=%s\n' "$current_blob"
+          printf 'CURRENT_BLOB=%s\n' "$current_blob"
           printf 'INCOMING_BLOB=%s\n' "$incoming_blob"
           test "$current_sha" = "$EXPECTED_LIVE_SHA"
-          test "$current_blob" = "$EXPECTED_OLD_BLOB"
           test "$incoming_blob" = "$EXPECTED_NEW_BLOB"
 
-          cp -a "$target" "$backup/email-inbound-production-readiness.ts.before"
+          if [[ "$current_blob" == "$EXPECTED_OLD_BLOB" ]]; then
+            sync_mode="UPDATED"
+          elif [[ "$current_blob" == "$EXPECTED_NEW_BLOB" ]]; then
+            sync_mode="ALREADY_SYNCED"
+          else
+            printf 'UNEXPECTED_LIVE_BLOB=%s\n' "$current_blob" >&2
+            exit 1
+          fi
+          printf 'SYNC_MODE=%s\n' "$sync_mode"
+
+          mutated=0
           rollback() {
-            cp -a "$backup/email-inbound-production-readiness.ts.before" "$target"
+            if [[ "$mutated" == "1" ]]; then
+              cp -a "$backup/email-inbound-production-readiness.ts.before" "$target"
+              printf 'ROLLBACK=APPLIED\n' | tee -a "$backup/result.txt"
+            else
+              printf 'ROLLBACK=NOT_REQUIRED\n' | tee -a "$backup/result.txt"
+            fi
             rm -f "$incoming"
-            printf 'ROLLBACK=APPLIED\n' | tee -a "$backup/result.txt"
           }
           trap 'rollback' ERR
 
-          install -m 0644 "$incoming" "$target"
+          if [[ "$sync_mode" == "UPDATED" ]]; then
+            cp -a "$target" "$backup/email-inbound-production-readiness.ts.before"
+            install -m 0644 "$incoming" "$target"
+            mutated=1
+          fi
           rm -f "$incoming"
           new_blob="$(git hash-object "$target")"
           printf 'NEW_BLOB=%s\n' "$new_blob"
@@ -160,8 +178,9 @@ jobs:
 
           {
             printf 'SYNC=PASS\n'
+            printf 'SYNC_MODE=%s\n' "$sync_mode"
             printf 'LIVE_SHA=%s\n' "$current_sha"
-            printf 'OLD_BLOB=%s\n' "$current_blob"
+            printf 'PREVIOUS_BLOB=%s\n' "$current_blob"
             printf 'NEW_BLOB=%s\n' "$new_blob"
             printf 'READINESS_EXIT_CODE=%s\n' "$code"
           } | tee "$backup/result.txt"
