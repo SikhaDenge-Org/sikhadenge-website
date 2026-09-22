@@ -109,3 +109,15 @@ for (const forbidden of [
     `WhatsApp workflow must not mutate unrelated email source: ${forbidden}`,
   );
 }
+
+
+assert.equal(
+  workflowSource.includes('test "$REVIEWED_EMAIL_DRIFT_SHA256" =~'),
+  false,
+  "Broken test-regex syntax must stay absent",
+);
+assert.equal(
+  workflowSource.includes('[[ "$REVIEWED_EMAIL_DRIFT_SHA256" =~ ^[0-9a-f]{64}$ ]]'),
+  true,
+  "Reviewed drift SHA must use Bash regex syntax",
+);
