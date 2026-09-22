@@ -1,4 +1,4 @@
-name: VPS Global ENOSPC Recovery 20260922
+name: VPS Fast Service Recovery 20260922
 
 on:
   workflow_dispatch:
@@ -121,14 +121,9 @@ jobs:
           show_disk
           [ "$after" -gt 262144 ]
 
-          echo '=== TOP DISK CONSUMERS AFTER SAFE RECLAIM ==='
-          du -x -B1 -d 1 /var /opt /root /home /tmp 2>/dev/null | sort -nr | head -80 || true
-          echo '--- /var/www depth2 ---'
-          du -x -B1 -d 2 /var/www 2>/dev/null | sort -nr | head -120 || true
-          echo '--- /opt depth2 ---'
-          du -x -B1 -d 2 /opt 2>/dev/null | sort -nr | head -100 || true
-          echo '--- large files >500MiB ---'
-          find /var /opt /root /home /tmp -xdev -type f -size +500M -printf '%s|%p\n' 2>/dev/null | sort -nr | head -100 || true
+          echo '=== FAST RECOVERY MODE: DEEP DISK SCAN DEFERRED ==='
+          echo "FAST_RECOVERY_AVAILABLE_KB=$(avail_kb)"
+          df -hT /
 
           echo '=== NGINX / PM2 BASELINE ==='
           nginx -t
