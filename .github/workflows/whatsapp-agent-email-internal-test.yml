@@ -133,6 +133,44 @@ jobs:
             bash scripts/email-automation-production-internal-test.sh
           REMOTE
 
+      - name: Reconcile post-test runtime to verified DRY_RUN
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" \
+            "REQUESTED_DEPLOYED_SHA='$REQUESTED_DEPLOYED_SHA' RESTORE_RUN_ID='${TEST_RUN_ID}-restore' bash -s" <<'REMOTE' | tee email-internal-post-test-restore.log
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          test "$(id -u)" = "0"
+          cd "$APP"
+
+          DEPLOYED_SHA="$(git rev-parse HEAD)"
+          [[ "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ -n "${REQUESTED_DEPLOYED_SHA:-}" ]]; then
+            test "$DEPLOYED_SHA" = "$REQUESTED_DEPLOYED_SHA"
+          fi
+
+          APPLY=1 bash scripts/email-automation-scheduler-deactivate.sh
+          APPLY=1 \
+          LIVE_APP="$APP" \
+          ENV_FILE="$APP/.env" \
+          EXPECTED_RELEASE_SHA="$DEPLOYED_SHA" \
+          RUN_ID="$RESTORE_RUN_ID" \
+          MAX_FAILED_EVENTS=0 \
+          bash scripts/email-automation-production-dryrun-activate.sh
+
+          EXPECTED_RELEASE_SHA="$DEPLOYED_SHA" \
+          ENV_FILE="$APP/.env" \
+          MAX_FAILED_EVENTS=0 \
+          bash scripts/email-automation-scheduler-verify.sh
+
+          printf 'POST_TEST_DRYRUN_RECONCILE=PASS\n'
+          printf 'RUNTIME_MODE=DRY_RUN\n'
+          printf 'EXTERNAL_WRITES=false\n'
+          printf 'SCHEDULER_ACTIVE=true\n'
+          REMOTE
+
       - name: Collect protected test evidence
         if: always()
         shell: bash
@@ -152,6 +190,7 @@ jobs:
           name: whatsapp-agent-email-internal-${{ env.TEST_RUN_ID }}
           path: |
             email-internal-test.log
+            email-internal-post-test-restore.log
             email-internal-test-evidence
           if-no-files-found: error
           retention-days: 14
