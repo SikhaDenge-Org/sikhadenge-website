@@ -133,3 +133,38 @@ assert.equal(
   false,
   "Reviewed live drift hash must not duplicate the app path from inside APP",
 );
+
+
+const singleCanaryWorkflowSource = readFileSync(
+  fileURLToPath(
+    new URL(
+      "../../../.github/workflows/whatsapp-agent-phase17-single-message-canary.yml",
+      import.meta.url,
+    ),
+  ),
+  "utf8",
+);
+for (const required of [
+  "REVIEWED_EMAIL_DRIFT_SHA256",
+  "allowed_dirty_line",
+  "email-inbound-production-readiness.ts",
+  "sha256sum scripts/email-inbound-production-readiness.ts",
+  "REVIEWED_EMAIL_DRIFT_PRESENT=true",
+]) {
+  assert.equal(
+    singleCanaryWorkflowSource.includes(required),
+    true,
+    `Missing single-canary reviewed-drift isolation contract: ${required}`,
+  );
+}
+for (const forbidden of [
+  "git reset --hard",
+  "git restore apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts",
+  "git checkout -- apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts",
+]) {
+  assert.equal(
+    singleCanaryWorkflowSource.includes(forbidden),
+    false,
+    `Single-canary operator must not mutate unrelated email source: ${forbidden}`,
+  );
+}
