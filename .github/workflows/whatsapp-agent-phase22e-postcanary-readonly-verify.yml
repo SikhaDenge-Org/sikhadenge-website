@@ -1,0 +1,178 @@
+name: WhatsApp Phase22E Post-Canary Readonly Verification
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - .github/workflows/whatsapp-agent-phase22e-postcanary-readonly-verify.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_RUNTIME_SHA: 4e4bcb0119f2096ee2f95c95862c5c0d797c1021
+      QUALIFIED_CANARY_MESSAGE_ID: cmuce80nn0005kwodm06mj7kf
+
+    steps:
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for value in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            test -n "${!value:-}"
+          done
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            SSH_PORT=22
+            echo 'SSH_PORT=22' >> "$GITHUB_ENV"
+          fi
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          ssh-keygen -y -f "$key" >/dev/null
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Verify post-canary production state read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_RUNTIME_SHA='$EXPECTED_RUNTIME_SHA' QUALIFIED_CANARY_MESSAGE_ID='$QUALIFIED_CANARY_MESSAGE_ID' bash -s" <<'REMOTE' | tee phase22e-post-canary-readonly.txt
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          cd "$APP"
+
+          live_sha="$(git rev-parse HEAD)"
+          tracked_dirty="$(git status --porcelain --untracked-files=no | sed '/^$/d')"
+          tracked_dirty_count="$(printf '%s\n' "$tracked_dirty" | sed '/^$/d' | wc -l | tr -d ' ')"
+          printf 'LIVE_RUNTIME_SHA=%s\n' "$live_sha"
+          printf 'TRACKED_DIRTY_COUNT=%s\n' "$tracked_dirty_count"
+          test "$live_sha" = "$EXPECTED_RUNTIME_SHA"
+          if [[ "$tracked_dirty_count" = "0" ]]; then
+            printf 'OUT_OF_SCOPE_EMAIL_DRIFT_PRESENT=false\n'
+          else
+            allowed_dirty_line=" M apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts"
+            test "$tracked_dirty_count" = "1"
+            test "$tracked_dirty" = "$allowed_dirty_line"
+            printf 'OUT_OF_SCOPE_EMAIL_DRIFT_PRESENT=true\n'
+          fi
+
+          app_state="$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s||"[]");process.stdout.write(a.find(x=>x.name==="sikhadenge-whatsapp-agent")?.pm2_env?.status||"missing")})')"
+          scheduler_state="$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s||"[]");process.stdout.write(a.find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler")?.pm2_env?.status||"missing")})')"
+          printf 'APP_PM2_STATE=%s\nSCHEDULER_PM2_STATE=%s\n' "$app_state" "$scheduler_state"
+          test "$app_state" = "online"
+          test "$scheduler_state" = "online"
+
+          login_http=""
+          for attempt in 1 2 3 4 5; do
+            login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login || true)"
+            [[ "$login_http" = "200" ]] && break
+            sleep 2
+          done
+          printf 'LOGIN_HTTP=%s\n' "$login_http"
+          test "$login_http" = "200"
+
+          scheduler_json="$(pm2 jlist)"
+          pm2v() {
+            printf '%s' "$scheduler_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const [k]=process.argv.slice(1);const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.[k]??""))})' "$1"
+          }
+          test "$(pm2v AUTOMATION_RUNTIME_ENABLED)" = "false"
+          test "$(pm2v AUTOMATION_ACTIONS_ENABLED)" = "false"
+          test "$(pm2v JOURNEY_RUNTIME_ENABLED)" = "false"
+          test "$(pm2v JOURNEY_ACTIONS_ENABLED)" = "false"
+          test "$(pm2v WHATSAPP_CAMPAIGNS_ENABLED)" = "false"
+          test "$(pm2v WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)" = "false"
+          test "$(pm2v WHATSAPP_OUTBOUND_MODE)" = "disabled"
+          test "$(pm2v WHATSAPP_OUTBOUND_KILL_SWITCH)" = "on"
+          printf 'SCHEDULER_EXTERNAL_ACTIONS_GATED=true\n'
+
+          set -a
+          source .env
+          set +a
+          test "${WHATSAPP_OUTBOUND_MODE:-disabled}" != "live"
+          test "${WHATSAPP_CUTOVER_APPROVED:-false}" != "true"
+          test -z "${WHATSAPP_OUTBOUND_LIVE_ACK:-}"
+          test "${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}" = "on"
+          printf 'BASE_OUTBOUND_FAIL_CLOSED=true\n'
+
+          DB="$(node scripts/prisma-postgres-cli-url.mjs "$DATABASE_URL")"
+          state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"stage\",\"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,COALESCE((\"scope\"->>'externalWritesRequested'),'false'),\"version\" FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='engagews_default';")"
+          printf 'CONTROLLED_LAUNCH_STATE=%s\n' "$state"
+          IFS='|' read -r stage mode policy external requested version <<< "$state"
+          test "$stage" = "ONE_CONNECTED_ACCOUNT"
+          test "$mode" = "SHADOW"
+          test "$policy" = "NO_EXTERNAL_WRITES"
+          test "$external" = "false"
+          test "$requested" = "false"
+          [[ "$version" =~ ^[0-9]+$ ]]
+          test "$version" -ge 4
+
+          active_approvals="$(psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "SELECT COUNT(*) FROM \"EngageControlledLaunchOutboundApproval\" WHERE \"workspaceId\"='engagews_default' AND \"consumedAt\" IS NULL AND \"revokedAt\" IS NULL AND \"expiresAt\">NOW();")"
+          printf 'ACTIVE_OUTBOUND_APPROVALS=%s\n' "$active_approvals"
+          test "$active_approvals" = "0"
+
+          canary_state="$(psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT m.\"status\",CASE WHEN m.\"metaMessageId\" IS NULL THEN 'false' ELSE 'true' END FROM \"WhatsAppMessage\" m WHERE m.id='$QUALIFIED_CANARY_MESSAGE_ID';")"
+          printf 'QUALIFIED_CANARY_STATE=%s\n' "$canary_state"
+          IFS='|' read -r canary_status canary_meta <<< "$canary_state"
+          case "$canary_status" in SENT|DELIVERED|READ) ;; *) exit 31 ;; esac
+          test "$canary_meta" = "true"
+
+          parity="$(npx tsx scripts/engageos-whatsapp-provider-binding-reconcile.ts)"
+          printf '%s\n' "$parity"
+          printf '%s' "$parity" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const o=JSON.parse(s);if(!Number.isInteger(o.contactsScanned)||o.contactsScanned<1||o.mappingsNeedingRepairBefore!==0||o.mappingsNeedingRepairAfter!==0||o.externalWhatsAppWriteSent!==false||o.parityPassed!==true)process.exit(2);console.log("PASS: PROVIDER_BINDING_PARITY contactsScanned="+o.contactsScanned);})'
+
+          printf 'RUNTIME_FLAGS_MUTATED=false\n'
+          printf 'EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          printf 'PASS: PHASE22E_POST_CANARY_READONLY_VERIFICATION\n'
+          REMOTE
+
+      - name: Record Phase22E evidence
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          {
+            printf '## Phase22E post-canary read-only verification\n\n'
+            printf '%s\n' "- Workflow run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            printf '%s\n' "- Expected deployed runtime SHA: `$EXPECTED_RUNTIME_SHA`"
+            printf '%s\n' "- Qualified canary message ID: `$QUALIFIED_CANARY_MESSAGE_ID`"
+            printf '%s\n\n' "- Provider write requested by this verification: **false**"
+            printf '%s\n' 'The verification checks PM2/login health, scheduler fail-closed gates, SHADOW/no-external-writes state, zero active outbound approvals, retained canary provider evidence, and provider-binding parity.'
+          } > phase22e-ledger.md
+          gh issue comment 65 -R "$GITHUB_REPOSITORY" --body-file phase22e-ledger.md
+
+      - name: Upload verification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase22e-post-canary-readonly-${{ github.run_id }}
+          path: phase22e-post-canary-readonly.txt
+          if-no-files-found: error
+          retention-days: 30
