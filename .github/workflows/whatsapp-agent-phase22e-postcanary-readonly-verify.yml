@@ -74,6 +74,9 @@ jobs:
           tracked_dirty_count="$(printf '%s\n' "$tracked_dirty" | sed '/^$/d' | wc -l | tr -d ' ')"
           printf 'LIVE_RUNTIME_SHA=%s\n' "$live_sha"
           printf 'TRACKED_DIRTY_COUNT=%s\n' "$tracked_dirty_count"
+          printf '%s\n' 'TRACKED_DIRTY_PATHS_BEGIN'
+          printf '%s\n' "$tracked_dirty"
+          printf '%s\n' 'TRACKED_DIRTY_PATHS_END'
           test "$live_sha" = "$EXPECTED_RUNTIME_SHA"
           if [[ "$tracked_dirty_count" = "0" ]]; then
             printf 'OUT_OF_SCOPE_EMAIL_DRIFT_PRESENT=false\n'
@@ -103,14 +106,26 @@ jobs:
           pm2v() {
             printf '%s' "$scheduler_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const [k]=process.argv.slice(1);const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.[k]??""))})' "$1"
           }
-          test "$(pm2v AUTOMATION_RUNTIME_ENABLED)" = "false"
-          test "$(pm2v AUTOMATION_ACTIONS_ENABLED)" = "false"
-          test "$(pm2v JOURNEY_RUNTIME_ENABLED)" = "false"
-          test "$(pm2v JOURNEY_ACTIONS_ENABLED)" = "false"
-          test "$(pm2v WHATSAPP_CAMPAIGNS_ENABLED)" = "false"
-          test "$(pm2v WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)" = "false"
-          test "$(pm2v WHATSAPP_OUTBOUND_MODE)" = "disabled"
-          test "$(pm2v WHATSAPP_OUTBOUND_KILL_SWITCH)" = "on"
+          pm2off() {
+            case "$(printf '%s' "$(pm2v "$1")" | tr '[:upper:]' '[:lower:]')" in
+              ""|0|false|no|off|disabled) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+          for key in AUTOMATION_RUNTIME_ENABLED AUTOMATION_ACTIONS_ENABLED JOURNEY_RUNTIME_ENABLED JOURNEY_ACTIONS_ENABLED WHATSAPP_CAMPAIGNS_ENABLED; do
+            value="$(pm2v "$key")"
+            printf 'SCHEDULER_%s=%s\n' "$key" "${value:-unset}"
+            pm2off "$key"
+          done
+          scheduler_outbound="$(pm2v WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)"
+          scheduler_mode="$(pm2v WHATSAPP_OUTBOUND_MODE)"
+          scheduler_kill="$(pm2v WHATSAPP_OUTBOUND_KILL_SWITCH)"
+          printf 'SCHEDULER_WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED=%s\n' "$scheduler_outbound"
+          printf 'SCHEDULER_WHATSAPP_OUTBOUND_MODE=%s\n' "$scheduler_mode"
+          printf 'SCHEDULER_WHATSAPP_OUTBOUND_KILL_SWITCH=%s\n' "$scheduler_kill"
+          test "$scheduler_outbound" = "false"
+          test "$scheduler_mode" = "disabled"
+          test "$scheduler_kill" = "on"
           printf 'SCHEDULER_EXTERNAL_ACTIONS_GATED=true\n'
 
           set -a
