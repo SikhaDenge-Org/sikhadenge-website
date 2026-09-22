@@ -1,0 +1,193 @@
+name: WhatsApp Phase22D Refresh Stale Canary And DRY_RUN
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - .github/workflows/whatsapp-agent-phase22d-refresh-stale-canary-dryrun.yml
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+jobs:
+  refresh-and-dryrun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      VERIFIED_CANARY_WA_ID: ${{ secrets.WHATSAPP_INTERNAL_CANARY_WA_ID }}
+      EXPECTED_LIVE_SHA: 4e4bcb0119f2096ee2f95c95862c5c0d797c1021
+      EXPECTED_STATE_VERSION: "2"
+      STALE_MESSAGE_ID: cmubjhi1j0002kwh6ulh85bun
+      TARGET_WORKFLOW: whatsapp-agent-phase17-single-message-canary.yml
+      TARGET_REF: release/whatsapp-instagram-agent-flow-20260731
+
+    steps:
+      - name: Checkout reviewed refresh operator
+        uses: actions/checkout@v4
+
+      - name: Validate fixed refresh inputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$STALE_MESSAGE_ID" =~ ^[A-Za-z0-9_-]{1,200}$ ]]
+          [[ "$VERIFIED_CANARY_WA_ID" =~ ^[0-9]{6,20}$ ]]
+          for value in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            test -n "${!value:-}"
+          done
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            SSH_PORT=22
+            echo 'SSH_PORT=22' >> "$GITHUB_ENV"
+          fi
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          ssh-keygen -y -f "$key" >/dev/null
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Transport reviewed refresh operator
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          local_script="apps/whatsapp-agent-dashboard/scripts/whatsapp-phase22d-refresh-canary-message.ts"
+          test -f "$local_script"
+          remote_script="/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard/scripts/.phase22d-refresh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.ts"
+          script_sha="$(sha256sum "$local_script" | awk '{print $1}')"
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" "cat > '$remote_script'" < "$local_script"
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" "test -f '$remote_script' && test \"\$(sha256sum '$remote_script' | cut -d ' ' -f1)\" = '$script_sha'"
+          echo "REVIEWED_REFRESH_REMOTE=$remote_script" >> "$GITHUB_ENV"
+          echo "REVIEWED_REFRESH_SHA256=$script_sha" >> "$GITHUB_ENV"
+
+      - name: Supersede stale canary and queue one fresh internal canary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          refresh_output="$(ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' STALE_MESSAGE_ID='$STALE_MESSAGE_ID' VERIFIED_CANARY_WA_ID='$VERIFIED_CANARY_WA_ID' REVIEWED_REFRESH_REMOTE='$REVIEWED_REFRESH_REMOTE' REVIEWED_REFRESH_SHA256='$REVIEWED_REFRESH_SHA256' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          cd "$APP"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
+          test "$(git status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')" = "0"
+          test "$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s);process.stdout.write(a.find(x=>x.name==="sikhadenge-whatsapp-agent")?.pm2_env?.status||"")})')" = "online"
+          test "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login)" = "200"
+          [[ "$REVIEWED_REFRESH_REMOTE" == "$APP/scripts/.phase22d-refresh-"*".ts" ]]
+          test -f "$REVIEWED_REFRESH_REMOTE"
+          test "$(sha256sum "$REVIEWED_REFRESH_REMOTE" | awk '{print $1}')" = "$REVIEWED_REFRESH_SHA256"
+          set -a
+          source .env
+          set +a
+          test "${WHATSAPP_OUTBOUND_MODE:-disabled}" != "live"
+          test "${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}" = "on"
+          PHASE22D_VERIFIED_CANARY_WA_ID="$VERIFIED_CANARY_WA_ID" \
+          PHASE22D_STALE_MESSAGE_ID="$STALE_MESSAGE_ID" \
+          PHASE22D_REFRESH_CONFIRM=REFRESH_ONE_STALE_INTERNAL_CANARY_MESSAGE \
+          npm exec -- tsx "$REVIEWED_REFRESH_REMOTE"
+          REMOTE
+          )"
+          printf '%s\n' "$refresh_output" | tee phase22d-refresh-canary.json
+          fresh_message_id="$(printf '%s' "$refresh_output" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const o=JSON.parse(s);if(o.externalWhatsAppWriteSent!==false||o.messageStatus!=="QUEUED"||!o.messageId)process.exit(2);process.stdout.write(o.messageId)})')"
+          [[ "$fresh_message_id" =~ ^[A-Za-z0-9_-]{1,200}$ ]]
+          echo "FRESH_MESSAGE_ID=$fresh_message_id" >> "$GITHUB_ENV"
+          printf 'FRESH_MESSAGE_ID=%s\nEXTERNAL_WHATSAPP_WRITE_SENT=false\n' "$fresh_message_id"
+
+      - name: Dispatch exact fresh no-send canary
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          previous_id="$(gh run list -R "$GITHUB_REPOSITORY" --workflow "$TARGET_WORKFLOW" --branch "$TARGET_REF" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+          gh workflow run "$TARGET_WORKFLOW" -R "$GITHUB_REPOSITORY" --ref "$TARGET_REF" \
+            -f expected_release_sha="$EXPECTED_LIVE_SHA" \
+            -f expected_state_version="$EXPECTED_STATE_VERSION" \
+            -f message_id="$FRESH_MESSAGE_ID" \
+            -f execute=false
+          target_run_id=""
+          for attempt in $(seq 1 30); do
+            sleep 3
+            candidate="$(gh run list -R "$GITHUB_REPOSITORY" --workflow "$TARGET_WORKFLOW" --branch "$TARGET_REF" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+            if [[ "$candidate" != "0" && "$candidate" != "$previous_id" ]]; then
+              target_run_id="$candidate"
+              break
+            fi
+          done
+          test -n "$target_run_id"
+          echo "TARGET_RUN_ID=$target_run_id" >> "$GITHUB_ENV"
+          echo "TARGET_RUN_URL=https://github.com/$GITHUB_REPOSITORY/actions/runs/$target_run_id" >> "$GITHUB_ENV"
+
+      - name: Wait for fresh canary DRY_RUN
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          gh run watch "$TARGET_RUN_ID" -R "$GITHUB_REPOSITORY" --exit-status
+
+      - name: Record refresh and DRY_RUN evidence
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          test -n "${FRESH_MESSAGE_ID:-}"
+          test -n "${TARGET_RUN_ID:-}"
+          status="$(gh run view "$TARGET_RUN_ID" -R "$GITHUB_REPOSITORY" --json status --jq '.status')"
+          conclusion="$(gh run view "$TARGET_RUN_ID" -R "$GITHUB_REPOSITORY" --json conclusion --jq '.conclusion')"
+          {
+            printf '## Phase22D fresh internal canary DRY_RUN\n\n'
+            printf '%s\n' "- Stale message ID: \`$STALE_MESSAGE_ID\`"
+            printf '%s\n' "- Fresh message ID: \`$FRESH_MESSAGE_ID\`"
+            printf '%s\n' "- Workflow run: $TARGET_RUN_URL"
+            printf '%s\n' "- Run ID: $TARGET_RUN_ID"
+            printf '%s\n' "- execute: \`false\`"
+            printf '%s\n' "- Status: \`$status\`"
+            printf '%s\n' "- Conclusion: \`$conclusion\`"
+            printf '%s\n\n' "- External WhatsApp write requested: **false**"
+            printf '%s\n' "The stale internal canary is superseded before the fresh no-send qualification."
+          } > phase22d-fresh-dryrun-ledger.md
+          gh issue comment 65 -R "$GITHUB_REPOSITORY" --body-file phase22d-fresh-dryrun-ledger.md
+          test "$status" = "completed"
+          test "$conclusion" = "success"
+
+      - name: Cleanup reviewed refresh operator
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -n "${REVIEWED_REFRESH_REMOTE:-}" && -f "$HOME/.ssh/whatsapp-production" ]]; then
+            ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+              -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 \
+              "$SSH_USER@$SSH_HOST" "rm -f '$REVIEWED_REFRESH_REMOTE'" || true
+          fi
+          exit 0
