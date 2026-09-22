@@ -122,12 +122,18 @@ jobs:
           set -a
           source "$APP/.env"
           set +a
+          trap - ERR
           set +e
           EXPECTED_RELEASE_SHA="$EXPECTED_LIVE_SHA" EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID="engagews_default" \
             npx tsx "$target" > "$backup/readiness.json"
           code=$?
           set -e
-          test "$code" = "0" -o "$code" = "2"
+          trap 'rollback' ERR
+          if [[ "$code" != "0" && "$code" != "2" ]]; then
+            printf 'READINESS_PROBE=FAIL exit=%s\n' "$code" >&2
+            rollback
+            exit "$code"
+          fi
 
           node - "$backup/readiness.json" <<'NODE'
           const fs=require('node:fs');
@@ -158,6 +164,7 @@ jobs:
             printf 'READINESS_EXIT_CODE=%s\n' "$code"
           } | tee "$backup/result.txt"
           chmod 600 "$backup"/*
+          printf 'ROLLBACK=NOT_APPLIED\n' >> "$backup/result.txt"
           trap - ERR
           REMOTE
 
