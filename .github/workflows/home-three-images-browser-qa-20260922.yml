@@ -1,0 +1,91 @@
+name: Home Three Images Browser QA 20260922
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/home-three-images-browser-qa-20260922.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  browser-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Run clean Chrome render QA
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          TMP="$(mktemp -d)"
+          cd "$TMP"
+          npm init -y >/dev/null 2>&1
+          npm install playwright-core@1.55.0 --no-save >/dev/null 2>&1
+          cat > qa.js <<'JS'
+          const { chromium } = require('playwright-core');
+          (async()=>{
+            const browser=await chromium.launch({
+              executablePath:process.env.CHROME,
+              headless:true,
+              args:['--no-sandbox','--disable-dev-shm-usage']
+            });
+            const page=await browser.newPage({viewport:{width:1640,height:900}});
+            const failures=[];
+            page.on('requestfailed',r=>{
+              const u=r.url();
+              if(u.includes('/assets/home/')) failures.push({url:u,error:r.failure()?.errorText||'requestfailed'});
+            });
+            await page.goto('https://sikhadenge.in/?three_image_qa=20260922',{
+              waitUntil:'networkidle',
+              timeout:90000
+            });
+            await page.waitForTimeout(2500);
+            const paths=[
+              '/assets/home/ai-jobs-data-banner/ai-jobs-data-banner-desktop.webp',
+              '/assets/home/process-section/process-section-ai-digital-growth-desktop.png',
+              '/assets/home/ai-growth-system-section/ai-growth-system-desktop.webp'
+            ];
+            const result=await page.evaluate((paths)=>{
+              return paths.map(src=>{
+                const img=[...document.images].find(x=>new URL(x.src).pathname===src);
+                if(!img) return {src,found:false};
+                const r=img.getBoundingClientRect();
+                return {
+                  src,
+                  found:true,
+                  complete:img.complete,
+                  naturalWidth:img.naturalWidth,
+                  naturalHeight:img.naturalHeight,
+                  renderedWidth:Math.round(r.width),
+                  renderedHeight:Math.round(r.height),
+                  display:getComputedStyle(img).display,
+                  visibility:getComputedStyle(img).visibility
+                };
+              });
+            },paths);
+            console.log('TARGET_IMAGES',JSON.stringify(result,null,2));
+            console.log('REQUEST_FAILURES',JSON.stringify(failures,null,2));
+            for(const x of result){
+              if(!x.found || !x.complete || x.naturalWidth<=0 || x.naturalHeight<=0 || x.renderedWidth<=0 || x.renderedHeight<=0){
+                throw new Error('BROKEN_IMAGE '+JSON.stringify(x));
+              }
+            }
+            if(failures.length) throw new Error('ASSET_REQUEST_FAILURES');
+            await page.screenshot({path:'homepage-three-images.png',fullPage:true});
+            await browser.close();
+            console.log('HOME_THREE_IMAGES_BROWSER_QA_OK=1');
+          })().catch(e=>{console.error(e);process.exit(1)});
+          JS
+          CHROME="$CHROME" node qa.js
+          cp homepage-three-images.png "$GITHUB_WORKSPACE/homepage-three-images.png"
+
+      - name: Upload screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: homepage-three-images-browser-qa-${{ github.run_id }}
+          path: homepage-three-images.png
+          if-no-files-found: error
+          retention-days: 3
