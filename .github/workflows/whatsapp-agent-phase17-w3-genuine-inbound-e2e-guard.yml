@@ -1,0 +1,170 @@
+name: WhatsApp W3 Genuine Inbound E2E Guard
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - .github/workflows/whatsapp-agent-phase17-w3-genuine-inbound-e2e-guard.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-w3-genuine-inbound-e2e-guard
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_LIVE_SHA: e3b9289abb92217bfdcf26d9f4097895106a956b
+      REVIEWED_EMAIL_INTERNAL_TEST_SHA256: d7dc9e6950379aca830830680778d71fc083bfeaa5fea67dd3117fc0696eda0e
+      REVIEWED_EMAIL_READINESS_SHA256: a3c15e6b03e31ed9f4df38391a737a56a36625ae89c36f185a3d7df13fa8254c
+      EVIDENCE_CUTOFF_UTC: 2026-09-21T00:00:00Z
+
+    steps:
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; SSH_PORT=22; fi
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          ssh-keygen -y -f "$key" >/dev/null
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Verify genuine inbound production chain read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' REVIEWED_EMAIL_INTERNAL_TEST_SHA256='$REVIEWED_EMAIL_INTERNAL_TEST_SHA256' REVIEWED_EMAIL_READINESS_SHA256='$REVIEWED_EMAIL_READINESS_SHA256' EVIDENCE_CUTOFF_UTC='$EVIDENCE_CUTOFF_UTC' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          APP="$ROOT/apps/whatsapp-agent-dashboard"
+          ENV_FILE="$APP/.env"
+          cd "$ROOT"
+
+          live_sha="$(git rev-parse HEAD)"
+          actual_dirty="$(git status --porcelain --untracked-files=no | sed '/^$/d' | sort)"
+          expected_dirty="$(printf '%s\n%s\n' \
+            ' M apps/whatsapp-agent-dashboard/scripts/email-automation-production-internal-test.sh' \
+            ' M apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts' | sort)"
+
+          printf 'LIVE_SHA=%s\n' "$live_sha"
+          test "$live_sha" = "$EXPECTED_LIVE_SHA"
+          test "$actual_dirty" = "$expected_dirty"
+          test "$(sha256sum "$APP/scripts/email-automation-production-internal-test.sh" | awk '{print $1}')" = "$REVIEWED_EMAIL_INTERNAL_TEST_SHA256"
+          test "$(sha256sum "$APP/scripts/email-inbound-production-readiness.ts" | awk '{print $1}')" = "$REVIEWED_EMAIL_READINESS_SHA256"
+          printf 'REVIEWED_NON_WHATSAPP_DRIFT_EXACT=true\n'
+          printf 'WHATSAPP_RELEVANT_DIRTY_COUNT=0\n'
+
+          pm2_state="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(String(p?.pm2_env?.status||"missing"))})')"
+          login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login || true)"
+          printf 'PM2_STATE=%s\nLOGIN_HTTP=%s\n' "$pm2_state" "$login_http"
+          test "$pm2_state" = online
+          test "$login_http" = 200
+
+          scheduler_json="$(pm2 jlist 2>/dev/null)"
+          scheduler_outbound="$(printf '%s' "$scheduler_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED??""))})')"
+          scheduler_mode="$(printf '%s' "$scheduler_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.WHATSAPP_OUTBOUND_MODE??""))})')"
+          scheduler_kill="$(printf '%s' "$scheduler_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.WHATSAPP_OUTBOUND_KILL_SWITCH??""))})')"
+          printf 'SCHEDULER_OUTBOUND=%s\nSCHEDULER_MODE=%s\nSCHEDULER_KILL_SWITCH=%s\n' "$scheduler_outbound" "$scheduler_mode" "$scheduler_kill"
+          test "$scheduler_outbound" = false
+          test "$scheduler_mode" = disabled
+          test "$scheduler_kill" = on
+
+          test -f "$ENV_FILE"
+          DATABASE_URL="$(node - "$ENV_FILE" <<'NODE'
+          const fs=require('node:fs');
+          const [file]=process.argv.slice(2);
+          for(const raw of fs.readFileSync(file,'utf8').split(/\r?\n/)){
+            let line=raw.trim();
+            if(!line||line.startsWith('#')) continue;
+            if(line.startsWith('export ')) line=line.slice(7).trim();
+            const i=line.indexOf('=');
+            if(i<1||line.slice(0,i).trim()!=='DATABASE_URL') continue;
+            let value=line.slice(i+1).trim();
+            if(value.length>=2&&((value.startsWith('"')&&value.endsWith('"'))||(value.startsWith("'")&&value.endsWith("'")))) value=value.slice(1,-1);
+            process.stdout.write(value); process.exit(0);
+          }
+          process.exit(1);
+          NODE
+          )"
+          test -n "$DATABASE_URL"
+          DB="$(node "$APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")"
+
+          IFS='|' read -r fresh_events chain_count latest_received latest_processed service_window_count <<< "$(PGOPTIONS='-c default_transaction_read_only=on' psql "$DB" -X -v ON_ERROR_STOP=1 -v cutoff="$EVIDENCE_CUTOFF_UTC" -A -F '|' -t <<'SQL'
+          WITH fresh_events AS (
+            SELECT
+              "receivedAt" AS received_at,
+              "processedAt" AS processed_at,
+              "payload" #>> '{message,id}' AS meta_message_id
+            FROM "WebhookEvent"
+            WHERE "eventType" = 'message'
+              AND "receivedAt" >= :'cutoff'::timestamptz
+              AND "processedAt" IS NOT NULL
+              AND "processingError" IS NULL
+              AND COALESCE("payload" #>> '{message,id}', '') <> ''
+          ), chains AS (
+            SELECT
+              e.received_at,
+              e.processed_at,
+              c."serviceWindowExpiresAt" AS service_window_expires_at
+            FROM fresh_events e
+            JOIN "WhatsAppMessage" m
+              ON m."metaMessageId" = e.meta_message_id
+             AND m."direction"::text = 'INBOUND'
+             AND m."actor"::text = 'CUSTOMER'
+            JOIN "WhatsAppConversation" c ON c."id" = m."conversationId"
+            JOIN "WhatsAppContact" ct ON ct."id" = c."contactId"
+          )
+          SELECT
+            (SELECT COUNT(*) FROM fresh_events),
+            COUNT(*),
+            COALESCE(MAX(received_at)::text, ''),
+            COALESCE(MAX(processed_at)::text, ''),
+            COUNT(*) FILTER (WHERE service_window_expires_at IS NOT NULL)
+          FROM chains;
+          SQL
+          )"
+
+          printf 'EVIDENCE_CUTOFF_UTC=%s\n' "$EVIDENCE_CUTOFF_UTC"
+          printf 'FRESH_PROCESSED_INBOUND_EVENT_COUNT=%s\n' "$fresh_events"
+          printf 'FRESH_E2E_CHAIN_COUNT=%s\n' "$chain_count"
+          printf 'LATEST_INBOUND_RECEIVED_AT=%s\n' "$latest_received"
+          printf 'LATEST_INBOUND_PROCESSED_AT=%s\n' "$latest_processed"
+          printf 'SERVICE_WINDOW_CHAIN_COUNT=%s\n' "$service_window_count"
+
+          test "$fresh_events" -ge 1
+          test "$chain_count" -ge 1
+          test "$chain_count" -eq "$fresh_events"
+          test "$service_window_count" -eq "$chain_count"
+
+          printf 'PII_EMITTED=false\n'
+          printf 'DATABASE_WRITE_REQUESTED=false\n'
+          printf 'PROVIDER_WRITE_REQUESTED=false\n'
+          printf 'WHATSAPP_W3_GENUINE_INBOUND_E2E=PASS\n'
+          REMOTE
