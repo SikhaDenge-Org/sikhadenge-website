@@ -27,9 +27,9 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
-      EXPECTED_OLD_SHA: e3b9289abb92217bfdcf26d9f4097895106a956b
-      TARGET_REF: production/email-e8-live-20260923
-      TARGET_SHA: 1c49d36fef42491e2e976b3971fac89bf53ebd35
+      EXPECTED_OLD_SHA: 1c49d36fef42491e2e976b3971fac89bf53ebd35
+      TARGET_REF: production/email-e8-live-v2-20260923
+      TARGET_SHA: 60cd180e7a728b4ac546777605b4257504df483a
       EXPECTED_MANUAL_SEND_BLOB: 650a5b62d128223acf05a6c13f99098e62e1de27
       EXPECTED_FAILOVER_BLOB: 5430bb72487010208088c9af9545fc59135059cf
       EXPECTED_READINESS_BLOB: c8936e26b1d985d166f610dcd15dcacede562545
@@ -64,7 +64,7 @@ jobs:
           printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
 
-      - name: Execute reviewed Email E8 target on exact live lineage
+      - name: Reconcile and certify reviewed Email E8 runtime
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -101,25 +101,25 @@ jobs:
           printf 'E8_DIAG_PM2_STATE=%s\nE8_DIAG_LOCAL_LOGIN_HTTP=%s\nE8_DIAG_PUBLIC_LOGIN_HTTP=%s\n' "$pm2_state" "$local_http" "$public_http"
 
           test "$live_sha" = "$EXPECTED_OLD_SHA"
-
           git fetch --no-tags origin "$TARGET_REF"
           fetched_sha="$(git rev-parse FETCH_HEAD 2>/dev/null || true)"
           printf 'E8_DIAG_FETCHED_TARGET_SHA=%s\nE8_DIAG_EXPECTED_TARGET_SHA=%s\n' "$fetched_sha" "$TARGET_SHA"
           test "$fetched_sha" = "$TARGET_SHA"
 
-          if git cat-file -e "$TARGET_SHA:apps/whatsapp-agent-dashboard/scripts/email-e8-live-deploy.sh" 2>/dev/null; then
-            printf 'E8_DIAG_DEPLOY_SCRIPT_PRESENT=true\n'
+          reconcile_path=apps/whatsapp-agent-dashboard/scripts/email-e8-live-reconcile.sh
+          if git cat-file -e "$TARGET_SHA:$reconcile_path" 2>/dev/null; then
+            printf 'E8_DIAG_RECONCILE_SCRIPT_PRESENT=true\n'
           else
-            printf 'E8_DIAG_DEPLOY_SCRIPT_PRESENT=false\n'
+            printf 'E8_DIAG_RECONCILE_SCRIPT_PRESENT=false\n'
             exit 1
           fi
 
-          deploy_script=/tmp/email-e8-live-deploy-${TARGET_SHA}.sh
-          git show "$TARGET_SHA:apps/whatsapp-agent-dashboard/scripts/email-e8-live-deploy.sh" > "$deploy_script"
-          chmod 700 "$deploy_script"
-          trap 'rm -f "$deploy_script"' EXIT
-          bash "$deploy_script"
-          rm -f "$deploy_script"
+          reconcile_script=/tmp/email-e8-live-reconcile-${TARGET_SHA}.sh
+          git show "$TARGET_SHA:$reconcile_path" > "$reconcile_script"
+          chmod 700 "$reconcile_script"
+          trap 'rm -f "$reconcile_script"' EXIT
+          bash "$reconcile_script"
+          rm -f "$reconcile_script"
           trap - EXIT
           REMOTE
 
