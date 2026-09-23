@@ -85,12 +85,27 @@ jobs:
           expected_dirty="$(printf '%s\n%s\n' \
             ' M apps/whatsapp-agent-dashboard/scripts/email-automation-production-internal-test.sh' \
             ' M apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts' | sort)"
+          actual_dirty_count="$(printf '%s\n' "$actual_dirty" | sed '/^$/d' | wc -l | tr -d ' ')"
+          live_sha_match=false
+          dirty_set_match=false
+          reviewed_internal_hash_match=false
+          reviewed_readiness_hash_match=false
+          [[ "$live_sha" = "$EXPECTED_LIVE_SHA" ]] && live_sha_match=true
+          [[ "$actual_dirty" = "$expected_dirty" ]] && dirty_set_match=true
+          actual_internal_hash="$(sha256sum "$APP/scripts/email-automation-production-internal-test.sh" | awk '{print $1}')"
+          actual_readiness_hash="$(sha256sum "$APP/scripts/email-inbound-production-readiness.ts" | awk '{print $1}')"
+          [[ "$actual_internal_hash" = "$REVIEWED_EMAIL_INTERNAL_TEST_SHA256" ]] && reviewed_internal_hash_match=true
+          [[ "$actual_readiness_hash" = "$REVIEWED_EMAIL_READINESS_SHA256" ]] && reviewed_readiness_hash_match=true
 
-          test "$live_sha" = "$EXPECTED_LIVE_SHA"
-          test "$actual_dirty" = "$expected_dirty"
-          test "$(sha256sum "$APP/scripts/email-automation-production-internal-test.sh" | awk '{print $1}')" = "$REVIEWED_EMAIL_INTERNAL_TEST_SHA256"
-          test "$(sha256sum "$APP/scripts/email-inbound-production-readiness.ts" | awk '{print $1}')" = "$REVIEWED_EMAIL_READINESS_SHA256"
-          printf 'LIVE_SHA=%s\n' "$live_sha"
+          printf 'SOURCE_LIVE_SHA_MATCH=%s\n' "$live_sha_match"
+          printf 'SOURCE_TRACKED_DIRTY_COUNT=%s\n' "$actual_dirty_count"
+          printf 'SOURCE_REVIEWED_DIRTY_SET_MATCH=%s\n' "$dirty_set_match"
+          printf 'SOURCE_REVIEWED_INTERNAL_HASH_MATCH=%s\n' "$reviewed_internal_hash_match"
+          printf 'SOURCE_REVIEWED_READINESS_HASH_MATCH=%s\n' "$reviewed_readiness_hash_match"
+          if [[ "$live_sha_match" != true ]]; then printf 'W4_BLOCKER=LIVE_SHA_MISMATCH\n'; exit 1; fi
+          if [[ "$dirty_set_match" != true ]]; then printf 'W4_BLOCKER=TRACKED_SOURCE_DRIFT_CHANGED\n'; exit 1; fi
+          if [[ "$reviewed_internal_hash_match" != true ]]; then printf 'W4_BLOCKER=REVIEWED_INTERNAL_HASH_CHANGED\n'; exit 1; fi
+          if [[ "$reviewed_readiness_hash_match" != true ]]; then printf 'W4_BLOCKER=REVIEWED_READINESS_HASH_CHANGED\n'; exit 1; fi
           printf 'REVIEWED_NON_WHATSAPP_DRIFT_EXACT=true\n'
           printf 'WHATSAPP_RELEVANT_DIRTY_COUNT=0\n'
 
@@ -101,15 +116,15 @@ jobs:
           scheduler_mode="$(printf '%s' "$pm2_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.WHATSAPP_OUTBOUND_MODE??""))})')"
           scheduler_kill="$(printf '%s' "$pm2_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.WHATSAPP_OUTBOUND_KILL_SWITCH??""))})')"
 
-          test "$pm2_state" = online
-          test "$login_http" = 200
-          test "$scheduler_outbound" = false
-          test "$scheduler_mode" = disabled
-          test "$scheduler_kill" = on
           printf 'PM2_STATE=%s\nLOGIN_HTTP=%s\n' "$pm2_state" "$login_http"
           printf 'SCHEDULER_OUTBOUND=%s\nSCHEDULER_MODE=%s\nSCHEDULER_KILL_SWITCH=%s\n' "$scheduler_outbound" "$scheduler_mode" "$scheduler_kill"
+          if [[ "$pm2_state" != online ]]; then printf 'W4_BLOCKER=WHATSAPP_PM2_NOT_ONLINE\n'; exit 1; fi
+          if [[ "$login_http" != 200 ]]; then printf 'W4_BLOCKER=WHATSAPP_LOGIN_NOT_200\n'; exit 1; fi
+          if [[ "$scheduler_outbound" != false ]]; then printf 'W4_BLOCKER=OUTBOUND_DISPATCH_NOT_DISABLED\n'; exit 1; fi
+          if [[ "$scheduler_mode" != disabled ]]; then printf 'W4_BLOCKER=OUTBOUND_MODE_NOT_DISABLED\n'; exit 1; fi
+          if [[ "$scheduler_kill" != on ]]; then printf 'W4_BLOCKER=OUTBOUND_KILL_SWITCH_NOT_ON\n'; exit 1; fi
 
-          test -f "$ENV_FILE"
+          if [[ ! -f "$ENV_FILE" ]]; then printf 'W4_BLOCKER=ENV_FILE_MISSING\n'; exit 1; fi
           DATABASE_URL="$(node - "$ENV_FILE" <<'NODE'
           const fs=require('node:fs');
           const [file]=process.argv.slice(2);
@@ -125,9 +140,10 @@ jobs:
           }
           process.exit(1);
           NODE
-          )"
-          test -n "$DATABASE_URL"
-          DB="$(node "$APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")"
+          )" || { printf 'W4_BLOCKER=DATABASE_URL_MISSING\n'; exit 1; }
+          if [[ -z "$DATABASE_URL" ]]; then printf 'W4_BLOCKER=DATABASE_URL_EMPTY\n'; exit 1; fi
+          DB="$(node "$APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")" || { printf 'W4_BLOCKER=DATABASE_CLI_URL_PREP_FAILED\n'; exit 1; }
+          printf 'DATABASE_READONLY_PREFLIGHT=true\n'
 
           IFS='|' read -r contact_count opted_out_count opted_in_count connection_ready_count conversation_count service_window_open_count approved_template_count operator_count <<< "$(PGOPTIONS='-c default_transaction_read_only=on' psql "$DB" -X -v ON_ERROR_STOP=1 -v canary="$VERIFIED_CANARY_WA_ID" -A -F '|' -t <<'SQL'
           WITH target AS (
