@@ -175,15 +175,24 @@ jobs:
           SQL
           )"
 
-          test "$contact_count" = 1
-          test "$opted_out_count" = 0
-          test "$connection_ready_count" = 1
-          test "$conversation_count" = 1
-          test "$operator_count" -ge 1
+          printf 'VERIFIED_CONTACT_MATCH_COUNT=%s\n' "$contact_count"
+          printf 'OPTED_OUT_MATCH_COUNT=%s\n' "$opted_out_count"
+          printf 'OPTED_IN_MATCH_COUNT=%s\n' "$opted_in_count"
+          printf 'CONNECTION_READY_COUNT=%s\n' "$connection_ready_count"
+          printf 'CONVERSATION_MATCH_COUNT=%s\n' "$conversation_count"
+          printf 'SERVICE_WINDOW_OPEN_COUNT=%s\n' "$service_window_open_count"
+          printf 'APPROVED_TEMPLATE_COUNT=%s\n' "$approved_template_count"
+          printf 'AUTHORIZED_OPERATOR_COUNT=%s\n' "$operator_count"
+
+          if [[ "$contact_count" != 1 ]]; then printf 'W4_BLOCKER=VERIFIED_CONTACT_MATCH\n'; exit 1; fi
+          if [[ "$opted_out_count" != 0 ]]; then printf 'W4_BLOCKER=CANARY_OPTED_OUT\n'; exit 1; fi
+          if [[ "$connection_ready_count" != 1 ]]; then printf 'W4_BLOCKER=WHATSAPP_CONNECTION_NOT_READY\n'; exit 1; fi
+          if [[ "$conversation_count" != 1 ]]; then printf 'W4_BLOCKER=CANARY_CONVERSATION_MISSING\n'; exit 1; fi
+          if [[ "$operator_count" -lt 1 ]]; then printf 'W4_BLOCKER=AUTHORIZED_OPERATOR_MISSING\n'; exit 1; fi
 
           if [[ "$service_window_open_count" -eq 0 ]]; then
-            test "$opted_in_count" = 1
-            test "$approved_template_count" -ge 1
+            if [[ "$opted_in_count" != 1 ]]; then printf 'W4_BLOCKER=CLOSED_WINDOW_WITHOUT_OPT_IN\n'; exit 1; fi
+            if [[ "$approved_template_count" -lt 1 ]]; then printf 'W4_BLOCKER=CLOSED_WINDOW_WITHOUT_APPROVED_TEMPLATE\n'; exit 1; fi
             printf 'CANARY_SEND_PATH=APPROVED_TEMPLATE_REQUIRED\n'
           else
             printf 'CANARY_SEND_PATH=OPEN_SERVICE_WINDOW\n'
@@ -197,20 +206,13 @@ jobs:
           WHERE "workspaceId"='engagews_default';
           SQL
           )"
-          test -n "$launch_stage"
-          test "$external_writes" = false
-          test "$requested_external" = false
 
-          printf 'VERIFIED_CONTACT_MATCH_COUNT=%s\n' "$contact_count"
-          printf 'OPTED_OUT_MATCH_COUNT=%s\n' "$opted_out_count"
-          printf 'OPTED_IN_MATCH_COUNT=%s\n' "$opted_in_count"
-          printf 'CONNECTION_READY_COUNT=%s\n' "$connection_ready_count"
-          printf 'CONVERSATION_MATCH_COUNT=%s\n' "$conversation_count"
-          printf 'SERVICE_WINDOW_OPEN_COUNT=%s\n' "$service_window_open_count"
-          printf 'APPROVED_TEMPLATE_COUNT=%s\n' "$approved_template_count"
-          printf 'AUTHORIZED_OPERATOR_COUNT=%s\n' "$operator_count"
           printf 'CONTROLLED_LAUNCH_STAGE=%s\nCONTROLLED_LAUNCH_MODE=%s\nCONTROLLED_LAUNCH_POLICY=%s\n' "$launch_stage" "$launch_mode" "$launch_policy"
           printf 'EXTERNAL_WRITES_ALLOWED=%s\nEXTERNAL_WRITES_REQUESTED=%s\n' "$external_writes" "$requested_external"
+          if [[ -z "$launch_stage" ]]; then printf 'W4_BLOCKER=CONTROLLED_LAUNCH_STATE_MISSING\n'; exit 1; fi
+          if [[ "$external_writes" != false ]]; then printf 'W4_BLOCKER=EXTERNAL_WRITES_ALREADY_ALLOWED\n'; exit 1; fi
+          if [[ "$requested_external" != false ]]; then printf 'W4_BLOCKER=EXTERNAL_WRITES_ALREADY_REQUESTED\n'; exit 1; fi
+
           printf 'CANARY_IDENTIFIER_EMITTED=false\nPII_EMITTED=false\n'
           printf 'DATABASE_WRITE_REQUESTED=false\nPROVIDER_WRITE_REQUESTED=false\n'
           printf 'WHATSAPP_W4_CANARY_TARGET_QUALIFICATION=PASS\n'
