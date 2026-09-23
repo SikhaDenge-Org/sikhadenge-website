@@ -14,6 +14,10 @@ import { getEmailRuntimePolicy } from "./runtime-policy";
 import { assertManualEmailDispatchPolicy, assertManualEmailRetryAllowed, internalRecipientAllowlist } from "./manual-send-policy";
 import { instrumentEmailHtml } from "../analytics/tracking";
 import { isPersistedDeliveryRetrySafe, persistedEmailDeliveryError } from "../providers/provider-error-policy";
+import {
+  emailProviderFailoverPolicyFromEnv,
+  selectEmailProviderRoute,
+} from "../providers/routing/failover-policy";
 
 const KEY = /^[A-Za-z0-9._:-]{8,128}$/;
 function json(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }
@@ -96,8 +100,17 @@ export class ManualEmailSendService {
     const emailRuntime = buildEmailE1Runtime();
     const senders = await emailRuntime.senders.listByWorkspace(input.workspaceId);
     const resolved = resolveEmailSender({ availableSenders: senders, manualSenderIdentityId: input.manualSenderIdentityId, automationSenderIdentityId: input.automationSenderIdentityId, templateSenderIdentityId: version.defaultSenderIdentityId });
-    const connection = await emailRuntime.connections.getById({ workspaceId: input.workspaceId, connectionId: resolved.sender.connectionId });
-    if (!connection || connection.status !== "CONNECTED") throw new Error("Resolved email sender connection is not connected.");
+    const connections = await emailRuntime.connections.listByWorkspace(input.workspaceId);
+    const route = selectEmailProviderRoute({
+      policy: emailProviderFailoverPolicyFromEnv(),
+      primary: resolved.sender,
+      senders,
+      connections,
+      registeredProviders: emailRuntime.providers.list(),
+    });
+    if (!route) throw new Error("No connected registered email provider route is available for the resolved sender.");
+    const connection = route.connection;
+    const sender = route.sender;
 
     const policy = getEmailRuntimePolicy();
     const decision = input.deliveryContext === "AUTOMATION"
@@ -115,14 +128,14 @@ export class ManualEmailSendService {
       attachments.push({ assetId: asset.id, fileName: asset.fileName, mimeType: asset.mimeType, sizeBytes: asset.sizeBytes, disposition: asset.kind === "INLINE_IMAGE" ? "INLINE" : "ATTACHMENT", ...(asset.contentId ? { contentId: asset.contentId } : {}), contentBase64: data.toString("base64") });
     }
     const auditAttachments = attachments.map(({ contentBase64: _content, ...item }) => item);
-    const replyTo = input.replyTo ? addresses([input.replyTo], true)[0] : resolved.sender.replyToEmail ? { email: resolved.sender.replyToEmail } : undefined;
+    const replyTo = input.replyTo ? addresses([input.replyTo], true)[0] : sender.replyToEmail ? { email: sender.replyToEmail } : undefined;
     let created;
     if (retryPersisted && prior) {
       if (
         prior.templateId !== template.id ||
         prior.templateVersionId !== version.id ||
         prior.connectionId !== connection.id ||
-        prior.senderIdentityId !== resolved.sender.id
+        prior.senderIdentityId !== sender.id
       ) {
         throw new Error("Persisted retry-safe email no longer matches the pinned automation delivery contract.");
       }
@@ -131,7 +144,7 @@ export class ManualEmailSendService {
       try {
         created = await prisma.engageEmailMessage.create({ data: {
       workspaceId: input.workspaceId, templateId: template.id, templateVersionId: version.id, connectionId: connection.id,
-      senderIdentityId: resolved.sender.id, senderResolutionSource: resolved.source, status: "DRAFT", runtimeMode: decision.mode,
+      senderIdentityId: sender.id, senderResolutionSource: resolved.source, status: "DRAFT", runtimeMode: decision.mode,
       toRecipients: json(to), ccRecipients: json(cc), bccRecipients: json(bcc), ...(replyTo ? { replyTo: json(replyTo) } : {}),
       subject: rendered.subject, preheader: rendered.preheader ?? null, htmlBody: rendered.html, textBody: rendered.text,
       variables: json(rendered.variables), attachments: json(auditAttachments), idempotencyKey, createdById: input.actorUserId,
@@ -155,8 +168,8 @@ export class ManualEmailSendService {
     await prisma.engageEmailMessage.update({ where: { id: created.id }, data: { status: "SENDING", lastError: null, runtimeMode: decision.mode } });
     try {
       const result = await emailRuntime.providers.get(connection.provider).sendMessage({
-        workspaceId: input.workspaceId, connectionId: connection.id, senderIdentityId: resolved.sender.id,
-        from: { email: resolved.sender.fromEmail, ...(resolved.sender.fromName ? { name: resolved.sender.fromName } : {}) },
+        workspaceId: input.workspaceId, connectionId: connection.id, senderIdentityId: sender.id,
+        from: { email: sender.fromEmail, ...(sender.fromName ? { name: sender.fromName } : {}) },
         to, cc, bcc, ...(replyTo ? { replyTo } : {}), rendered: outboundRendered, attachments, idempotencyKey, ...(input.providerThreadId?.trim() ? { providerThreadId: input.providerThreadId.trim() } : {}),
       });
       const message = await prisma.engageEmailMessage.update({ where: { id: created.id }, data: {
