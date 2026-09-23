@@ -8,7 +8,6 @@ on:
 permissions:
   contents: read
 
-
 jobs:
   email-oauth-provision:
     concurrency:
@@ -26,13 +25,11 @@ jobs:
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       GMAIL_CLIENT_ID: ${{ secrets.GOOGLE_GMAIL_CLIENT_ID }}
       GMAIL_CLIENT_SECRET: ${{ secrets.GOOGLE_GMAIL_CLIENT_SECRET }}
-      DEPLOYED_SHA: ${{ github.event.before }}
     steps:
       - name: Validate guarded OAuth inputs
         shell: bash
         run: |
           set -Eeuo pipefail
-          [[ "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
           missing=0
           for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY GMAIL_CLIENT_ID GMAIL_CLIENT_SECRET; do
             [[ -n "${!variable_name:-}" ]] || { echo "Missing required production secret: $variable_name" >&2; missing=1; }
@@ -67,14 +64,37 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            "DEPLOYED_SHA='$DEPLOYED_SHA' GMAIL_CLIENT_ID_B64='$client_id_b64' GMAIL_CLIENT_SECRET_B64='$client_secret_b64' bash -s" <<'REMOTE'
+            "GMAIL_CLIENT_ID_B64='$client_id_b64' GMAIL_CLIENT_SECRET_B64='$client_secret_b64' bash -s" <<'REMOTE'
           set -Eeuo pipefail
-          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          APP="$ROOT/apps/whatsapp-agent-dashboard"
           ENV_FILE="$APP/.env"
           test "$(id -u)" = "0"
+          test -d "$ROOT/.git"
+          LIVE_SHA="$(git -C "$ROOT" rev-parse HEAD)"
+          [[ "$LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
           cd "$APP"
-          test "$(git rev-parse HEAD)" = "$DEPLOYED_SHA"
           test -f "$ENV_FILE"
+          printf 'DISCOVERED_DEPLOYED_SHA=%s\n' "$LIVE_SHA"
+
+          PM2_SNAPSHOT="$(mktemp)"
+          trap 'rm -f "$PM2_SNAPSHOT"' EXIT
+          pm2 jlist > "$PM2_SNAPSHOT"
+          IFS='|' read -r START_PM2_PID START_PM2_STATUS START_PM2_CWD < <(
+            node - "$PM2_SNAPSHOT" <<'NODE'
+          const fs=require('node:fs');
+          const rows=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const p=rows.find(x=>x.name==='sikhadenge-whatsapp-agent');
+          process.stdout.write(p ? [p.pid||'',p.pm2_env?.status||'',p.pm2_env?.pm_cwd||''].join('|')+'\n' : '||\n');
+          NODE
+          )
+          test -n "$START_PM2_PID"
+          test "$START_PM2_STATUS" = "online"
+          case "$START_PM2_CWD" in /var/www/sikhadenge-whatsapp-agent/*) ;; *) echo 'Unexpected PM2 cwd' >&2; exit 20;; esac
+          test -s "$START_PM2_CWD/.next/BUILD_ID"
+          START_BUILD_ID="$(cat "$START_PM2_CWD/.next/BUILD_ID")"
+          printf 'START_BUILD_ID=%s\n' "$START_BUILD_ID"
+
           cp -a "$ENV_FILE" "/root/sikhadenge-backups/email-oauth-env-$(date -u +%Y%m%dT%H%M%SZ).before"
           export GOOGLE_GMAIL_CLIENT_ID="$(printf '%s' "$GMAIL_CLIENT_ID_B64" | base64 -d)"
           export GOOGLE_GMAIL_CLIENT_SECRET="$(printf '%s' "$GMAIL_CLIENT_SECRET_B64" | base64 -d)"
@@ -111,4 +131,8 @@ jobs:
           console.log(`GMAIL_OAUTH_CONFIGURED=${ok?'yes':'no'}`);console.log(`EMAIL_RUNTIME_MODE=${env.EMAIL_RUNTIME_MODE||''}`);console.log(`EMAIL_EXTERNAL_WRITES_ENABLED=${env.EMAIL_EXTERNAL_WRITES_ENABLED||''}`);console.log(`EMAIL_INBOUND_SYNC_ENABLED=${env.EMAIL_INBOUND_SYNC_ENABLED||''}`);if(!ok)process.exit(1);
           NODE
           pm2 jlist | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const r=JSON.parse(s).find(x=>x.name==='sikhadenge-whatsapp-agent');console.log('PM2_STATUS='+(r?.pm2_env?.status||'missing'));if(r?.pm2_env?.status!=='online')process.exit(1)})"
+          test "$(git -C "$ROOT" rev-parse HEAD)" = "$LIVE_SHA"
+          test "$(cat "$START_PM2_CWD/.next/BUILD_ID")" = "$START_BUILD_ID"
+          printf 'EMAIL_OAUTH_PROVISION=PASS\n'
+          printf 'EXTERNAL_EMAIL_SENT=false\n'
           REMOTE
