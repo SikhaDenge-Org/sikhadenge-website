@@ -49,7 +49,7 @@ jobs:
       EXPECTED_LIVE_SHA: 60cd180e7a728b4ac546777605b4257504df483a
       REVIEWED_EMAIL_INTERNAL_TEST_SHA256: d7dc9e6950379aca830830680778d71fc083bfeaa5fea67dd3117fc0696eda0e
       REVIEWED_EMAIL_READINESS_SHA256: a3c15e6b03e31ed9f4df38391a737a56a36625ae89c36f185a3d7df13fa8254c
-      CANARY_PREFIX: phase17-w5-internal-canary:
+      CANARY_PREFIX: "phase17-w5-internal-canary:"
       SELECTED_TEMPLATE: hello_world
       EXECUTE: ${{ github.event_name == 'workflow_dispatch' && inputs.execute || false }}
       APPROVER_USER_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.approved_by_user_id || '' }}
