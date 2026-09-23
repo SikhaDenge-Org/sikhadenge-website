@@ -75,10 +75,45 @@ jobs:
             "EXPECTED_OLD_SHA='$EXPECTED_OLD_SHA' TARGET_REF='$TARGET_REF' TARGET_SHA='$TARGET_SHA' EXPECTED_MANUAL_SEND_BLOB='$EXPECTED_MANUAL_SEND_BLOB' EXPECTED_FAILOVER_BLOB='$EXPECTED_FAILOVER_BLOB' EXPECTED_READINESS_BLOB='$EXPECTED_READINESS_BLOB' EXPECTED_READINESS_SCRIPT_BLOB='$EXPECTED_READINESS_SCRIPT_BLOB' REVIEWED_EMAIL_INTERNAL_TEST_SHA256='$REVIEWED_EMAIL_INTERNAL_TEST_SHA256' REVIEWED_EMAIL_READINESS_SHA256='$REVIEWED_EMAIL_READINESS_SHA256' bash -s" <<'REMOTE' | tee email-e8-live-bridge.txt
           set -Eeuo pipefail
           ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          APP="$ROOT/apps/whatsapp-agent-dashboard"
+          ENV_FILE="$APP/.env"
           cd "$ROOT"
-          test "$(git rev-parse HEAD)" = "$EXPECTED_OLD_SHA"
+
+          live_sha="$(git rev-parse HEAD 2>/dev/null || true)"
+          printf 'E8_DIAG_LIVE_SHA=%s\n' "$live_sha"
+          printf 'E8_DIAG_EXPECTED_OLD_SHA=%s\n' "$EXPECTED_OLD_SHA"
+          printf 'E8_DIAG_TRACKED_DIRTY_BEGIN\n'
+          git status --porcelain --untracked-files=no 2>/dev/null | sed -n '1,40p' || true
+          printf 'E8_DIAG_TRACKED_DIRTY_END\n'
+
+          if [[ -f "$ENV_FILE" ]]; then
+            for key in EMAIL_RUNTIME_MODE EMAIL_RUNTIME_ENABLED EMAIL_EXTERNAL_WRITES_ENABLED; do
+              value="$(grep -E "^(export )?${key}=" "$ENV_FILE" 2>/dev/null | tail -1 | sed -E "s/^(export )?${key}=//" | tr -d '\r\"' | xargs || true)"
+              printf 'E8_DIAG_%s=%s\n' "$key" "$value"
+            done
+          else
+            printf 'E8_DIAG_ENV_FILE=missing\n'
+          fi
+
+          pm2_state="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const a=JSON.parse(s||"[]");const p=a.find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(String(p?.pm2_env?.status||"missing"))}catch{process.stdout.write("parse-error")}})' 2>/dev/null || true)"
+          local_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3100/login 2>/dev/null || true)"
+          public_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login 2>/dev/null || true)"
+          printf 'E8_DIAG_PM2_STATE=%s\nE8_DIAG_LOCAL_LOGIN_HTTP=%s\nE8_DIAG_PUBLIC_LOGIN_HTTP=%s\n' "$pm2_state" "$local_http" "$public_http"
+
+          test "$live_sha" = "$EXPECTED_OLD_SHA"
+
           git fetch --no-tags origin "$TARGET_REF"
-          test "$(git rev-parse FETCH_HEAD)" = "$TARGET_SHA"
+          fetched_sha="$(git rev-parse FETCH_HEAD 2>/dev/null || true)"
+          printf 'E8_DIAG_FETCHED_TARGET_SHA=%s\nE8_DIAG_EXPECTED_TARGET_SHA=%s\n' "$fetched_sha" "$TARGET_SHA"
+          test "$fetched_sha" = "$TARGET_SHA"
+
+          if git cat-file -e "$TARGET_SHA:apps/whatsapp-agent-dashboard/scripts/email-e8-live-deploy.sh" 2>/dev/null; then
+            printf 'E8_DIAG_DEPLOY_SCRIPT_PRESENT=true\n'
+          else
+            printf 'E8_DIAG_DEPLOY_SCRIPT_PRESENT=false\n'
+            exit 1
+          fi
+
           deploy_script=/tmp/email-e8-live-deploy-${TARGET_SHA}.sh
           git show "$TARGET_SHA:apps/whatsapp-agent-dashboard/scripts/email-e8-live-deploy.sh" > "$deploy_script"
           chmod 700 "$deploy_script"
