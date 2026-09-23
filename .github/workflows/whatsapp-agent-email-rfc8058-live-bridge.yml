@@ -1,4 +1,4 @@
-# Activation checkpoint: 2026-09-23
+# Activation checkpoint: 2026-09-23 retry-2
 name: Email RFC8058 Live Bridge
 
 on:
@@ -28,7 +28,7 @@ jobs:
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       EXPECTED_OLD_SHA: 4e4bcb0119f2096ee2f95c95862c5c0d797c1021
       TARGET_REF: production/email-rfc8058-20260923
-      TARGET_SHA: 432fb7f02305d592b4a50465c2b648a2378de89c
+      TARGET_SHA: 1f51f6bdf6dd431253f428c9d91fa8a209d82a0c
       EXPECTED_GMAIL_MIME_BLOB: e4fc52f4c353fc282862192c4c4ccef995dad0bd
       EXPECTED_UNSUB_ROUTE_BLOB: 667870f367f31e7cf3ec09e3d203cc2c45035315
       EXPECTED_UNSUB_SERVICE_BLOB: 4b302af6ce8e317251ed35a3a2dd0209077c62eb
