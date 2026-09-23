@@ -1,0 +1,109 @@
+name: WhatsApp W2 Production Drift Guard
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - .github/workflows/whatsapp-w2-production-drift-guard.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-w2-production-drift-guard
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_LIVE_SHA: 4e4bcb0119f2096ee2f95c95862c5c0d797c1021
+      REVIEWED_EMAIL_INTERNAL_TEST_SHA256: d7dc9e6950379aca830830680778d71fc083bfeaa5fea67dd3117fc0696eda0e
+      REVIEWED_EMAIL_READINESS_SHA256: a3c15e6b03e31ed9f4df38391a737a56a36625ae89c36f185a3d7df13fa8254c
+
+    steps:
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; SSH_PORT=22; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          ssh-keygen -y -f "$key" >/dev/null
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Verify WhatsApp production source drift fail-closed
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' REVIEWED_EMAIL_INTERNAL_TEST_SHA256='$REVIEWED_EMAIL_INTERNAL_TEST_SHA256' REVIEWED_EMAIL_READINESS_SHA256='$REVIEWED_EMAIL_READINESS_SHA256' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          APP="$ROOT/apps/whatsapp-agent-dashboard"
+          cd "$ROOT"
+
+          live_sha="$(git rev-parse HEAD)"
+          actual_dirty="$(git status --porcelain --untracked-files=no | sed '/^$/d' | sort)"
+          expected_dirty="$(printf '%s\n%s\n' \
+            ' M apps/whatsapp-agent-dashboard/scripts/email-automation-production-internal-test.sh' \
+            ' M apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts' | sort)"
+          dirty_count="$(printf '%s\n' "$actual_dirty" | sed '/^$/d' | wc -l | tr -d ' ')"
+
+          printf 'LIVE_SHA=%s\n' "$live_sha"
+          printf 'TRACKED_DIRTY_COUNT=%s\n' "$dirty_count"
+          printf 'TRACKED_DIRTY_BEGIN\n%s\nTRACKED_DIRTY_END\n' "$actual_dirty"
+
+          test "$live_sha" = "$EXPECTED_LIVE_SHA"
+          test "$actual_dirty" = "$expected_dirty"
+          test "$(sha256sum "$APP/scripts/email-automation-production-internal-test.sh" | awk '{print $1}')" = "$REVIEWED_EMAIL_INTERNAL_TEST_SHA256"
+          test "$(sha256sum "$APP/scripts/email-inbound-production-readiness.ts" | awk '{print $1}')" = "$REVIEWED_EMAIL_READINESS_SHA256"
+          printf 'REVIEWED_NON_WHATSAPP_DRIFT_EXACT=true\n'
+          printf 'WHATSAPP_RELEVANT_DIRTY_COUNT=0\n'
+
+          pm2_state="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(String(p?.pm2_env?.status||"missing"))})')"
+          login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login || true)"
+          printf 'PM2_STATE=%s\nLOGIN_HTTP=%s\n' "$pm2_state" "$login_http"
+          test "$pm2_state" = online
+          test "$login_http" = 200
+
+          set -a
+          source "$APP/.env"
+          set +a
+          test "${WHATSAPP_OUTBOUND_MODE:-disabled}" != live
+          test "${WHATSAPP_CUTOVER_APPROVED:-false}" != true
+          test -z "${WHATSAPP_OUTBOUND_LIVE_ACK:-}"
+          test "${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}" = on
+
+          scheduler_outbound="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED??""))})')"
+          scheduler_mode="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.WHATSAPP_OUTBOUND_MODE??""))})')"
+          scheduler_kill="$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.WHATSAPP_OUTBOUND_KILL_SWITCH??""))})')"
+          printf 'SCHEDULER_OUTBOUND=%s\nSCHEDULER_MODE=%s\nSCHEDULER_KILL_SWITCH=%s\n' "$scheduler_outbound" "$scheduler_mode" "$scheduler_kill"
+          test "$scheduler_outbound" = false
+          test "$scheduler_mode" = disabled
+          test "$scheduler_kill" = on
+
+          printf 'PROVIDER_WRITE_REQUESTED=false\n'
+          printf 'WHATSAPP_W2_DRIFT_GUARD=PASS\n'
+          REMOTE
