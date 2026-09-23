@@ -13,6 +13,7 @@ on:
       - "apps/whatsapp-agent-dashboard/scripts/email-inbound-*.ts"
       - "apps/whatsapp-agent-dashboard/scripts/email-inbound-*.sh"
       - "apps/whatsapp-agent-dashboard/scripts/email-lifecycle-*.ts"
+      - "apps/whatsapp-agent-dashboard/scripts/email-provider-*.ts"
       - "apps/whatsapp-agent-dashboard/tests/email-lifecycle-*.sh"
       - "apps/whatsapp-agent-dashboard/tests/email-automation-*.sh"
       - "apps/whatsapp-agent-dashboard/tests/email-inbound-*.sh"
@@ -74,6 +75,15 @@ jobs:
 
       - name: Run email provider retry safety contracts
         run: npx tsx modules/email-automation/tests/provider-error-policy.test.ts
+
+      - name: Run Email E8 shared provider contract parity
+        run: npx tsx modules/email-automation/tests/provider-contract-parity.test.ts
+
+      - name: Run Email E8 provider routing and failover contracts
+        run: npx tsx modules/email-automation/tests/provider-routing.test.ts
+
+      - name: Run Email E8 provider readiness contracts
+        run: npx tsx modules/email-automation/tests/provider-readiness.test.ts
 
       - name: Run Microsoft 365 disconnect contracts
         run: npx tsx modules/email-automation/tests/microsoft-disconnect.test.ts
