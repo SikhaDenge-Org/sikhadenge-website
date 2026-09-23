@@ -31,3 +31,4 @@ fi
 echo "PASS: email operational validation discovers live SHA and follows latest persisted canary"
 
 # Governed operational validation marker; no runtime behavior change.
+# Fresh-base Phase C CI marker after protected release advanced on 2026-09-23.
