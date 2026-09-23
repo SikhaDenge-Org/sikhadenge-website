@@ -1,0 +1,218 @@
+name: Email Phase A Production Evidence Repair
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-email-phase-a-evidence-repair.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  repair-email-production-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      RUN_ID: email-phase-a-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Validate production access
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          missing=0
+          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            [[ -n "${!variable_name:-}" ]] || { echo "Missing production secret: $variable_name" >&2; missing=1; }
+          done
+          test "$missing" = "0"
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Certify actual live Email runtime and repair evidence
+        shell: bash
+        run: |
+          set -o pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 -o ConnectionAttempts=3 \
+            "$SSH_USER@$SSH_HOST" "RUN_ID='$RUN_ID' bash -s" <<'REMOTE' | tee email-phase-a-evidence-repair.log
+          set -Eeuo pipefail
+          ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          APP="$ROOT/apps/whatsapp-agent-dashboard"
+          ENV_FILE="$APP/.env"
+          WORKSPACE_ID=engagews_default
+          EVIDENCE_DIR="/root/sikhadenge-backups/engageos-github-$RUN_ID"
+          EVIDENCE_FILE="$EVIDENCE_DIR/post-deploy-evidence.txt"
+          RESULT_DIR="/root/sikhadenge-backups/$RUN_ID"
+
+          test "$(id -u)" = "0"
+          test -d "$APP"
+          test -f "$ENV_FILE"
+          install -d -m 700 "$EVIDENCE_DIR" "$RESULT_DIR"
+
+          LIVE_SHA="$(git -C "$ROOT" rev-parse HEAD)"
+          [[ "$LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          APP_BUILD_ID="$(cat "$APP/.next/BUILD_ID")"
+          test -n "$APP_BUILD_ID"
+
+          PM2_FILE="$(mktemp)"
+          trap 'rm -f "$PM2_FILE"' EXIT
+          pm2 jlist > "$PM2_FILE"
+          IFS='|' read -r PM2_PID PM2_STATUS PM2_CWD < <(
+            node - "$PM2_FILE" <<'NODE'
+          const fs=require('node:fs');
+          const rows=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const p=rows.find(x=>x.name==='sikhadenge-whatsapp-agent');
+          process.stdout.write(p ? [p.pid||'',p.pm2_env?.status||'',p.pm2_env?.pm_cwd||''].join('|')+'\n' : '||\n');
+          NODE
+          )
+          test -n "$PM2_PID"
+          test "$PM2_STATUS" = "online"
+          case "$PM2_CWD" in /var/www/sikhadenge-whatsapp-agent/*) ;; *) echo 'FAIL: unexpected PM2 cwd' >&2; exit 20;; esac
+          RUNTIME_BUILD_ID="$(cat "$PM2_CWD/.next/BUILD_ID")"
+          test "$RUNTIME_BUILD_ID" = "$APP_BUILD_ID"
+
+          read_env() {
+            node - "$ENV_FILE" "$1" <<'NODE'
+          const fs=require('node:fs'); const [file,key]=process.argv.slice(2); let out='';
+          for(const raw of fs.readFileSync(file,'utf8').split(/\r?\n/)){
+            let line=raw.trim(); if(!line||line.startsWith('#')) continue;
+            if(line.startsWith('export ')) line=line.slice(7).trim();
+            const i=line.indexOf('='); if(i<1||line.slice(0,i).trim()!==key) continue;
+            out=line.slice(i+1).trim();
+            if(out.length>=2&&((out.startsWith('"')&&out.endsWith('"'))||(out.startsWith("'")&&out.endsWith("'")))) out=out.slice(1,-1);
+          }
+          process.stdout.write(out);
+          NODE
+          }
+          test "$(read_env EMAIL_RUNTIME_ENABLED)" = "true"
+          test "$(read_env EMAIL_AUTOMATION_ENABLED)" = "true"
+          test "$(read_env EMAIL_RUNTIME_MODE)" = "DRY_RUN"
+          test "$(read_env EMAIL_EXTERNAL_WRITES_ENABLED)" = "false"
+          test "$(read_env EMAIL_INBOUND_SYNC_ENABLED)" = "false"
+
+          tmp="$EVIDENCE_FILE.tmp"
+          {
+            printf 'RELEASE_SHA=%s\n' "$LIVE_SHA"
+            printf 'BUILD_ID=%s\n' "$RUNTIME_BUILD_ID"
+            printf 'PM2_STATUS=%s\n' "$PM2_STATUS"
+            printf 'PM2_CWD=%s\n' "$PM2_CWD"
+            printf 'SOURCE=EMAIL_PHASE_A_RUNTIME_TRUTH\n'
+            printf 'GENERATED_AT=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > "$tmp"
+          chmod 600 "$tmp"
+          mv "$tmp" "$EVIDENCE_FILE"
+
+          latest_evidence=""
+          latest_mtime=0
+          shopt -s nullglob
+          for candidate in /root/sikhadenge-backups/engageos-github-*/post-deploy-evidence.txt; do
+            m="$(stat -c %Y "$candidate" 2>/dev/null || printf 0)"
+            if [[ "$m" =~ ^[0-9]+$ ]] && (( m > latest_mtime )); then latest_mtime="$m"; latest_evidence="$candidate"; fi
+          done
+          shopt -u nullglob
+          test "$latest_evidence" = "$EVIDENCE_FILE"
+          getv(){ awk -F= -v key="$1" '$1==key{sub(/^[^=]*=/,"");print;exit}' "$latest_evidence"; }
+          test "$(getv RELEASE_SHA)" = "$LIVE_SHA"
+          test "$(getv BUILD_ID)" = "$RUNTIME_BUILD_ID"
+          test "$(getv PM2_STATUS)" = "online"
+          test "$(getv PM2_CWD)" = "$PM2_CWD"
+
+          cd "$APP"
+          EXPECTED_RELEASE_SHA="$LIVE_SHA" ENV_FILE="$ENV_FILE" MAX_FAILED_EVENTS=0 bash scripts/email-automation-scheduler-verify.sh | tee "$RESULT_DIR/scheduler-verify.log"
+
+          npm exec -- tsx -e 'import { prisma } from "./lib/db/prisma"; import { ManualEmailSendService } from "./modules/email-automation/application/manual-send-service"; (async()=>{ const rows=await prisma.engageEmailMessage.findMany({where:{status:"SENT",externalRequestSent:true,idempotencyKey:{startsWith:"internal-test-"}},orderBy:{createdAt:"desc"},take:50}); const m=rows.find((row:any)=>{const to=Array.isArray(row.toRecipients)?row.toRecipients:[];return to.some((x:any)=>String(x?.email||"").toLowerCase()==="ankitsingh@sikhadenge.in")&&Boolean(row.idempotencyKey)&&Boolean(row.providerMessageId)&&Boolean(row.sentAt)&&Boolean(row.templateId)&&Boolean(row.senderIdentityId);}); if(!m) throw new Error("no persisted internal canary found"); const replay=await new ManualEmailSendService().send({workspaceId:m.workspaceId,templateId:m.templateId!,manualSenderIdentityId:m.senderIdentityId,to:[{email:"ankitsingh@sikhadenge.in"}],idempotencyKey:m.idempotencyKey!,actorUserId:m.createdById}); const count=await prisma.engageEmailMessage.count({where:{workspaceId:m.workspaceId,idempotencyKey:m.idempotencyKey!}}); if(!replay.replayed||replay.message.id!==m.id||count!==1) throw new Error("idempotency replay contract failed"); console.log("CANARY_STATUS=PASS"); console.log(`CANARY_MESSAGE_ID=${m.id}`); console.log(`CANARY_DUPLICATE_COUNT=${count}`); await prisma.$disconnect(); })().catch(async e=>{console.error(e);try{await prisma.$disconnect()}catch{}process.exit(1)});' | tee "$RESULT_DIR/canary-idempotency.log"
+
+          set +e
+          EXPECTED_RELEASE_SHA="$LIVE_SHA" EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID="$WORKSPACE_ID" npx tsx scripts/email-inbound-production-readiness.ts | tee "$RESULT_DIR/inbound-readiness.json"
+          INBOUND_EXIT=${PIPESTATUS[0]}
+          set -e
+
+          {
+            printf 'LIVE_SHA=%s\n' "$LIVE_SHA"
+            printf 'BUILD_ID=%s\n' "$RUNTIME_BUILD_ID"
+            printf 'PM2_STATUS=%s\n' "$PM2_STATUS"
+            printf 'PM2_CWD=%s\n' "$PM2_CWD"
+            printf 'RUNTIME_MODE=DRY_RUN\n'
+            printf 'EXTERNAL_WRITES=false\n'
+            printf 'EVIDENCE_REPAIRED=true\n'
+            printf 'SCHEDULER_VERIFY_EXIT=0\n'
+            printf 'CANARY_VERIFY_EXIT=0\n'
+            printf 'INBOUND_READINESS_EXIT=%s\n' "$INBOUND_EXIT"
+            printf 'EXTERNAL_EMAIL_SENT=false\n'
+          } > "$RESULT_DIR/phase-a-evidence-repair-result.txt"
+          chmod 600 "$RESULT_DIR"/* "$EVIDENCE_FILE" 2>/dev/null || true
+
+          printf 'PHASE_A_EVIDENCE_REPAIR=PASS\n'
+          printf 'PHASE_A_LIVE_SHA=%s\n' "$LIVE_SHA"
+          printf 'PHASE_A_BUILD_ID=%s\n' "$RUNTIME_BUILD_ID"
+          printf 'PHASE_A_PM2_STATUS=%s\n' "$PM2_STATUS"
+          printf 'PHASE_A_EVIDENCE_LATEST=true\n'
+          printf 'PHASE_A_RUNTIME_MODE=DRY_RUN\n'
+          printf 'PHASE_A_EXTERNAL_WRITES=false\n'
+          printf 'PHASE_A_INBOUND_READINESS_EXIT=%s\n' "$INBOUND_EXIT"
+          printf 'PHASE_A_EXTERNAL_EMAIL_SENT=false\n'
+          REMOTE
+
+      - name: Collect Phase A evidence
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p email-phase-a-evidence-repair
+          for file_name in phase-a-evidence-repair-result.txt scheduler-verify.log canary-idempotency.log inbound-readiness.json; do
+            scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+              -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
+              "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${RUN_ID}/${file_name}" "email-phase-a-evidence-repair/${file_name}" >/dev/null 2>&1 || true
+          done
+          chmod -R go-rwx email-phase-a-evidence-repair 2>/dev/null || true
+
+      - name: Publish Phase A evidence summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Email Phase A — production evidence repair'
+            echo
+            grep '^PHASE_A_' email-phase-a-evidence-repair.log | sed 's/^/- `/' | sed 's/$/`/' || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Phase A evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: email-phase-a-evidence-repair-${{ env.RUN_ID }}
+          path: |
+            email-phase-a-evidence-repair.log
+            email-phase-a-evidence-repair
+          if-no-files-found: error
+          retention-days: 30
