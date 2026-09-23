@@ -218,8 +218,11 @@ async function main() {
     throw new Error("W5 namespace contains a provider message ID; refresh is refused.");
   }
   if (
-    candidates.some((candidate) =>
-      [MessageStatus.SENT, MessageStatus.DELIVERED, MessageStatus.READ].includes(candidate.status),
+    candidates.some(
+      (candidate) =>
+        candidate.status === MessageStatus.SENT ||
+        candidate.status === MessageStatus.DELIVERED ||
+        candidate.status === MessageStatus.READ,
     )
   ) {
     throw new Error("W5 namespace contains prior provider-delivery state; refresh is refused.");
