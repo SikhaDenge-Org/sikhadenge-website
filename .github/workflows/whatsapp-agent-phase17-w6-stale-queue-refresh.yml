@@ -1,0 +1,214 @@
+name: WhatsApp W6 Stale Canary Queue Refresh
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-phase17-w6-stale-queue-refresh.yml"
+      - "apps/whatsapp-agent-dashboard/scripts/engageos-phase17-w6-canary-queue-refresh.ts"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-w6-stale-canary-queue-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      VERIFIED_CANARY_WA_ID: ${{ secrets.WHATSAPP_INTERNAL_CANARY_WA_ID }}
+      EXPECTED_LIVE_SHA: 60cd180e7a728b4ac546777605b4257504df483a
+      REVIEWED_EMAIL_INTERNAL_TEST_SHA256: d7dc9e6950379aca830830680778d71fc083bfeaa5fea67dd3117fc0696eda0e
+      REVIEWED_EMAIL_READINESS_SHA256: a3c15e6b03e31ed9f4df38391a737a56a36625ae89c36f185a3d7df13fa8254c
+      SELECTED_TEMPLATE: hello_world
+      W5_PREFIX: "phase17-w5-internal-canary:"
+
+    steps:
+      - name: Checkout reviewed W6 refresh code
+        uses: actions/checkout@v4
+
+      - name: Validate pinned production inputs and refresh safety surface
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY VERIFIED_CANARY_WA_ID; do
+            test -n "${!v:-}"
+          done
+          [[ "$VERIFIED_CANARY_WA_ID" =~ ^[0-9]{6,20}$ ]]
+          [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$REVIEWED_EMAIL_INTERNAL_TEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$REVIEWED_EMAIL_READINESS_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "$SELECTED_TEMPLATE" = hello_world
+          test "$W5_PREFIX" = "phase17-w5-internal-canary:"
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            SSH_PORT=22
+            echo 'SSH_PORT=22' >> "$GITHUB_ENV"
+          fi
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+
+          script="apps/whatsapp-agent-dashboard/scripts/engageos-phase17-w6-canary-queue-refresh.ts"
+          test -f "$script"
+          grep -Fq 'queueOutboundMessage' "$script"
+          grep -Fq 'W6_CANARY_SUPERSEDED' "$script"
+          grep -Fq 'whatsAppMessageStatusEvent.create' "$script"
+          if grep -Eq 'dispatchOutboundMessage|dispatchQueuedOutboundBatch|sendMetaWhatsAppMessage|uploadMetaWhatsAppMedia' "$script"; then
+            echo 'FAIL: W6 refresh must never contain provider-dispatch code.' >&2
+            exit 1
+          fi
+          printf 'W6_REFRESH_STATIC_NO_PROVIDER_DISPATCH=true\n'
+          printf 'W6_REFRESH_CANARY_IDENTIFIER_EMITTED=false\n'
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          ssh-keygen -y -f "$key" >/dev/null
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Transport reviewed W6 refresh executor
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          local_script="apps/whatsapp-agent-dashboard/scripts/engageos-phase17-w6-canary-queue-refresh.ts"
+          reviewed_sha="$(sha256sum "$local_script" | awk '{print $1}')"
+          remote_script="/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard/scripts/.w6-canary-refresh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.ts"
+          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$local_script" "$SSH_USER@$SSH_HOST:$remote_script"
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" "test -f '$remote_script' && test \"\$(sha256sum '$remote_script' | awk '{print \$1}')\" = '$reviewed_sha'"
+          printf 'REVIEWED_W6_REFRESH_SCRIPT_REMOTE=%s\n' "$remote_script" >> "$GITHUB_ENV"
+          printf 'REVIEWED_W6_REFRESH_SCRIPT_SHA256=%s\n' "$reviewed_sha" >> "$GITHUB_ENV"
+          printf 'PASS: REVIEWED_W6_REFRESH_EXECUTOR_TRANSPORTED\n'
+
+      - name: Refresh exactly one stale W5 queue record without provider dispatch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' REVIEWED_EMAIL_INTERNAL_TEST_SHA256='$REVIEWED_EMAIL_INTERNAL_TEST_SHA256' REVIEWED_EMAIL_READINESS_SHA256='$REVIEWED_EMAIL_READINESS_SHA256' VERIFIED_CANARY_WA_ID='$VERIFIED_CANARY_WA_ID' SELECTED_TEMPLATE='$SELECTED_TEMPLATE' W5_PREFIX='$W5_PREFIX' REVIEWED_W6_REFRESH_SCRIPT_REMOTE='$REVIEWED_W6_REFRESH_SCRIPT_REMOTE' REVIEWED_W6_REFRESH_SCRIPT_SHA256='$REVIEWED_W6_REFRESH_SCRIPT_SHA256' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          APP="$ROOT/apps/whatsapp-agent-dashboard"
+          trap 'rm -f "$REVIEWED_W6_REFRESH_SCRIPT_REMOTE"' EXIT
+          cd "$ROOT"
+
+          test "$(git rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
+          actual_dirty="$(git status --porcelain --untracked-files=no | sed '/^$/d' | sort)"
+          expected_dirty="$(printf '%s\n%s\n' \
+            ' M apps/whatsapp-agent-dashboard/scripts/email-automation-production-internal-test.sh' \
+            ' M apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts' | sort)"
+          test "$actual_dirty" = "$expected_dirty"
+          test "$(sha256sum "$APP/scripts/email-automation-production-internal-test.sh" | awk '{print $1}')" = "$REVIEWED_EMAIL_INTERNAL_TEST_SHA256"
+          test "$(sha256sum "$APP/scripts/email-inbound-production-readiness.ts" | awk '{print $1}')" = "$REVIEWED_EMAIL_READINESS_SHA256"
+          test -f "$REVIEWED_W6_REFRESH_SCRIPT_REMOTE"
+          test "$(sha256sum "$REVIEWED_W6_REFRESH_SCRIPT_REMOTE" | awk '{print $1}')" = "$REVIEWED_W6_REFRESH_SCRIPT_SHA256"
+          printf 'W6_REFRESH_SOURCE_GUARD=PASS\nW6_REFRESH_WHATSAPP_RELEVANT_DIRTY_COUNT=0\n'
+
+          pm2_json="$(pm2 jlist 2>/dev/null)"
+          app_state="$(printf '%s' "$pm2_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s||"[]");process.stdout.write(String(a.find(x=>x.name==="sikhadenge-whatsapp-agent")?.pm2_env?.status||"missing"))})')"
+          scheduler_outbound="$(printf '%s' "$pm2_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED??""))})')"
+          scheduler_mode="$(printf '%s' "$pm2_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.WHATSAPP_OUTBOUND_MODE??""))})')"
+          scheduler_kill="$(printf '%s' "$pm2_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.WHATSAPP_OUTBOUND_KILL_SWITCH??""))})')"
+          test "$app_state" = online
+          test "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login)" = 200
+          test "$scheduler_outbound" = false
+          test "$scheduler_mode" = disabled
+          test "$scheduler_kill" = on
+          printf 'W6_REFRESH_PM2_ONLINE=true\nW6_REFRESH_LOGIN_HTTP=200\nW6_REFRESH_SCHEDULER_ISOLATED=true\n'
+
+          cd "$APP"
+          set -a
+          source .env
+          set +a
+          test "${WHATSAPP_OUTBOUND_MODE:-disabled}" != live
+          test "${WHATSAPP_CUTOVER_APPROVED:-false}" != true
+          test -z "${WHATSAPP_OUTBOUND_LIVE_ACK:-}"
+          test "${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}" = on
+
+          dry_output="$(W6_REFRESH_MODE=DRY_RUN W6_REFRESH_VERIFIED_CANARY_WA_ID="$VERIFIED_CANARY_WA_ID" W6_REFRESH_TEMPLATE_NAME="$SELECTED_TEMPLATE" npm exec -- tsx "$REVIEWED_W6_REFRESH_SCRIPT_REMOTE" 2>&1)"
+          printf '%s\n' "$dry_output" | grep -q '^W6_REFRESH_DRY_RUN=PASS$'
+          printf '%s\n' "$dry_output" | grep -q '^W6_REFRESH_PROVIDER_WRITE_REQUESTED=false$'
+          printf '%s\n' "$dry_output" | grep -q '^W6_REFRESH_EXTERNAL_WHATSAPP_WRITE_SENT=false$'
+          printf 'W6_REFRESH_DRY_RUN=PASS\n'
+
+          refresh_output="$(W6_REFRESH_MODE=REFRESH W6_REFRESH_VERIFIED_CANARY_WA_ID="$VERIFIED_CANARY_WA_ID" W6_REFRESH_TEMPLATE_NAME="$SELECTED_TEMPLATE" W6_REFRESH_CONFIRM=REFRESH_ONE_STALE_W5_INTERNAL_CANARY_QUEUE npm exec -- tsx "$REVIEWED_W6_REFRESH_SCRIPT_REMOTE" 2>&1)"
+          printf '%s\n' "$refresh_output" | grep -q '^W6_REFRESH=PASS$'
+          printf '%s\n' "$refresh_output" | grep -q '^W6_REFRESH_ACTIVE_QUEUE_COUNT=1$'
+          printf '%s\n' "$refresh_output" | grep -q '^W6_REFRESH_META_MESSAGE_ID_SET=false$'
+          printf '%s\n' "$refresh_output" | grep -q '^W6_REFRESH_CONTROLLED_LAUNCH_FAIL_CLOSED=true$'
+          printf '%s\n' "$refresh_output" | grep -q '^W6_REFRESH_PROVIDER_WRITE_REQUESTED=false$'
+          printf '%s\n' "$refresh_output" | grep -q '^W6_REFRESH_EXTERNAL_WHATSAPP_WRITE_SENT=false$'
+          printf 'W6_REFRESH_EXECUTION=PASS\n'
+
+          DB="$(node scripts/prisma-postgres-cli-url.mjs "$DATABASE_URL")"
+          IFS='|' read -r queued_count meta_count fresh_count old_phase22d_queued launch_external launch_requested <<< "$(PGOPTIONS='-c default_transaction_read_only=on' psql "$DB" -X -v ON_ERROR_STOP=1 -v canary="$VERIFIED_CANARY_WA_ID" -v template="$SELECTED_TEMPLATE" -v prefix="${W5_PREFIX}%" -A -F '|' -t <<'SQL'
+          WITH active AS (
+            SELECT m.id, m."metaMessageId", m."createdAt"
+            FROM "WhatsAppMessage" m
+            JOIN "WhatsAppConversation" c ON c.id=m."conversationId"
+            JOIN "WhatsAppContact" ct ON ct.id=c."contactId"
+            WHERE m.direction='OUTBOUND'
+              AND m.status='QUEUED'
+              AND m.type='TEMPLATE'
+              AND ct."waId"=:'canary'
+              AND ct."consentStatus"='OPTED_IN'
+              AND ct."optedOutAt" IS NULL
+              AND m."rawPayload" #>> '{outbound,templateName}'=:'template'
+              AND m."rawPayload" #>> '{outbound,idempotencyKey}' LIKE :'prefix'
+          )
+          SELECT
+            (SELECT COUNT(*) FROM active)::text,
+            (SELECT COUNT(*) FROM active WHERE "metaMessageId" IS NOT NULL)::text,
+            (SELECT COUNT(*) FROM active WHERE "createdAt">=NOW()-INTERVAL '30 minutes')::text,
+            (SELECT COUNT(*) FROM "WhatsAppMessage" m JOIN "WhatsAppConversation" c ON c.id=m."conversationId" JOIN "WhatsAppContact" ct ON ct.id=c."contactId" WHERE ct."waId"=:'canary' AND m.status='QUEUED' AND m."rawPayload" #>> '{outbound,idempotencyKey}' LIKE 'phase22d-internal-canary:%')::text,
+            (SELECT COUNT(*) FROM "EngageControlledLaunchState" WHERE "workspaceId"='engagews_default' AND "externalWritesAllowed"=true)::text,
+            (SELECT COUNT(*) FROM "EngageControlledLaunchState" WHERE "workspaceId"='engagews_default' AND COALESCE("scope"->>'externalWritesRequested','false')='true')::text;
+          SQL
+          )"
+          test "$queued_count" = 1
+          test "$meta_count" = 0
+          test "$fresh_count" = 1
+          test "$old_phase22d_queued" = 0
+          test "$launch_external" = 0
+          test "$launch_requested" = 0
+
+          pm2_after="$(pm2 jlist 2>/dev/null)"
+          test "$(printf '%s' "$pm2_after" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED??""))})')" = false
+          test "$(printf '%s' "$pm2_after" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.WHATSAPP_OUTBOUND_MODE??""))})')" = disabled
+          test "$(printf '%s' "$pm2_after" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(String(p?.pm2_env?.WHATSAPP_OUTBOUND_KILL_SWITCH??""))})')" = on
+
+          printf 'W6_REFRESH_FINAL_ACTIVE_QUEUE_COUNT=1\n'
+          printf 'W6_REFRESH_FINAL_META_MESSAGE_ID_COUNT=0\n'
+          printf 'W6_REFRESH_FINAL_FRESH_COUNT=1\n'
+          printf 'W6_REFRESH_FINAL_OLD_PHASE22D_QUEUED_COUNT=0\n'
+          printf 'W6_REFRESH_FINAL_CONTROLLED_LAUNCH_FAIL_CLOSED=true\n'
+          printf 'W6_REFRESH_FINAL_SCHEDULER_FAIL_CLOSED=true\n'
+          printf 'W6_REFRESH_PROVIDER_WRITE_REQUESTED=false\n'
+          printf 'W6_REFRESH_EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          printf 'WHATSAPP_W6_STALE_CANARY_QUEUE_REFRESH=PASS\n'
+          REMOTE
