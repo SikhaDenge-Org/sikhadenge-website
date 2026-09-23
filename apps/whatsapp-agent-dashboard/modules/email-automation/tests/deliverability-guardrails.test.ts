@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   EMAIL_DELIVERABILITY_COMPLAINT_BLOCK_PCT,
@@ -89,6 +90,19 @@ function testHealthyScaledSnapshotPasses() {
   }
 }
 
+function testEnvironmentContractIsDeclaredFailClosed() {
+  const example = readFileSync(".env.example", "utf8");
+  for (const name of [
+    "EMAIL_DELIVERABILITY_SPF_ALIGNED",
+    "EMAIL_DELIVERABILITY_DKIM_ALIGNED",
+    "EMAIL_DELIVERABILITY_DMARC_ALIGNED",
+    "EMAIL_DELIVERABILITY_HARD_BOUNCE_RATE_PCT",
+    "EMAIL_DELIVERABILITY_COMPLAINT_RATE_PCT",
+  ]) {
+    assert.match(example, new RegExp(`^${name}=\\"\\"$`, "m"), `${name} must be declared empty/fail-closed in .env.example`);
+  }
+}
+
 function withDeliverabilityEnv(values: Record<string, string | undefined>, fn: () => void) {
   const keys = Object.keys(values);
   const before = new Map(keys.map((key) => [key, process.env[key]]));
@@ -164,6 +178,7 @@ testSafePreScaleModesAreNotBlocked();
 testMissingScaledTelemetryFailsClosed();
 testBoundaryRatesFailClosed();
 testHealthyScaledSnapshotPasses();
+testEnvironmentContractIsDeclaredFailClosed();
 testAutomationScaledDispatchIsActuallyGated();
 
 console.log("Email Phase D deliverability guardrail contracts: PASS");
