@@ -726,6 +726,7 @@ export async function dispatchQueuedOutboundBatch(
   limit = 10,
   options?: {
     idempotencyPrefix?: string;
+    messageIds?: string[];
   },
 ) {
   const safeLimit = Math.max(1, Math.min(50, Math.floor(limit)));
@@ -733,11 +734,33 @@ export async function dispatchQueuedOutboundBatch(
     options?.idempotencyPrefix ?? "",
     200,
   );
+  const messageIdsProvided = Array.isArray(options?.messageIds);
+  const messageIds = [
+    ...new Set(
+      (options?.messageIds ?? [])
+        .map((id) => compact(id, 200))
+        .filter(Boolean),
+    ),
+  ].slice(0, 50);
+
+  if (messageIdsProvided && messageIds.length === 0) {
+    return {
+      mode: getOutboundMode(),
+      inspected: 0,
+      processed: 0,
+      sent: 0,
+      results: [] as DispatchResult[],
+    };
+  }
 
   const where: Prisma.WhatsAppMessageWhereInput = {
     direction: MessageDirection.OUTBOUND,
     status: MessageStatus.QUEUED,
   };
+
+  if (messageIdsProvided) {
+    where.id = { in: messageIds };
+  }
 
   if (idempotencyPrefix) {
     where.rawPayload = {
