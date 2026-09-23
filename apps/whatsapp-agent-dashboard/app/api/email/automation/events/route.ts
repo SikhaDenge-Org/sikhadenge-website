@@ -10,6 +10,7 @@ import {
   listEmailAutomationEvents,
   type EmailAutomationEventStatus,
 } from "@/modules/email-automation/automation/event-outbox";
+import { EMAIL_AUTOMATION_MANUAL_MAX_ATTEMPTS } from "@/modules/email-automation/providers/provider-error-policy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,7 +30,12 @@ export async function GET(request: Request) {
     });
     const policy = getEmailRuntimePolicy();
     return NextResponse.json(
-      { events, automationEnabled: policy.automationEnabled, runtimeMode: policy.mode },
+      {
+        events,
+        automationEnabled: policy.automationEnabled,
+        runtimeMode: policy.mode,
+        manualRetryMaxAttempts: EMAIL_AUTOMATION_MANUAL_MAX_ATTEMPTS,
+      },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
