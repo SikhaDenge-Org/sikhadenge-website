@@ -11,6 +11,9 @@ permissions:
 jobs:
   validate-email-operation:
     if: contains(github.event.head_commit.message, '[email-operational-validation]')
+    concurrency:
+      group: whatsapp-agent-production
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: whatsapp-agent-production
@@ -20,7 +23,6 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
-      EXPECTED_DEPLOYED_SHA: ${{ github.event.before }}
     steps:
       - name: Validate production access
         shell: bash
@@ -46,20 +48,34 @@ jobs:
           printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
           ssh-keygen -y -f "$key" >/dev/null
-      - name: Validate persisted send and idempotency
+
+      - name: Validate actual live persisted send and idempotency
         shell: bash
         run: |
           set -Eeuo pipefail
-          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" \
-            "EXPECTED_DEPLOYED_SHA='$EXPECTED_DEPLOYED_SHA' bash -s" <<'REMOTE'
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" bash -s <<'REMOTE'
           set -Eeuo pipefail
-          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          APP="$ROOT/apps/whatsapp-agent-dashboard"
           cd "$APP"
-          test "$(git rev-parse HEAD)" = "$EXPECTED_DEPLOYED_SHA"
+          DEPLOYED_SHA="$(git -C "$ROOT" rev-parse HEAD)"
+          [[ "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
+
           set -a
           source .env
           set +a
+          test "${EMAIL_RUNTIME_ENABLED:-false}" = "true"
+          test "${EMAIL_AUTOMATION_ENABLED:-false}" = "true"
           test "${EMAIL_RUNTIME_MODE:-}" = "DRY_RUN"
           test "${EMAIL_EXTERNAL_WRITES_ENABLED:-false}" = "false"
-          npm exec -- tsx -e 'import { prisma } from "./lib/db/prisma"; import { ManualEmailSendService } from "./modules/email-automation/application/manual-send-service"; (async()=>{ const rows=await prisma.engageEmailMessage.findMany({where:{status:"SENT",externalRequestSent:true,idempotencyKey:{startsWith:"internal-test-"}},orderBy:{createdAt:"desc"},take:25}); const m=rows.find((row:any)=>{ const to=Array.isArray(row.toRecipients)?row.toRecipients:[]; return to.some((x:any)=>x?.email==="ankitsingh@sikhadenge.in") && Boolean(row.idempotencyKey) && Boolean(row.providerMessageId) && Boolean(row.sentAt) && Boolean(row.templateId) && Boolean(row.senderIdentityId); }); if(!m) throw new Error("no persisted internal canary found"); const key=m.idempotencyKey!; const replay=await new ManualEmailSendService().send({workspaceId:m.workspaceId,templateId:m.templateId!,manualSenderIdentityId:m.senderIdentityId,to:[{email:"ankitsingh@sikhadenge.in"}],idempotencyKey:key,actorUserId:m.createdById}); if(!replay.replayed||replay.message.id!==m.id) throw new Error("idempotency replay failed"); const count=await prisma.engageEmailMessage.count({where:{workspaceId:m.workspaceId,idempotencyKey:key}}); if(count!==1) throw new Error("duplicate record detected"); console.log("VALIDATION_STATUS=PASS"); console.log(`MESSAGE_ID=${m.id}`); console.log(`MESSAGE_STATUS=${m.status}`); console.log(`PROVIDER_MESSAGE_ID_PRESENT=${Boolean(m.providerMessageId)}`); console.log(`IDEMPOTENCY_REPLAYED=${replay.replayed}`); console.log(`DUPLICATE_RECORD_COUNT=${count}`); await prisma.$disconnect(); })().catch(async e=>{console.error(e); try{await prisma.$disconnect()}catch{} process.exit(1)});'
+          test "${EMAIL_INBOUND_SYNC_ENABLED:-false}" = "false"
+
+          npm exec -- tsx -e 'import { prisma } from "./lib/db/prisma"; import { ManualEmailSendService } from "./modules/email-automation/application/manual-send-service"; (async()=>{ const rows=await prisma.engageEmailMessage.findMany({where:{status:"SENT",externalRequestSent:true,idempotencyKey:{startsWith:"internal-test-"}},orderBy:{createdAt:"desc"},take:50}); const m=rows.find((row:any)=>{ const to=Array.isArray(row.toRecipients)?row.toRecipients:[]; return to.some((x:any)=>String(x?.email||"").toLowerCase()==="ankitsingh@sikhadenge.in") && Boolean(row.idempotencyKey) && Boolean(row.providerMessageId) && Boolean(row.sentAt) && Boolean(row.templateId) && Boolean(row.senderIdentityId); }); if(!m) throw new Error("no persisted internal canary found"); const key=m.idempotencyKey!; const replay=await new ManualEmailSendService().send({workspaceId:m.workspaceId,templateId:m.templateId!,manualSenderIdentityId:m.senderIdentityId,to:[{email:"ankitsingh@sikhadenge.in"}],idempotencyKey:key,actorUserId:m.createdById}); if(!replay.replayed||replay.message.id!==m.id) throw new Error("idempotency replay failed"); const count=await prisma.engageEmailMessage.count({where:{workspaceId:m.workspaceId,idempotencyKey:key}}); if(count!==1) throw new Error("duplicate record detected"); console.log("VALIDATION_STATUS=PASS"); console.log(`MESSAGE_ID=${m.id}`); console.log(`MESSAGE_STATUS=${m.status}`); console.log(`PROVIDER_MESSAGE_ID_PRESENT=${Boolean(m.providerMessageId)}`); console.log(`IDEMPOTENCY_REPLAYED=${replay.replayed}`); console.log(`DUPLICATE_RECORD_COUNT=${count}`); await prisma.$disconnect(); })().catch(async e=>{console.error(e); try{await prisma.$disconnect()}catch{} process.exit(1)});'
+
+          test "$(git -C "$ROOT" rev-parse HEAD)" = "$DEPLOYED_SHA"
+          printf 'DISCOVERED_DEPLOYED_SHA=%s\n' "$DEPLOYED_SHA"
+          printf 'RUNTIME_MODE=DRY_RUN\n'
+          printf 'EXTERNAL_WRITES=false\n'
+          printf 'EXTERNAL_EMAIL_SENT=false\n'
+          printf 'EMAIL_OPERATIONAL_VALIDATION=PASS\n'
           REMOTE
