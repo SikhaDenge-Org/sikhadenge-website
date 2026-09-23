@@ -49,6 +49,7 @@ function connection(sender: EmailSenderIdentity, status: EmailConnection["status
 
 function main() {
   const disabled = emailProviderFailoverPolicyFromEnv({
+    NODE_ENV: "test",
     EMAIL_PROVIDER_FAILOVER_ENABLED: "false",
     EMAIL_PROVIDER_FAILOVER_ORDER: "MICROSOFT_365,GOOGLE_GMAIL",
   });
@@ -63,6 +64,7 @@ function main() {
   assert.equal(primary?.failoverUsed, false);
 
   const enabled = emailProviderFailoverPolicyFromEnv({
+    NODE_ENV: "test",
     EMAIL_PROVIDER_FAILOVER_ENABLED: "true",
     EMAIL_PROVIDER_FAILOVER_ORDER: "MICROSOFT_365,MICROSOFT_365,GOOGLE_GMAIL,INVALID",
   });
