@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { emailProviderE8ReadinessFromEnv } from "../providers/readiness";
 
 const base: NodeJS.ProcessEnv = {
+  NODE_ENV: "test",
   EMAIL_RUNTIME_ENABLED: "true",
   EMAIL_RUNTIME_MODE: "DRY_RUN",
   EMAIL_EXTERNAL_WRITES_ENABLED: "false",
