@@ -3,6 +3,7 @@ name: Email Phase D Deliverability CI
 on:
   pull_request:
     paths:
+      - "apps/whatsapp-agent-dashboard/.env.example"
       - "apps/whatsapp-agent-dashboard/modules/email-automation/application/deliverability-guardrails.ts"
       - "apps/whatsapp-agent-dashboard/modules/email-automation/application/automation-send-policy.ts"
       - "apps/whatsapp-agent-dashboard/modules/email-automation/tests/deliverability-guardrails.test.ts"
@@ -12,6 +13,7 @@ on:
     branches:
       - release/whatsapp-instagram-agent-flow-20260731
     paths:
+      - "apps/whatsapp-agent-dashboard/.env.example"
       - "apps/whatsapp-agent-dashboard/modules/email-automation/application/deliverability-guardrails.ts"
       - "apps/whatsapp-agent-dashboard/modules/email-automation/application/automation-send-policy.ts"
       - "apps/whatsapp-agent-dashboard/modules/email-automation/tests/deliverability-guardrails.test.ts"
