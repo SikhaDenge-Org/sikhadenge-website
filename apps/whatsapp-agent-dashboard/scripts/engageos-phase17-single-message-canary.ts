@@ -256,8 +256,12 @@ async function resolveTarget(
     template.language === "en_US" &&
     template.status === TemplateStatus.APPROVED &&
     !hasTemplateVariables(template.components);
+  const requiredIdempotencyPrefix = envText(
+    "PHASE17_CANARY_IDEMPOTENCY_PREFIX",
+    "phase22d-internal-canary:",
+  );
 
-  const isPhase22DTemplate =
+  const isApprovedCanaryTemplate =
     message.type === MessageType.TEMPLATE &&
     canary.designated === true &&
     canary.kind === "INTERNAL_TEST" &&
@@ -265,12 +269,12 @@ async function resolveTarget(
     hasCanaryTag &&
     outbound.templateName === "hello_world" &&
     typeof outbound.idempotencyKey === "string" &&
-    outbound.idempotencyKey.startsWith("phase22d-internal-canary:") &&
+    outbound.idempotencyKey.startsWith(requiredIdempotencyPrefix) &&
     currentTemplateApproved;
 
-  if (message.type !== MessageType.TEXT && !isPhase22DTemplate) {
+  if (message.type !== MessageType.TEXT && !isApprovedCanaryTemplate) {
     throw new Error(
-      "Controlled canary allows TEXT or the exact designated Phase22D hello_world template only.",
+      "Controlled canary allows TEXT or the exact designated approved hello_world template only.",
     );
   }
   if (message.actor !== MessageActor.COUNSELOR) {

@@ -11,13 +11,15 @@ if grep -Fq 'dispatchQueuedOutboundBatch' "$SCRIPT"; then
   exit 1
 fi
 
-grep -Fq 'message.type !== MessageType.TEXT && !isPhase22DTemplate' "$SCRIPT"
+grep -Fq 'message.type !== MessageType.TEXT && !isApprovedCanaryTemplate' "$SCRIPT"
 grep -Fq 'message.type === MessageType.TEMPLATE' "$SCRIPT"
 grep -Fq 'canary.designated === true' "$SCRIPT"
 grep -Fq 'canary.kind === "INTERNAL_TEST"' "$SCRIPT"
 grep -Fq 'hasCanaryTag' "$SCRIPT"
 grep -Fq 'outbound.templateName === "hello_world"' "$SCRIPT"
-grep -Fq 'outbound.idempotencyKey.startsWith("phase22d-internal-canary:")' "$SCRIPT"
+grep -Fq 'PHASE17_CANARY_IDEMPOTENCY_PREFIX' "$SCRIPT"
+grep -Fq '"phase22d-internal-canary:"' "$SCRIPT"
+grep -Fq 'outbound.idempotencyKey.startsWith(requiredIdempotencyPrefix)' "$SCRIPT"
 grep -Fq 'prisma.whatsAppTemplate.findUnique' "$SCRIPT"
 grep -Fq 'template.status === TemplateStatus.APPROVED' "$SCRIPT"
 grep -Fq 'template.name === "hello_world"' "$SCRIPT"
@@ -40,4 +42,4 @@ if grep -Eq 'writeFile|appendFile|\.env.*=' "$SCRIPT"; then
   exit 1
 fi
 
-printf 'EngageOS Phase17 single-message canary policy: PASS\n'
+printf 'EngageOS Phase17 namespace-bound single-message canary policy: PASS\n'
