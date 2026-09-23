@@ -16,7 +16,9 @@ RUN_ID="email-rfc8058-$(date -u +%Y%m%dT%H%M%SZ)"
 BACKUP="/root/sikhadenge-backups/$RUN_ID"
 WORKTREE="/tmp/$RUN_ID"
 STAGE_APP="$WORKTREE/apps/whatsapp-agent-dashboard"
-swapped=false
+RUNTIME_APP=""
+swapped_app=false
+swapped_runtime=false
 advanced=false
 
 cleanup() {
@@ -28,9 +30,13 @@ rollback() {
   rc=$?
   trap - ERR INT TERM
   set +e
-  if [[ "$swapped" = true && -d "$BACKUP/.next.before" ]]; then
+  if [[ "$swapped_runtime" = true && -n "$RUNTIME_APP" && -d "$BACKUP/.next.runtime.before" ]]; then
+    rm -rf "$RUNTIME_APP/.next"
+    mv "$BACKUP/.next.runtime.before" "$RUNTIME_APP/.next"
+  fi
+  if [[ "$swapped_app" = true && -d "$BACKUP/.next.app.before" ]]; then
     rm -rf "$APP/.next"
-    mv "$BACKUP/.next.before" "$APP/.next"
+    mv "$BACKUP/.next.app.before" "$APP/.next"
   fi
   if [[ "$advanced" = true ]]; then
     git -C "$ROOT" reset --keep "$EXPECTED_OLD_SHA" >/dev/null 2>&1 || true
@@ -72,10 +78,24 @@ IFS='|' read -r pid status cwd < <(
 )
 test -n "$pid"
 test "$status" = online
-test "$cwd" = "$APP"
-old_build="$(cat "$APP/.next/BUILD_ID")"
-test -n "$old_build"
-printf 'PRE_DEPLOY_BUILD_ID=%s\n' "$old_build"
+RUNTIME_APP="${cwd:-$APP}"
+if [[ -z "$RUNTIME_APP" ]]; then RUNTIME_APP="$APP"; fi
+case "$RUNTIME_APP" in
+  /var/www/sikhadenge-whatsapp-agent/*) ;;
+  *) printf 'FAIL: unexpected PM2 runtime cwd: %s\n' "$RUNTIME_APP" >&2; exit 21 ;;
+esac
+test -d "$RUNTIME_APP"
+test -d "$APP/.next"
+test -d "$RUNTIME_APP/.next"
+old_app_build="$(cat "$APP/.next/BUILD_ID")"
+old_runtime_build="$(cat "$RUNTIME_APP/.next/BUILD_ID")"
+test -n "$old_app_build"
+test -n "$old_runtime_build"
+printf 'PRE_DEPLOY_PM2_PID=%s\n' "$pid"
+printf 'PRE_DEPLOY_PM2_STATUS=%s\n' "$status"
+printf 'PRE_DEPLOY_RUNTIME_APP=%s\n' "$RUNTIME_APP"
+printf 'PRE_DEPLOY_APP_BUILD_ID=%s\n' "$old_app_build"
+printf 'PRE_DEPLOY_RUNTIME_BUILD_ID=%s\n' "$old_runtime_build"
 
 git fetch --no-tags origin "$TARGET_REF"
 test "$(git rev-parse FETCH_HEAD)" = "$TARGET_SHA"
@@ -101,7 +121,7 @@ cd "$STAGE_APP"
 NEXT_TELEMETRY_DISABLED=1 npm run build > "$BACKUP/build.log" 2>&1
 new_build="$(cat "$STAGE_APP/.next/BUILD_ID")"
 test -n "$new_build"
-test "$new_build" != "$old_build"
+test "$new_build" != "$old_runtime_build"
 printf 'STAGED_BUILD_ID=%s\n' "$new_build"
 
 cd "$ROOT"
@@ -109,9 +129,18 @@ git merge --ff-only "$TARGET_SHA"
 advanced=true
 test "$(git rev-parse HEAD)" = "$TARGET_SHA"
 test "$(git status --porcelain --untracked-files=no | sed '/^$/d' | sort)" = "$expected_dirty"
-mv "$APP/.next" "$BACKUP/.next.before"
-mv "$STAGE_APP/.next" "$APP/.next"
-swapped=true
+
+mv "$APP/.next" "$BACKUP/.next.app.before"
+cp -a "$STAGE_APP/.next" "$APP/.next"
+swapped_app=true
+if [[ "$RUNTIME_APP" != "$APP" ]]; then
+  mv "$RUNTIME_APP/.next" "$BACKUP/.next.runtime.before"
+  cp -a "$STAGE_APP/.next" "$RUNTIME_APP/.next"
+  swapped_runtime=true
+fi
+
+test "$(cat "$APP/.next/BUILD_ID")" = "$new_build"
+test "$(cat "$RUNTIME_APP/.next/BUILD_ID")" = "$new_build"
 pm2 restart "$PROCESS" >/dev/null
 sleep 5
 
@@ -121,8 +150,12 @@ IFS='|' read -r post_pid post_status post_cwd < <(
 )
 test -n "$post_pid"
 test "$post_status" = online
-test "$post_cwd" = "$APP"
+post_runtime_app="${post_cwd:-$APP}"
+if [[ -z "$post_runtime_app" ]]; then post_runtime_app="$APP"; fi
+test "$post_runtime_app" = "$RUNTIME_APP"
 test "$(cat "$APP/.next/BUILD_ID")" = "$new_build"
+test "$(cat "$RUNTIME_APP/.next/BUILD_ID")" = "$new_build"
+
 set -a
 source "$APP/.env"
 set +a
@@ -144,7 +177,9 @@ grep -q 'List-Unsubscribe-Post: List-Unsubscribe=One-Click' "$APP/modules/email-
 grep -q 'export async function POST' "$APP/app/api/email/unsubscribe/route.ts"
 
 printf 'POST_DEPLOY_SHA=%s\n' "$(git rev-parse HEAD)"
-printf 'POST_DEPLOY_BUILD_ID=%s\n' "$(cat "$APP/.next/BUILD_ID")"
+printf 'POST_DEPLOY_APP_BUILD_ID=%s\n' "$(cat "$APP/.next/BUILD_ID")"
+printf 'POST_DEPLOY_RUNTIME_BUILD_ID=%s\n' "$(cat "$RUNTIME_APP/.next/BUILD_ID")"
+printf 'POST_DEPLOY_RUNTIME_APP=%s\n' "$RUNTIME_APP"
 printf 'POST_DEPLOY_PM2_STATUS=%s\n' "$post_status"
 printf 'LOGIN_HTTP=%s\n' "$login"
 printf 'UNSUBSCRIBE_GET_NO_TOKEN_HTTP=%s\n' "$get_code"
@@ -154,7 +189,8 @@ printf 'EXTERNAL_EMAIL_SENT=false\n'
 printf 'EMAIL_RFC8058_LIVE_DEPLOY=PASS\n'
 
 trap - ERR INT TERM
-swapped=false
+swapped_app=false
+swapped_runtime=false
 advanced=false
-rm -rf "$BACKUP/.next.before"
+rm -rf "$BACKUP/.next.app.before" "$BACKUP/.next.runtime.before"
 cleanup
