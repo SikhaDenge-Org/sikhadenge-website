@@ -74,8 +74,11 @@ printf 'EMAIL_RUNTIME_PRECHECK=DRY_RUN_EXTERNAL_WRITES_OFF\n'
 
 pm2_json="$(pm2 jlist)"
 IFS='|' read -r pid status cwd < <(
-  printf '%s' "$pm2_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(p?[p.pid||"",p.pm2_env?.status||"",p.pm2_env?.pm_cwd||""].join("|"):"||")})'
+  printf '%s' "$pm2_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");const out=p?[p.pid||"",p.pm2_env?.status||"",p.pm2_env?.pm_cwd||""].join("|"):"||";process.stdout.write(out+"\n")})'
 )
+printf 'PRE_DEPLOY_PM2_PID=%s\n' "$pid"
+printf 'PRE_DEPLOY_PM2_STATUS=%s\n' "$status"
+printf 'PRE_DEPLOY_PM2_CWD=%s\n' "$cwd"
 test -n "$pid"
 test "$status" = online
 RUNTIME_APP="${cwd:-$APP}"
@@ -91,8 +94,6 @@ old_app_build="$(cat "$APP/.next/BUILD_ID")"
 old_runtime_build="$(cat "$RUNTIME_APP/.next/BUILD_ID")"
 test -n "$old_app_build"
 test -n "$old_runtime_build"
-printf 'PRE_DEPLOY_PM2_PID=%s\n' "$pid"
-printf 'PRE_DEPLOY_PM2_STATUS=%s\n' "$status"
 printf 'PRE_DEPLOY_RUNTIME_APP=%s\n' "$RUNTIME_APP"
 printf 'PRE_DEPLOY_APP_BUILD_ID=%s\n' "$old_app_build"
 printf 'PRE_DEPLOY_RUNTIME_BUILD_ID=%s\n' "$old_runtime_build"
@@ -146,8 +147,11 @@ sleep 5
 
 pm2_json="$(pm2 jlist)"
 IFS='|' read -r post_pid post_status post_cwd < <(
-  printf '%s' "$pm2_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write(p?[p.pid||"",p.pm2_env?.status||"",p.pm2_env?.pm_cwd||""].join("|"):"||")})'
+  printf '%s' "$pm2_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");const out=p?[p.pid||"",p.pm2_env?.status||"",p.pm2_env?.pm_cwd||""].join("|"):"||";process.stdout.write(out+"\n")})'
 )
+printf 'POST_DEPLOY_PM2_PID=%s\n' "$post_pid"
+printf 'POST_DEPLOY_PM2_STATUS=%s\n' "$post_status"
+printf 'POST_DEPLOY_PM2_CWD=%s\n' "$post_cwd"
 test -n "$post_pid"
 test "$post_status" = online
 post_runtime_app="${post_cwd:-$APP}"
@@ -180,7 +184,6 @@ printf 'POST_DEPLOY_SHA=%s\n' "$(git rev-parse HEAD)"
 printf 'POST_DEPLOY_APP_BUILD_ID=%s\n' "$(cat "$APP/.next/BUILD_ID")"
 printf 'POST_DEPLOY_RUNTIME_BUILD_ID=%s\n' "$(cat "$RUNTIME_APP/.next/BUILD_ID")"
 printf 'POST_DEPLOY_RUNTIME_APP=%s\n' "$RUNTIME_APP"
-printf 'POST_DEPLOY_PM2_STATUS=%s\n' "$post_status"
 printf 'LOGIN_HTTP=%s\n' "$login"
 printf 'UNSUBSCRIBE_GET_NO_TOKEN_HTTP=%s\n' "$get_code"
 printf 'UNSUBSCRIBE_POST_NO_TOKEN_HTTP=%s\n' "$post_code"
