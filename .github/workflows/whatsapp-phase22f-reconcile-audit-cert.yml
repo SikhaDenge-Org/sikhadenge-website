@@ -1,0 +1,85 @@
+name: WhatsApp Phase22F Reconcile Audit Certification
+
+on:
+  push:
+    branches:
+      - audit/whatsapp-phase22f-prod-reconcile-cert-20260923
+    paths:
+      - .github/workflows/whatsapp-phase22f-reconcile-audit-cert.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-phase22f-reconcile-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BASE_PRODUCTION_SHA: 60cd180e7a728b4ac546777605b4257504df483a
+      REVIEWED_RECONCILE_SHA: 4b12c4923ec1d1b89e24588cb252b310b84e171b
+    steps:
+      - name: Checkout audit branch with history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove audit commit is layered only on reviewed reconcile head
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD^)" = "$REVIEWED_RECONCILE_SHA"
+          audit_delta="$(git diff --name-only "$REVIEWED_RECONCILE_SHA" HEAD | sort)"
+          test "$audit_delta" = '.github/workflows/whatsapp-phase22f-reconcile-audit-cert.yml'
+          printf 'PHASE22F_AUDIT_PARENT_MATCH=true\n'
+          printf 'PHASE22F_AUDIT_RUNTIME_DELTA=false\n'
+
+      - name: Prove exact production-to-reconcile allowlist
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git merge-base --is-ancestor "$BASE_PRODUCTION_SHA" "$REVIEWED_RECONCILE_SHA"
+          actual="$(git diff --name-only "$BASE_PRODUCTION_SHA" "$REVIEWED_RECONCILE_SHA" | sort)"
+          expected="$(printf '%s\n%s\n%s\n%s\n%s\n' \
+            '.github/workflows/whatsapp-agent-phase22f-current-production-reconcile.yml' \
+            'apps/whatsapp-agent-dashboard/ecosystem.automation-scheduler.cjs' \
+            'apps/whatsapp-agent-dashboard/lib/outbound/outbound-service.ts' \
+            'apps/whatsapp-agent-dashboard/modules/automations/application/whatsapp-automation-scheduler.ts' \
+            'apps/whatsapp-agent-dashboard/tests/whatsapp-automation-scheduler-certification.test.ts' | sort)"
+          printf 'PHASE22F_REVIEWED_DIFF_BEGIN\n%s\nPHASE22F_REVIEWED_DIFF_END\n' "$actual"
+          test "$actual" = "$expected"
+          printf 'PHASE22F_EXACT_ALLOWLIST=true\n'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install WhatsApp dashboard dependencies
+        working-directory: apps/whatsapp-agent-dashboard
+        run: npm install --include=dev --no-audit --no-fund
+
+      - name: Validate and generate Prisma client
+        working-directory: apps/whatsapp-agent-dashboard
+        env:
+          DATABASE_URL: postgresql://ci_user:ci_password@localhost:5432/phase22f_ci?schema=public
+        run: |
+          npx prisma validate
+          npx prisma generate
+
+      - name: Run Phase22F scheduler certification
+        working-directory: apps/whatsapp-agent-dashboard
+        run: npm run test:whatsapp-automation-scheduler
+
+      - name: Run TypeScript typecheck
+        working-directory: apps/whatsapp-agent-dashboard
+        run: npm run typecheck
+
+      - name: Emit certification result
+        run: |
+          printf 'PHASE22F_PROVIDER_WRITE_REQUESTED=false\n'
+          printf 'PHASE22F_EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          printf 'WHATSAPP_PHASE22F_RECONCILE_AUDIT_CERTIFICATION=PASS\n'
