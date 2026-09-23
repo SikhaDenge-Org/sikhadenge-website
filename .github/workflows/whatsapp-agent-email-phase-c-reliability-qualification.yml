@@ -11,13 +11,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: email-phase-c-readonly-production
+  group: whatsapp-agent-production
   cancel-in-progress: false
 
 jobs:
   reliability-qualification:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment: whatsapp-agent-production
     env:
       SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
       SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
