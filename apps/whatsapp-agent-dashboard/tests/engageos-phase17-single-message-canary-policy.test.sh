@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 SCRIPT="scripts/engageos-phase17-single-message-canary.ts"
+REFRESH_SCRIPT="scripts/engageos-phase17-w6-canary-queue-refresh.ts"
 
 test -f "$SCRIPT"
 
@@ -42,4 +43,21 @@ if grep -Eq 'writeFile|appendFile|\.env.*=' "$SCRIPT"; then
   exit 1
 fi
 
+test -f "$REFRESH_SCRIPT"
+grep -Fq 'queueOutboundMessage' "$REFRESH_SCRIPT"
+grep -Fq 'W6_CANARY_SUPERSEDED' "$REFRESH_SCRIPT"
+grep -Fq 'whatsAppMessageStatusEvent.create' "$REFRESH_SCRIPT"
+grep -Fq 'MessageStatus.FAILED' "$REFRESH_SCRIPT"
+grep -Fq 'REFRESH_ONE_STALE_W5_INTERNAL_CANARY_QUEUE' "$REFRESH_SCRIPT"
+grep -Fq 'W6_REFRESH_EXTERNAL_WHATSAPP_WRITE_SENT=false' "$REFRESH_SCRIPT"
+if grep -Eq 'dispatchOutboundMessage|dispatchQueuedOutboundBatch|sendMetaWhatsAppMessage|uploadMetaWhatsAppMedia' "$REFRESH_SCRIPT"; then
+  echo 'FAIL: W6 queue refresh must never contain provider dispatch code' >&2
+  exit 1
+fi
+if grep -Eq 'writeFile|appendFile|\.env.*=' "$REFRESH_SCRIPT"; then
+  echo 'FAIL: W6 queue refresh must not mutate environment files' >&2
+  exit 1
+fi
+
 printf 'EngageOS Phase17 namespace-bound single-message canary policy: PASS\n'
+printf 'EngageOS Phase17 W6 no-provider queue-refresh policy: PASS\n'
