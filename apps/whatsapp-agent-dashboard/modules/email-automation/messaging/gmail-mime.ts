@@ -21,6 +21,21 @@ function address(value: EmailAddress): string {
 function lines(value: string): string { return value.replace(/\r?\n/g, "\r\n"); }
 function boundary(prefix: string, key: string): string { return `${prefix}-${Buffer.from(key).toString("hex").slice(0,24)}`; }
 
+function oneClickUnsubscribeHeaders(request: EmailSendRequest): string[] {
+  const raw = request.rendered.variables.unsubscribe_url?.trim();
+  if (!raw) return [];
+  const value = safeHeader(raw);
+  let url: URL;
+  try { url = new URL(value); }
+  catch { throw new Error("Marketing unsubscribe URL is invalid."); }
+  if (!["http:", "https:"].includes(url.protocol)) throw new Error("Marketing unsubscribe URL must use HTTP(S).");
+  if (process.env.NODE_ENV === "production" && url.protocol !== "https:") throw new Error("Marketing unsubscribe URL must use HTTPS in production.");
+  return [
+    `List-Unsubscribe: <${value}>`,
+    "List-Unsubscribe-Post: List-Unsubscribe=One-Click",
+  ];
+}
+
 export function buildGmailMime(request: EmailSendRequest, from: EmailAddress): string {
   const mixed = boundary("mixed", request.idempotencyKey);
   const alt = boundary("alt", request.idempotencyKey);
@@ -30,6 +45,7 @@ export function buildGmailMime(request: EmailSendRequest, from: EmailAddress): s
     ...(request.cc?.length ? [`Cc: ${request.cc.map(address).join(", ")}`] : []),
     ...(request.bcc?.length ? [`Bcc: ${request.bcc.map(address).join(", ")}`] : []),
     ...(request.replyTo ? [`Reply-To: ${address(request.replyTo)}`] : []),
+    ...oneClickUnsubscribeHeaders(request),
     `Subject: ${encodedWord(request.rendered.subject)}`,
     "MIME-Version: 1.0",
     `Content-Type: multipart/mixed; boundary="${mixed}"`,
