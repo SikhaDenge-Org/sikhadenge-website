@@ -1,0 +1,57 @@
+name: Email Phase D Deliverability CI
+
+on:
+  pull_request:
+    paths:
+      - "apps/whatsapp-agent-dashboard/.env.example"
+      - "apps/whatsapp-agent-dashboard/modules/email-automation/application/deliverability-guardrails.ts"
+      - "apps/whatsapp-agent-dashboard/modules/email-automation/application/automation-send-policy.ts"
+      - "apps/whatsapp-agent-dashboard/modules/email-automation/tests/deliverability-guardrails.test.ts"
+      - "apps/whatsapp-agent-dashboard/modules/email-automation/docs/phase-d-deliverability-guardrails.md"
+      - ".github/workflows/email-phase-d-deliverability-ci.yml"
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - "apps/whatsapp-agent-dashboard/.env.example"
+      - "apps/whatsapp-agent-dashboard/modules/email-automation/application/deliverability-guardrails.ts"
+      - "apps/whatsapp-agent-dashboard/modules/email-automation/application/automation-send-policy.ts"
+      - "apps/whatsapp-agent-dashboard/modules/email-automation/tests/deliverability-guardrails.test.ts"
+      - "apps/whatsapp-agent-dashboard/modules/email-automation/docs/phase-d-deliverability-guardrails.md"
+      - ".github/workflows/email-phase-d-deliverability-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: email-phase-d-deliverability-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deliverability-guardrails:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: apps/whatsapp-agent-dashboard
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run Phase D deliverability guardrail contracts
+        run: npx tsx modules/email-automation/tests/deliverability-guardrails.test.ts
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Typecheck application
+        run: npm run typecheck
