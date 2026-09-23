@@ -15,7 +15,12 @@ type AutomationEvent = {
   createdAt: string;
   updatedAt: string;
 };
-type QueuePayload = { events: AutomationEvent[]; automationEnabled: boolean; runtimeMode: string };
+type QueuePayload = {
+  events: AutomationEvent[];
+  automationEnabled: boolean;
+  runtimeMode: string;
+  manualRetryMaxAttempts: number;
+};
 
 async function readJson<T>(response: Response): Promise<T> {
   const payload = (await response.json()) as T & { error?: string };
@@ -35,6 +40,7 @@ export default function EmailAutomationQueue() {
   const [events, setEvents] = useState<AutomationEvent[]>([]);
   const [automationEnabled, setAutomationEnabled] = useState(false);
   const [runtimeMode, setRuntimeMode] = useState("DISABLED");
+  const [manualRetryMaxAttempts, setManualRetryMaxAttempts] = useState(20);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -46,6 +52,7 @@ export default function EmailAutomationQueue() {
     setEvents(payload.events);
     setAutomationEnabled(payload.automationEnabled);
     setRuntimeMode(payload.runtimeMode);
+    setManualRetryMaxAttempts(payload.manualRetryMaxAttempts);
   }, []);
 
   useEffect(() => {
@@ -143,14 +150,14 @@ export default function EmailAutomationQueue() {
         <div className={styles.cardHead}><div><h3>Runtime Controls</h3><p>Current protected runtime state</p></div></div>
         <div className={styles.controlRow}><span><b>Automation Engine</b><small>Process CRM email events</small></span><em data-on={automationEnabled}>{automationEnabled?"ON":"OFF"}</em></div>
         <div className={styles.controlRow}><span><b>Runtime Mode</b><small>Delivery policy</small></span><strong>{runtimeMode}</strong></div>
-        <div className={styles.controlRow}><span><b>Retry Failed Emails</b><small>Manual safe requeue available</small></span><em data-on>ON</em></div>
+        <div className={styles.controlRow}><span><b>Retry Failed Emails</b><small>Manual safe requeue up to {manualRetryMaxAttempts} attempts</small></span><em data-on>ON</em></div>
       </aside>
     </div>
 
     <div className={styles.middleGrid}>
       <section className={styles.eventsCard}>
         <div className={styles.cardHead}><div><h3>Recent Events</h3><p>Live event history from automation engine</p></div></div>
-        <div className={styles.eventList}>{events.slice(0,7).map(event=><article key={event.id}><span className={styles.eventIcon} data-status={event.status.toLowerCase()}>{event.status==="FAILED"?"!":event.status==="PROCESSED"?"✓":"↻"}</span><div><b>{event.trigger}</b><small>{event.contactId?`Contact ${event.contactId}`:event.submissionId?`Submission ${event.submissionId}`:event.status}</small></div><time>{ageLabel(event.createdAt)}</time>{event.status==="FAILED"?<button disabled={busy!==""||event.attemptCount>=5} onClick={()=>void requeue(event.id)}>Retry</button>:null}</article>)}{!events.length?<p className={styles.empty}>No automation events yet.</p>:null}</div>
+        <div className={styles.eventList}>{events.slice(0,7).map(event=><article key={event.id}><span className={styles.eventIcon} data-status={event.status.toLowerCase()}>{event.status==="FAILED"?"!":event.status==="PROCESSED"?"✓":"↻"}</span><div><b>{event.trigger}</b><small>{event.contactId?`Contact ${event.contactId}`:event.submissionId?`Submission ${event.submissionId}`:event.status}</small></div><time>{ageLabel(event.createdAt)}</time>{event.status==="FAILED"?<button disabled={busy!==""||event.attemptCount>=manualRetryMaxAttempts} onClick={()=>void requeue(event.id)}>Retry</button>:null}</article>)}{!events.length?<p className={styles.empty}>No automation events yet.</p>:null}</div>
       </section>
 
       <section className={styles.recoveryCard}>
