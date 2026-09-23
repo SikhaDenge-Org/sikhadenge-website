@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { isChannelType } from "@/modules/channels/core/contracts/channel";
 
 import { missingEmailPhaseDependencies } from "../application/phase-manifest";
 import { resolveEmailSender } from "../domain/sender-resolution";
-import type { EmailSenderIdentity } from "../domain/contracts";
+import type { EmailSendRequest, EmailSenderIdentity } from "../domain/contracts";
 import {
   decryptEmailCredential,
   encryptEmailCredential,
 } from "../infrastructure/credential-crypto";
+import { buildGmailMime } from "../messaging/gmail-mime";
 import {
   createGmailOAuthState,
   verifyGmailOAuthState,
@@ -211,6 +213,43 @@ function testOAuthStateSecurity() {
   );
 }
 
+function testRfc8058OneClickUnsubscribeContract() {
+  const request: EmailSendRequest = {
+    workspaceId: "workspace-1",
+    connectionId: "connection-1",
+    senderIdentityId: "sender-1",
+    from: { email: "support@sikhadenge.in", name: "SikhaDenge" },
+    to: [{ email: "learner@example.com", name: "Learner" }],
+    rendered: {
+      subject: "Marketing update",
+      html: "<p>Update</p>",
+      text: "Update",
+      variables: {
+        unsubscribe_url: "https://email.example.com/api/email/unsubscribe?t=signed-token",
+      },
+    },
+    idempotencyKey: "one-click-test",
+  };
+
+  const marketingMime = buildGmailMime(request, request.from);
+  assert.match(marketingMime, /List-Unsubscribe: <https:\/\/email\.example\.com\/api\/email\/unsubscribe\?t=signed-token>/);
+  assert.match(marketingMime, /List-Unsubscribe-Post: List-Unsubscribe=One-Click/);
+
+  const transactionalMime = buildGmailMime({
+    ...request,
+    rendered: { ...request.rendered, variables: {} },
+  }, request.from);
+  assert.doesNotMatch(transactionalMime, /List-Unsubscribe:/);
+  assert.doesNotMatch(transactionalMime, /List-Unsubscribe-Post:/);
+
+  const routeSource = readFileSync("app/api/email/unsubscribe/route.ts", "utf8");
+  assert.match(routeSource, /export async function POST/);
+  assert.match(routeSource, /application\/x-www-form-urlencoded/);
+  assert.match(routeSource, /List-Unsubscribe/);
+  assert.match(routeSource, /One-Click/);
+  assert.match(routeSource, /status: 204/);
+}
+
 testSenderPrecedence();
 testMultipleWorkspaceDefaultsFailClosed();
 testUnverifiedOverrideFailsClosed();
@@ -220,5 +259,6 @@ testGmailAliasNormalization();
 testEmailIsFirstClassChannel();
 testCredentialEncryption();
 testOAuthStateSecurity();
+testRfc8058OneClickUnsubscribeContract();
 
 console.log("Email automation E0/E1 foundation contracts: PASS");
