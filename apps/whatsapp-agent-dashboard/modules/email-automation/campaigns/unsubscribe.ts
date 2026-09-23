@@ -13,6 +13,12 @@ function sig(body: string, key = secret()) {
   return createHmac("sha256", key).update(body).digest("base64url");
 }
 
+function purposeList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string").map((item) => item.trim().toUpperCase())
+    : [];
+}
+
 export function createEmailUnsubscribeToken(input: { workspaceId: string; contactId: string; email: string; expiresAt?: Date }) {
   const payload: Payload = {
     workspaceId: input.workspaceId,
@@ -60,7 +66,7 @@ export async function applyEmailMarketingUnsubscribe(token: string) {
 
   const now = new Date();
   const result = await prisma.$transaction(async (tx) => {
-    const [latestConsent, activeSuppression] = await Promise.all([
+    const [latestConsent, activeSuppressions] = await Promise.all([
       tx.engageCustomerConsentEvent.findFirst({
         where: {
           workspaceId: payload.workspaceId,
@@ -71,19 +77,23 @@ export async function applyEmailMarketingUnsubscribe(token: string) {
         orderBy: { occurredAt: "desc" },
         select: { state: true },
       }),
-      tx.engageCustomerSuppression.findFirst({
+      tx.engageCustomerSuppression.findMany({
         where: {
           workspaceId: payload.workspaceId,
           customerRef: payload.contactId,
           channel: "EMAIL",
-          purposes: { array_contains: ["MARKETING"] },
           startsAt: { lte: now },
           revokedAt: null,
           OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
         },
-        select: { id: true },
+        select: { id: true, purposes: true },
       }),
     ]);
+
+    const activeMarketingSuppression = activeSuppressions.some((row) => {
+      const purposes = purposeList(row.purposes);
+      return purposes.includes("MARKETING") || purposes.includes("ALL");
+    });
 
     let consentCreated = false;
     let suppressionCreated = false;
@@ -105,7 +115,7 @@ export async function applyEmailMarketingUnsubscribe(token: string) {
       consentCreated = true;
     }
 
-    if (!activeSuppression) {
+    if (!activeMarketingSuppression) {
       await tx.engageCustomerSuppression.create({
         data: {
           workspaceId: payload.workspaceId,
