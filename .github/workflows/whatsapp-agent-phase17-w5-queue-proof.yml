@@ -132,8 +132,8 @@ jobs:
             LEFT JOIN LATERAL (
               SELECT wc.id
               FROM "WhatsAppConversation" wc
-              JOIN "WhatsAppConversationTag" wct ON wct."conversationId"=wc.id
-              JOIN "WhatsAppTag" wt ON wt.id=wct."tagId"
+              JOIN "ConversationTagLink" wct ON wct."conversationId"=wc.id
+              JOIN "ConversationTag" wt ON wt.id=wct."tagId"
               WHERE wc."contactId"=c.id
                 AND lower(coalesce(wc.source,'whatsapp'))='whatsapp'
                 AND wt.name='CANARY_INTERNAL_TEST'
