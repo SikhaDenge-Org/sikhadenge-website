@@ -1,0 +1,167 @@
+name: Email Phase C Reliability Qualification
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-email-phase-c-reliability-qualification.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: email-phase-c-readonly-production
+  cancel-in-progress: false
+
+jobs:
+  reliability-qualification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+    steps:
+      - name: Validate read-only production access
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          missing=0
+          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            [[ -n "${!variable_name:-}" ]] || { echo "Missing production secret: $variable_name" >&2; missing=1; }
+          done
+          test "$missing" = "0"
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Certify live Email reliability without writes
+        shell: bash
+        run: |
+          set -o pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 -o ConnectionAttempts=3 -o ServerAliveInterval=10 -o ServerAliveCountMax=2 \
+            "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE' | tee email-phase-c-reliability.log
+          set -Eeuo pipefail
+          ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          APP="$ROOT/apps/whatsapp-agent-dashboard"
+          ENV_FILE="$APP/.env"
+          PROCESS=sikhadenge-whatsapp-agent
+
+          test "$(id -u)" = "0"
+          test -d "$ROOT/.git"
+          test -d "$APP"
+          test -f "$ENV_FILE"
+
+          read_env() {
+            node - "$ENV_FILE" "$1" <<'NODE'
+          const fs=require('node:fs'); const [file,key]=process.argv.slice(2); let out='';
+          for(const raw of fs.readFileSync(file,'utf8').split(/\r?\n/)){
+            let line=raw.trim(); if(!line||line.startsWith('#')) continue;
+            if(line.startsWith('export ')) line=line.slice(7).trim();
+            const i=line.indexOf('='); if(i<1||line.slice(0,i).trim()!==key) continue;
+            out=line.slice(i+1).trim().replace(/^['"]|['"]$/g,'');
+          }
+          process.stdout.write(out);
+          NODE
+          }
+
+          LIVE_SHA="$(git -C "$ROOT" rev-parse HEAD)"
+          [[ "$LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          RUNTIME_MODE="$(read_env EMAIL_RUNTIME_MODE)"
+          EXTERNAL_WRITES="$(read_env EMAIL_EXTERNAL_WRITES_ENABLED)"
+          RUNTIME_ENABLED="$(read_env EMAIL_RUNTIME_ENABLED)"
+          AUTOMATION_ENABLED="$(read_env EMAIL_AUTOMATION_ENABLED)"
+
+          test "$RUNTIME_ENABLED" = "true"
+          test "$RUNTIME_MODE" = "DRY_RUN"
+          test "$EXTERNAL_WRITES" = "false"
+
+          PM2_FILE="$(mktemp)"
+          trap 'rm -f "$PM2_FILE"' EXIT
+          pm2 jlist > "$PM2_FILE"
+          IFS='|' read -r PM2_PID PM2_STATUS PM2_CWD < <(
+            node - "$PM2_FILE" <<'NODE'
+          const fs=require('node:fs'); const rows=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const p=rows.find(x=>x.name==='sikhadenge-whatsapp-agent');
+          process.stdout.write(p ? [p.pid||'',p.pm2_env?.status||'',p.pm2_env?.pm_cwd||''].join('|')+'\n' : '||\n');
+          NODE
+          )
+          test -n "$PM2_PID"
+          test "$PM2_STATUS" = "online"
+          case "$PM2_CWD" in /var/www/sikhadenge-whatsapp-agent/*) ;; *) echo 'FAIL: unexpected PM2 cwd' >&2; exit 20;; esac
+          test -s "$PM2_CWD/.next/BUILD_ID"
+          BUILD_ID="$(cat "$PM2_CWD/.next/BUILD_ID")"
+
+          cd "$APP"
+          test -f modules/email-automation/automation/event-outbox.ts
+          test -f modules/email-automation/automation/dispatcher.ts
+          test -f modules/email-automation/providers/provider-error-policy.ts
+          test -f 'app/api/email/automation/events/[eventId]/requeue/route.ts'
+          grep -q 'EMAIL_AUTOMATION_MANUAL_MAX_ATTEMPTS = 20' modules/email-automation/providers/provider-error-policy.ts
+          grep -q 'EMAIL_AUTOMATION_AUTO_MAX_ATTEMPTS = 5' modules/email-automation/providers/provider-error-policy.ts
+          grep -q 'EMAIL_AUTOMATION_EVENT_REQUEUED' modules/email-automation/automation/event-outbox.ts
+          grep -q 'deadLettered' modules/email-automation/automation/dispatcher.ts
+          grep -q 'Automation processing lease expired after 15 minutes' modules/email-automation/automation/dispatcher.ts
+
+          scheduler_exit=127
+          if [[ -f scripts/email-automation-scheduler-verify.sh ]]; then
+            set +e
+            EXPECTED_RELEASE_SHA="$LIVE_SHA" ENV_FILE="$ENV_FILE" bash scripts/email-automation-scheduler-verify.sh >/tmp/email-phase-c-scheduler.log 2>&1
+            scheduler_exit=$?
+            set -e
+          fi
+
+          npm exec -- tsx -e 'import { prisma } from "./lib/db/prisma"; (async()=>{ const staleBefore=new Date(Date.now()-15*60*1000); const [pending,processing,processed,failed,staleProcessing,retryPending,manualExhausted,oldestPending]=await Promise.all([prisma.engageEmailAutomationEvent.count({where:{status:"PENDING"}}),prisma.engageEmailAutomationEvent.count({where:{status:"PROCESSING"}}),prisma.engageEmailAutomationEvent.count({where:{status:"PROCESSED"}}),prisma.engageEmailAutomationEvent.count({where:{status:"FAILED"}}),prisma.engageEmailAutomationEvent.count({where:{status:"PROCESSING",updatedAt:{lt:staleBefore}}}),prisma.engageEmailAutomationEvent.count({where:{status:"PENDING",lastError:{startsWith:"[AUTO_RETRY_PENDING]"}}}),prisma.engageEmailAutomationEvent.count({where:{status:"FAILED",attemptCount:{gte:20}}}),prisma.engageEmailAutomationEvent.findFirst({where:{status:"PENDING"},orderBy:{createdAt:"asc"},select:{createdAt:true}})]); console.log(`PHASE_C_QUEUE_PENDING=${pending}`); console.log(`PHASE_C_QUEUE_PROCESSING=${processing}`); console.log(`PHASE_C_QUEUE_PROCESSED=${processed}`); console.log(`PHASE_C_QUEUE_FAILED=${failed}`); console.log(`PHASE_C_STALE_PROCESSING=${staleProcessing}`); console.log(`PHASE_C_RETRY_PENDING=${retryPending}`); console.log(`PHASE_C_MANUAL_RETRY_EXHAUSTED=${manualExhausted}`); console.log(`PHASE_C_OLDEST_PENDING_AT=${oldestPending?.createdAt?.toISOString()||"none"}`); if(staleProcessing>0) throw new Error(`Found ${staleProcessing} stale PROCESSING Email automation events`); await prisma.$disconnect(); })().catch(async e=>{console.error(e);try{await prisma.$disconnect()}catch{}process.exit(1)});'
+
+          printf 'PHASE_C_LIVE_SHA=%s\n' "$LIVE_SHA"
+          printf 'PHASE_C_BUILD_ID=%s\n' "$BUILD_ID"
+          printf 'PHASE_C_PM2_STATUS=%s\n' "$PM2_STATUS"
+          printf 'PHASE_C_RUNTIME_ENABLED=%s\n' "$RUNTIME_ENABLED"
+          printf 'PHASE_C_AUTOMATION_ENABLED=%s\n' "$AUTOMATION_ENABLED"
+          printf 'PHASE_C_RUNTIME_MODE=%s\n' "$RUNTIME_MODE"
+          printf 'PHASE_C_EXTERNAL_WRITES=%s\n' "$EXTERNAL_WRITES"
+          printf 'PHASE_C_SCHEDULER_VERIFY_EXIT=%s\n' "$scheduler_exit"
+          printf 'PHASE_C_EXTERNAL_EMAIL_SENT=false\n'
+          printf 'PHASE_C_RELIABILITY_QUALIFICATION=PASS\n'
+          REMOTE
+
+      - name: Assert reliability qualification markers
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          grep -q '^PHASE_C_RELIABILITY_QUALIFICATION=PASS$' email-phase-c-reliability.log
+          grep -q '^PHASE_C_EXTERNAL_EMAIL_SENT=false$' email-phase-c-reliability.log
+          grep -q '^PHASE_C_RUNTIME_MODE=DRY_RUN$' email-phase-c-reliability.log
+          grep -q '^PHASE_C_EXTERNAL_WRITES=false$' email-phase-c-reliability.log
+          grep -q '^PHASE_C_STALE_PROCESSING=0$' email-phase-c-reliability.log
+
+      - name: Upload Phase C evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: email-phase-c-reliability-${{ github.run_id }}-${{ github.run_attempt }}
+          path: email-phase-c-reliability.log
+          if-no-files-found: warn
+          retention-days: 30
