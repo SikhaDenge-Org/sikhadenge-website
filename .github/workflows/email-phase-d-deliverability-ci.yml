@@ -8,6 +8,10 @@ on:
       - "apps/whatsapp-agent-dashboard/modules/email-automation/application/automation-send-policy.ts"
       - "apps/whatsapp-agent-dashboard/modules/email-automation/tests/deliverability-guardrails.test.ts"
       - "apps/whatsapp-agent-dashboard/modules/email-automation/docs/phase-d-deliverability-guardrails.md"
+      - "apps/whatsapp-agent-dashboard/scripts/email-automation-deliverability-preflight.ts"
+      - "apps/whatsapp-agent-dashboard/scripts/email-automation-production-preflight.sh"
+      - "apps/whatsapp-agent-dashboard/tests/email-automation-deliverability-preflight-policy.test.sh"
+      - "apps/whatsapp-agent-dashboard/tests/email-automation-production-preflight-policy.test.sh"
       - ".github/workflows/email-phase-d-deliverability-ci.yml"
   push:
     branches:
@@ -18,6 +22,10 @@ on:
       - "apps/whatsapp-agent-dashboard/modules/email-automation/application/automation-send-policy.ts"
       - "apps/whatsapp-agent-dashboard/modules/email-automation/tests/deliverability-guardrails.test.ts"
       - "apps/whatsapp-agent-dashboard/modules/email-automation/docs/phase-d-deliverability-guardrails.md"
+      - "apps/whatsapp-agent-dashboard/scripts/email-automation-deliverability-preflight.ts"
+      - "apps/whatsapp-agent-dashboard/scripts/email-automation-production-preflight.sh"
+      - "apps/whatsapp-agent-dashboard/tests/email-automation-deliverability-preflight-policy.test.sh"
+      - "apps/whatsapp-agent-dashboard/tests/email-automation-production-preflight-policy.test.sh"
       - ".github/workflows/email-phase-d-deliverability-ci.yml"
   workflow_dispatch:
 
@@ -49,6 +57,12 @@ jobs:
 
       - name: Run Phase D deliverability guardrail contracts
         run: npx tsx modules/email-automation/tests/deliverability-guardrails.test.ts
+
+      - name: Run scaled production deliverability preflight contracts
+        run: bash tests/email-automation-deliverability-preflight-policy.test.sh
+
+      - name: Run production preflight policy
+        run: bash tests/email-automation-production-preflight-policy.test.sh
 
       - name: Generate Prisma client
         run: npx prisma generate

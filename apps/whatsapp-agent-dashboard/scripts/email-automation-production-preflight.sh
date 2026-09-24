@@ -38,10 +38,11 @@ value_for() {
 printf 'EMAIL_AUTOMATION_PRODUCTION_PREFLIGHT_BEGIN\n'
 printf 'UTC_TIMESTAMP=%s\nEXPECTED_MODE=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$EXPECTED_MODE"
 [[ "$EXPECTED_MODE" == "DRY_RUN" || "$EXPECTED_MODE" == "LIMITED_COHORT" || "$EXPECTED_MODE" == "LIVE" ]] || fail "EMAIL_PREFLIGHT_EXPECTED_MODE must be DRY_RUN, LIMITED_COHORT, or LIVE"
-for cmd in git node curl pm2; do
+for cmd in git node npm curl pm2; do
   if command -v "$cmd" >/dev/null 2>&1; then pass "command available: $cmd"; else fail "required command missing: $cmd"; fi
 done
 [[ -f package.json && -f prisma/schema.prisma ]] || fail "run from apps/whatsapp-agent-dashboard"
+[[ -f scripts/email-automation-deliverability-preflight.ts ]] || fail "deliverability preflight CLI is missing"
 [[ -n "$EXPECTED_RELEASE_SHA" ]] || fail "EXPECTED_RELEASE_SHA is required"
 current_sha="$(git rev-parse HEAD 2>/dev/null || true)"
 printf 'CURRENT_GIT_SHA=%s\n' "$current_sha"
@@ -89,6 +90,22 @@ else
   [[ "$external_writes" == "true" || "$external_writes" == "1" ]] && pass "external email writes enabled for LIVE" || fail "EMAIL_EXTERNAL_WRITES_ENABLED must be true for LIVE"
   [[ "$runtime_mode" == "LIVE" ]] && pass "email runtime mode is LIVE" || fail "EMAIL_RUNTIME_MODE must equal LIVE"
 fi
+
+if [[ "$EXPECTED_MODE" == "LIMITED_COHORT" || "$EXPECTED_MODE" == "LIVE" ]]; then
+  if EMAIL_DELIVERABILITY_SPF_ALIGNED="$(value_for EMAIL_DELIVERABILITY_SPF_ALIGNED)" \
+    EMAIL_DELIVERABILITY_DKIM_ALIGNED="$(value_for EMAIL_DELIVERABILITY_DKIM_ALIGNED)" \
+    EMAIL_DELIVERABILITY_DMARC_ALIGNED="$(value_for EMAIL_DELIVERABILITY_DMARC_ALIGNED)" \
+    EMAIL_DELIVERABILITY_HARD_BOUNCE_RATE_PCT="$(value_for EMAIL_DELIVERABILITY_HARD_BOUNCE_RATE_PCT)" \
+    EMAIL_DELIVERABILITY_COMPLAINT_RATE_PCT="$(value_for EMAIL_DELIVERABILITY_COMPLAINT_RATE_PCT)" \
+    npm exec -- tsx scripts/email-automation-deliverability-preflight.ts "$EXPECTED_MODE"; then
+    pass "scaled-delivery deliverability guardrails qualified"
+  else
+    fail "scaled-delivery deliverability guardrails are not qualified"
+  fi
+else
+  pass "deliverability guardrails are intentionally not enforced for DRY_RUN"
+fi
+
 if (( ${#scheduler_token} >= 32 )); then
   health_file="$(mktemp)"
   http_code="$(curl -sS --max-time 10 -o "$health_file" -w '%{http_code}' -H "Authorization: Bearer $scheduler_token" "${SCHEDULER_BASE_URL%/}${SCHEDULER_PATH}" || true)"
