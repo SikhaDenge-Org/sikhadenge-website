@@ -1,0 +1,148 @@
+name: Email P1 Production-Lineage Alignment
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-email-p1-prod-align.yml"
+      - "apps/whatsapp-agent-dashboard/scripts/email-p1-prod-lineage-deploy.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  email-p1-prod-align:
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[email-p1-prod-align]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: whatsapp-agent-production
+    concurrency:
+      group: whatsapp-agent-production
+      cancel-in-progress: false
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_OLD_SHA: d43e634426c10020c6b3e670b6a5712b96902003
+      TARGET_REF: prod/email-p1-deliverability-current-lineage-20260924
+      TARGET_SHA: bbf7caee4b5406d1de7d7715fff0805ed3d65491
+      ALIGN_RUN_ID: email-p1-prod-align-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Checkout protected control plane
+        uses: actions/checkout@v4
+
+      - name: Validate production secrets and pinned target
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          missing=0
+          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            [[ -n "${!variable_name:-}" ]] || { echo "Missing production secret: $variable_name" >&2; missing=1; }
+          done
+          test "$missing" = "0"
+          [[ "$EXPECTED_OLD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$EXPECTED_OLD_SHA" = "d43e634426c10020c6b3e670b6a5712b96902003"
+          test "$TARGET_SHA" = "bbf7caee4b5406d1de7d7715fff0805ed3d65491"
+          test "$TARGET_REF" = "prod/email-p1-deliverability-current-lineage-20260924"
+          test -f apps/whatsapp-agent-dashboard/scripts/email-p1-prod-lineage-deploy.sh
+          bash -n apps/whatsapp-agent-dashboard/scripts/email-p1-prod-lineage-deploy.sh
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Upload audited P1 deploy script
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          remote_script="/tmp/email-p1-prod-lineage-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sh"
+          printf 'REMOTE_SCRIPT=%s\n' "$remote_script" >> "$GITHUB_ENV"
+          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
+            apps/whatsapp-agent-dashboard/scripts/email-p1-prod-lineage-deploy.sh \
+            "$SSH_USER@$SSH_HOST:$remote_script"
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
+            "$SSH_USER@$SSH_HOST" "chmod 700 '$remote_script'"
+
+      - name: Fast-forward Email P1 production lineage and certify runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_OLD_SHA='$EXPECTED_OLD_SHA' TARGET_REF='$TARGET_REF' TARGET_SHA='$TARGET_SHA' RUN_ID='$ALIGN_RUN_ID' bash '$REMOTE_SCRIPT'" \
+            | tee email-p1-prod-align.log
+
+      - name: Collect production P1 alignment evidence
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p email-p1-prod-align-evidence
+          for file_name in align-result.txt tests.log build.log deactivate.log git-fast-forward.log pm2-restart.log preflight.log activate.log verify.log deliverability-refresh.log; do
+            scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+              -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
+              "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${ALIGN_RUN_ID}/${file_name}" \
+              "email-p1-prod-align-evidence/${file_name}" >/dev/null 2>&1 || true
+          done
+          if [[ -n "${REMOTE_SCRIPT:-}" ]]; then
+            ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+              -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
+              "$SSH_USER@$SSH_HOST" "rm -f '$REMOTE_SCRIPT'" >/dev/null 2>&1 || true
+          fi
+          chmod -R go-rwx email-p1-prod-align-evidence 2>/dev/null || true
+
+      - name: Assert fail-closed P1 production evidence
+        if: success()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          result=email-p1-prod-align-evidence/align-result.txt
+          test -s "$result"
+          grep -Fxq 'STATUS=PASS' "$result"
+          grep -Fxq "TARGET_SHA=$TARGET_SHA" "$result"
+          grep -Fxq 'PM2_STATUS=online' "$result"
+          grep -Fxq 'RUNTIME_MODE=DRY_RUN' "$result"
+          grep -Fxq 'EXTERNAL_WRITES=false' "$result"
+          grep -Fxq 'SCHEDULER_ACTIVE=true' "$result"
+          grep -Fxq 'TRACKED_DIRTY_AFTER=0' "$result"
+          grep -Fxq 'LOGIN_PUBLIC_HTTP=200' "$result"
+          grep -Eq '^DELIVERABILITY_CONNECTIONS_SCANNED=[1-9][0-9]*$' "$result"
+          grep -Eq '^DELIVERABILITY_DOMAINS=[1-9][0-9]*$' "$result"
+          grep -Fxq 'COMPLAINT_SOURCE_UNAVAILABLE=true' "$result"
+          grep -Fxq 'SCALED_DELIVERY_ENABLED=false' "$result"
+          echo 'EMAIL_P1_PRODUCTION_ALIGNMENT_EVIDENCE=PASS'
+
+      - name: Upload P1 production alignment artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: email-p1-prod-align-${{ env.ALIGN_RUN_ID }}
+          path: |
+            email-p1-prod-align.log
+            email-p1-prod-align-evidence
+          if-no-files-found: warn
+          retention-days: 14
