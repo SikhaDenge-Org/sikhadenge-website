@@ -1,0 +1,71 @@
+name: Email P0 Unblock Stale Production Run
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/email-p0-unblock-stale-production-run.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: email-p0-stale-run-unblock-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  cancel-stale-waiting-run:
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[email-p0-unblock]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Cancel only the known stale waiting Email inbound run
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const staleRunId = 35882522744;
+            const allowed = new Set(['waiting', 'pending', 'queued', 'requested']);
+
+            const before = await github.rest.actions.getWorkflowRun({ owner, repo, run_id: staleRunId });
+            core.info(`STALE_RUN_ID=${staleRunId}`);
+            core.info(`STALE_RUN_STATUS_BEFORE=${before.data.status}`);
+            core.info(`STALE_RUN_CONCLUSION_BEFORE=${before.data.conclusion ?? 'none'}`);
+
+            if (before.data.status === 'completed') {
+              core.info('STALE_RUN_ALREADY_COMPLETED=true');
+              return;
+            }
+            if (!allowed.has(before.data.status)) {
+              core.setFailed(`Refusing to cancel run ${staleRunId} from unsafe status ${before.data.status}.`);
+              return;
+            }
+
+            const jobs = await github.rest.actions.listJobsForWorkflowRun({ owner, repo, run_id: staleRunId, per_page: 100 });
+            const unsafeJob = jobs.data.jobs.find(job => !allowed.has(job.status) && job.status !== 'completed');
+            if (unsafeJob) {
+              core.setFailed(`Refusing to cancel: job ${unsafeJob.id} is ${unsafeJob.status}.`);
+              return;
+            }
+
+            await github.rest.actions.cancelWorkflowRun({ owner, repo, run_id: staleRunId });
+            core.info('STALE_RUN_CANCEL_REQUESTED=true');
+
+            for (let attempt = 1; attempt <= 12; attempt++) {
+              await new Promise(resolve => setTimeout(resolve, 5000));
+              const current = await github.rest.actions.getWorkflowRun({ owner, repo, run_id: staleRunId });
+              core.info(`STALE_RUN_POLL_${attempt}=${current.data.status}/${current.data.conclusion ?? 'none'}`);
+              if (current.data.status === 'completed') {
+                if (current.data.conclusion !== 'cancelled') {
+                  core.setFailed(`Stale run completed as ${current.data.conclusion}, expected cancelled.`);
+                  return;
+                }
+                core.info('EMAIL_P0_STALE_PRODUCTION_RUN_UNBLOCK=PASS');
+                return;
+              }
+            }
+            core.setFailed('Stale run did not reach cancelled state within the bounded verification window.');
