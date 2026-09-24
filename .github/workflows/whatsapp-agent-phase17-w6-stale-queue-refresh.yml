@@ -7,6 +7,7 @@ on:
     paths:
       - ".github/workflows/whatsapp-agent-phase17-w6-stale-queue-refresh.yml"
       - "apps/whatsapp-agent-dashboard/scripts/engageos-phase17-w6-canary-queue-refresh.ts"
+  workflow_dispatch:
 
 permissions:
   contents: read
