@@ -57,7 +57,7 @@ function testStaleEvidenceFailsClosed() {
   const decision = evaluateEmailDeliverabilityGuardrails({
     mode: "LIMITED_COHORT",
     snapshot: { ...healthy, checkedAt: "2026-09-22T10:00:00.000Z" },
-    env: { EMAIL_DELIVERABILITY_EVIDENCE_MAX_AGE_MINUTES: "1440" },
+    env: { NODE_ENV: "test", EMAIL_DELIVERABILITY_EVIDENCE_MAX_AGE_MINUTES: "1440" },
     now,
   });
   assert.equal(decision.allowed, false);
