@@ -98,6 +98,14 @@ const dryRun = assertAutomationEmailDispatchPolicy({
 });
 assert.deepEqual(dryRun, { mode: "DRY_RUN", externalRequestAllowed: false });
 
+Object.assign(process.env, {
+  EMAIL_DELIVERABILITY_SPF_ALIGNED: "true",
+  EMAIL_DELIVERABILITY_DKIM_ALIGNED: "true",
+  EMAIL_DELIVERABILITY_DMARC_ALIGNED: "true",
+  EMAIL_DELIVERABILITY_HARD_BOUNCE_RATE_PCT: "0.4",
+  EMAIL_DELIVERABILITY_COMPLAINT_RATE_PCT: "0.02",
+});
+
 const limited = assertAutomationEmailDispatchPolicy({
   policy: {
     runtimeEnabled: true,

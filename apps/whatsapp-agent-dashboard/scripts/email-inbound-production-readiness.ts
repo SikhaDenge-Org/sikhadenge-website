@@ -25,6 +25,9 @@ async function main() {
 
   const inboundMode = (process.env.EMAIL_GMAIL_INBOUND_MODE?.trim().toUpperCase() || "POLLING");
   const inboundModeValid = inboundMode === "POLLING" || inboundMode === "WATCH";
+  const runtimeMode = process.env.EMAIL_RUNTIME_MODE?.trim() || "DISABLED";
+  const externalWritesEnabled = flag("EMAIL_EXTERNAL_WRITES_ENABLED");
+  const safeSendRuntime = runtimeMode === "DRY_RUN" && !externalWritesEnabled;
   const connections = await prisma.engageChannelConnection.findMany({
     where: { workspaceId: activationWorkspaceId, channel: "EMAIL", status: "CONNECTED" },
     select: { id: true, workspaceId: true, displayName: true, externalAccountId: true, capabilities: true },
@@ -126,10 +129,19 @@ async function main() {
     gmailInboundScopeGranted,
     gmailInboundReadAccess: gmailInboundAccess.ok,
     gmailHistoryReadAccess: gmailHistoryReadAccess.ok,
+    safeSendRuntime,
   };
   const baseChecksReady = checks.gmailClientId && checks.gmailClientSecret && checks.gmailOauthStateSecret && checks.credentialEncryptionKey && checks.schedulerToken;
-  const configReady = baseChecksReady && inboundModeValid && gmail.length > 0 && checks.activationAccountConnection && checks.gmailInboundScopeGranted && checks.gmailInboundReadAccess && checks.gmailHistoryReadAccess && (inboundMode !== "WATCH" || checks.pubSubTopic);
+  const configReady = baseChecksReady && safeSendRuntime && inboundModeValid && gmail.length > 0 && checks.activationAccountConnection && checks.gmailInboundScopeGranted && checks.gmailInboundReadAccess && checks.gmailHistoryReadAccess && (inboundMode !== "WATCH" || checks.pubSubTopic);
   const blockers = [
+    ...(!checks.gmailClientId ? ["GOOGLE_GMAIL_CLIENT_ID is missing."] : []),
+    ...(!checks.gmailClientSecret ? ["GOOGLE_GMAIL_CLIENT_SECRET is missing."] : []),
+    ...(!checks.gmailOauthStateSecret ? ["GOOGLE_GMAIL_OAUTH_STATE_SECRET must be at least 32 characters."] : []),
+    ...(!checks.credentialEncryptionKey ? ["EMAIL_CREDENTIAL_ENCRYPTION_KEY_B64 is missing."] : []),
+    ...(!checks.schedulerToken ? ["EMAIL_AUTOMATION_SCHEDULER_TOKEN must be at least 32 characters."] : []),
+    ...(!safeSendRuntime ? [`Outbound Email runtime must remain DRY_RUN with external writes disabled; found mode=${runtimeMode}, externalWritesEnabled=${externalWritesEnabled}.`] : []),
+    ...(!inboundModeValid ? [`EMAIL_GMAIL_INBOUND_MODE must be POLLING or WATCH; found ${inboundMode}.`] : []),
+    ...(gmail.length === 0 ? ["No connected Gmail Email connection exists in the activation workspace."] : []),
     ...(!checks.activationAccountConnection ? [`Expected exactly one connected Gmail connection for ${activationAccount}; found ${activationMatches.length}.`] : []),
     ...(!checks.gmailInboundScopeGranted ? [`Gmail OAuth token for ${activationAccount} is missing required scope ${GMAIL_INBOUND_SCOPES[0]}.`] : []),
     ...(!checks.gmailInboundReadAccess ? [`Gmail inbox read access is not authorized for ${activationAccount}. Use Enable Inbox Access and approve Google read-only Gmail access.`] : []),
@@ -144,8 +156,8 @@ async function main() {
     inboundMode,
     inboundModeValid,
     inboundSyncEnabled: flag("EMAIL_INBOUND_SYNC_ENABLED"),
-    runtimeMode: process.env.EMAIL_RUNTIME_MODE?.trim() || "DISABLED",
-    externalWritesEnabled: flag("EMAIL_EXTERNAL_WRITES_ENABLED"),
+    runtimeMode,
+    externalWritesEnabled,
     checks,
     gmailGrantedScopes,
     requiredInboundScopes: [...GMAIL_INBOUND_SCOPES],
