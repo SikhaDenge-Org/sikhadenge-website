@@ -11,6 +11,8 @@ function dnsError(code: string) {
   return error;
 }
 
+const testEnv: NodeJS.ProcessEnv = { NODE_ENV: "test" };
+
 function googleResolver(): EmailDeliverabilityDnsResolver {
   return {
     async resolveTxt(hostname) {
@@ -41,7 +43,7 @@ function microsoftResolver(): EmailDeliverabilityDnsResolver {
 }
 
 async function testGoogleWorkspaceQualification() {
-  const evidence = await qualifyEmailDomainAuthentication({ domain: "example.com", provider: "GOOGLE_GMAIL", resolver: googleResolver(), env: {} });
+  const evidence = await qualifyEmailDomainAuthentication({ domain: "example.com", provider: "GOOGLE_GMAIL", resolver: googleResolver(), env: testEnv });
   assert.equal(evidence.spfAligned, true);
   assert.equal(evidence.dkimAligned, true);
   assert.equal(evidence.dmarcAligned, true);
@@ -51,7 +53,7 @@ async function testGoogleWorkspaceQualification() {
 }
 
 async function testMicrosoft365Qualification() {
-  const evidence = await qualifyEmailDomainAuthentication({ domain: "example.org", provider: "MICROSOFT_365", resolver: microsoftResolver(), env: {} });
+  const evidence = await qualifyEmailDomainAuthentication({ domain: "example.org", provider: "MICROSOFT_365", resolver: microsoftResolver(), env: testEnv });
   assert.equal(evidence.spfAligned, true);
   assert.equal(evidence.dkimAligned, true);
   assert.equal(evidence.dmarcAligned, true);
@@ -64,7 +66,7 @@ async function testMissingAuthenticationFailsClosed() {
     async resolveTxt() { throw dnsError("ENOTFOUND"); },
     async resolveCname() { throw dnsError("ENOTFOUND"); },
   };
-  const evidence = await qualifyEmailDomainAuthentication({ domain: "missing.example", provider: "GOOGLE_GMAIL", resolver, env: {} });
+  const evidence = await qualifyEmailDomainAuthentication({ domain: "missing.example", provider: "GOOGLE_GMAIL", resolver, env: testEnv });
   assert.equal(evidence.spfAligned, false);
   assert.equal(evidence.dkimAligned, false);
   assert.equal(evidence.dmarcAligned, false);
@@ -83,7 +85,7 @@ async function testTransientDnsFailureStaysUnknown() {
     },
     async resolveCname() { throw dnsError("ENOTFOUND"); },
   };
-  const evidence = await qualifyEmailDomainAuthentication({ domain: "transient.example", provider: "GOOGLE_GMAIL", resolver, env: {} });
+  const evidence = await qualifyEmailDomainAuthentication({ domain: "transient.example", provider: "GOOGLE_GMAIL", resolver, env: testEnv });
   assert.equal(evidence.spfAligned, null);
   assert.equal(evidence.dkimAligned, true);
   assert.equal(evidence.dmarcAligned, true);
@@ -104,7 +106,7 @@ async function testSelectorOverrideIsExplicit() {
     domain: "custom.example",
     provider: "GOOGLE_GMAIL",
     resolver,
-    env: { EMAIL_DELIVERABILITY_DKIM_SELECTORS_GOOGLE_GMAIL: "custom" },
+    env: { NODE_ENV: "test", EMAIL_DELIVERABILITY_DKIM_SELECTORS_GOOGLE_GMAIL: "custom" },
   });
   assert.equal(evidence.dkimAligned, true);
   assert.deepEqual(evidence.selectorsChecked, ["custom"]);
