@@ -33,21 +33,23 @@ jobs:
           ]
           old_sha = 'EXPECTED_LIVE_SHA: 4b12c4923ec1d1b89e24588cb252b310b84e171b'
           new_sha = 'EXPECTED_LIVE_SHA: d43e634426c10020c6b3e670b6a5712b96902003'
-          old_dirty = '''          expected_dirty="$(printf '%s\\n%s\\n' \\
-            ' M apps/whatsapp-agent-dashboard/scripts/email-automation-production-internal-test.sh' \\
-            ' M apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts' | sort)"
-          test "$actual_dirty" = "$expected_dirty"'''
-          new_dirty = '''          test -z "$actual_dirty"'''
+          compare_line = '          test "$actual_dirty" = "$expected_dirty"'
+          clean_line = '          test -z "$actual_dirty"'
 
           for path in paths:
-              text = path.read_text()
-              if text.count(old_sha) != 1:
+              original = path.read_text()
+              if original.count(old_sha) != 1:
                   raise SystemExit(f'{path}: expected exactly one old SHA pin')
-              if text.count(old_dirty) != 1:
-                  raise SystemExit(f'{path}: expected exactly one legacy dirty-set guard')
+              lines = original.splitlines()
+              starts = [i for i, line in enumerate(lines) if 'expected_dirty="$(printf ' in line]
+              ends = [i for i, line in enumerate(lines) if line == compare_line]
+              if len(starts) != 1 or len(ends) != 1 or not starts[0] < ends[0]:
+                  raise SystemExit(f'{path}: legacy dirty guard structure mismatch')
+              start, end = starts[0], ends[0]
+              lines = lines[:start] + [clean_line] + lines[end + 1:]
+              text = '\n'.join(lines) + ('\n' if original.endswith('\n') else '')
               text = text.replace(old_sha, new_sha)
-              text = text.replace(old_dirty, new_dirty)
-              if 'SEND_EXACTLY_ONE_INTERNAL_WHATSAPP_CANARY' in path.read_text():
+              if 'SEND_EXACTLY_ONE_INTERNAL_WHATSAPP_CANARY' in original:
                   if text.count('SEND_EXACTLY_ONE_INTERNAL_WHATSAPP_CANARY') != 1:
                       raise SystemExit('authorization phrase changed unexpectedly')
               path.write_text(text)
@@ -61,6 +63,8 @@ jobs:
           test "$changed" = "$expected"
           grep -Fxq '      EXPECTED_LIVE_SHA: d43e634426c10020c6b3e670b6a5712b96902003' .github/workflows/whatsapp-agent-phase17-w6-single-provider-canary.yml
           grep -Fxq '      EXPECTED_LIVE_SHA: d43e634426c10020c6b3e670b6a5712b96902003' .github/workflows/whatsapp-agent-phase17-w6-stale-queue-refresh.yml
+          grep -Fq '          test -z "$actual_dirty"' .github/workflows/whatsapp-agent-phase17-w6-single-provider-canary.yml
+          grep -Fq '          test -z "$actual_dirty"' .github/workflows/whatsapp-agent-phase17-w6-stale-queue-refresh.yml
           grep -Fq 'SEND_EXACTLY_ONE_INTERNAL_WHATSAPP_CANARY' .github/workflows/whatsapp-agent-phase17-w6-single-provider-canary.yml
           echo 'P2_GUARD_PATCH=PASS'
 
