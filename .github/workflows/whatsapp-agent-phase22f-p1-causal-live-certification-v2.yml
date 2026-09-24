@@ -1,0 +1,223 @@
+name: WhatsApp Phase22F P1 Causal Live Certification V2
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - .github/workflows/whatsapp-agent-phase22f-p1-causal-live-certification-v2.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_LIVE_SHA: 4b12c4923ec1d1b89e24588cb252b310b84e171b
+
+    steps:
+      - name: Checkout reviewed P1 certifier
+        uses: actions/checkout@v4
+
+      - name: Validate fixed P1 inputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          for value in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            test -n "${!value:-}"
+          done
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            SSH_PORT=22
+            echo 'SSH_PORT=22' >> "$GITHUB_ENV"
+          fi
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          test -f apps/whatsapp-agent-dashboard/scripts/whatsapp-phase22f-p1-causal-live-certification.ts
+          printf 'P1V2_FIXED_INPUT_GATE=PASS\n'
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          ssh-keygen -y -f "$key" >/dev/null
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          printf 'P1V2_PINNED_SSH=PASS\n'
+
+      - name: Transport exact reviewed P1 certifier
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          local_script=apps/whatsapp-agent-dashboard/scripts/whatsapp-phase22f-p1-causal-live-certification.ts
+          remote_script="/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard/scripts/.phase22f-p1v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.ts"
+          script_sha="$(sha256sum "$local_script" | awk '{print $1}')"
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \
+            "$SSH_USER@$SSH_HOST" "cat > '$remote_script'" < "$local_script"
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \
+            "$SSH_USER@$SSH_HOST" "test -f '$remote_script' && test \"\$(sha256sum '$remote_script' | awk '{print \$1}')\" = '$script_sha'"
+          echo "P1V2_REMOTE_SCRIPT=$remote_script" >> "$GITHUB_ENV"
+          echo "P1V2_SCRIPT_SHA256=$script_sha" >> "$GITHUB_ENV"
+          printf 'P1V2_REVIEWED_CERTIFIER_TRANSPORT=PASS\n'
+
+      - name: Certify causal live path with preserved persistent runtime baseline
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          prefix="phase22f-p1-cert:${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}:"
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 -o ConnectionAttempts=3 -o ServerAliveInterval=10 -o ServerAliveCountMax=2 \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' P1_PREFIX='$prefix' P1_REMOTE_SCRIPT='$P1V2_REMOTE_SCRIPT' P1_SCRIPT_SHA256='$P1V2_SCRIPT_SHA256' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          APP="$ROOT/apps/whatsapp-agent-dashboard"
+          WEB=sikhadenge-whatsapp-agent
+          SCHEDULER=sikhadenge-whatsapp-automation-scheduler
+          cd "$ROOT"
+
+          cleanup() {
+            rm -f "$P1_REMOTE_SCRIPT" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          [[ "$P1_REMOTE_SCRIPT" == "$APP/scripts/.phase22f-p1v2-"*".ts" ]]
+          test -f "$P1_REMOTE_SCRIPT"
+          test "$(sha256sum "$P1_REMOTE_SCRIPT" | awk '{print $1}')" = "$P1_SCRIPT_SHA256"
+          [[ "$P1_PREFIX" =~ ^phase22f-p1-cert:[0-9]+:[0-9]+:$ ]]
+
+          live_sha="$(git rev-parse HEAD)"
+          printf 'P1V2_PRE_LIVE_SHA=%s\n' "$live_sha"
+          test "$live_sha" = "$EXPECTED_LIVE_SHA"
+
+          pre_dirty="$(git status --porcelain --untracked-files=no | sort)"
+          expected_dirty="$(printf '%s\n%s\n' \
+            ' M apps/whatsapp-agent-dashboard/scripts/email-automation-production-internal-test.sh' \
+            ' M apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts' | sort)"
+          test "$pre_dirty" = "$expected_dirty"
+          printf 'P1V2_PRE_DIRTY_SET=VERIFIED\n'
+
+          pm2_json="$(pm2 jlist 2>/dev/null)"
+          pm2v() {
+            printf '%s' "$pm2_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const [name,key]=process.argv.slice(1);const p=JSON.parse(s||"[]").find(x=>x.name===name);process.stdout.write(String(p?.pm2_env?.[key]??""))})' "$1" "$2"
+          }
+          pm2off() {
+            case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+              ""|0|false|no|off|disabled) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          test "$(pm2v "$WEB" status)" = "online"
+          test "$(pm2v "$SCHEDULER" status)" = "online"
+          pre_runtime="$(pm2v "$SCHEDULER" AUTOMATION_RUNTIME_ENABLED)"
+          case "$pre_runtime" in true|false) ;; *) echo "Unexpected persistent AUTOMATION_RUNTIME_ENABLED=$pre_runtime" >&2; exit 41 ;; esac
+          test "$(pm2v "$SCHEDULER" AUTOMATION_ACTIONS_ENABLED)" = "false"
+          test "$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)" = "false"
+          test "$(pm2v "$SCHEDULER" WHATSAPP_OUTBOUND_MODE)" = "disabled"
+          test "$(pm2v "$SCHEDULER" WHATSAPP_OUTBOUND_KILL_SWITCH)" = "on"
+          pm2off "$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_ALLOW_GLOBAL_QUEUED_DISPATCH)"
+          printf 'P1V2_PERSISTENT_RUNTIME_BASELINE=%s\n' "$pre_runtime"
+          printf 'P1V2_PERSISTENT_SEND_PATH_FAIL_CLOSED_BEFORE=true\n'
+
+          cd "$APP"
+          set -a
+          source .env
+          set +a
+          test "${WHATSAPP_OUTBOUND_MODE:-disabled}" != "live"
+          test "${WHATSAPP_CUTOVER_APPROVED:-false}" != "true"
+          test -z "${WHATSAPP_OUTBOUND_LIVE_ACK:-}"
+          test "${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}" = "on"
+
+          DB="$(node scripts/prisma-postgres-cli-url.mjs "$DATABASE_URL")"
+          state_before="$(PGOPTIONS='-c default_transaction_read_only=on' psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,COALESCE((\"scope\"->>'externalWritesRequested'),'false') FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='engagews_default';")"
+          test "$state_before" = "SHADOW|NO_EXTERNAL_WRITES|false|false"
+          approvals_before="$(PGOPTIONS='-c default_transaction_read_only=on' psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "SELECT COUNT(*) FROM \"EngageControlledLaunchOutboundApproval\" WHERE \"workspaceId\"='engagews_default' AND \"consumedAt\" IS NULL AND \"revokedAt\" IS NULL AND \"expiresAt\">NOW();")"
+          test "$approvals_before" = "0"
+          prefix_count_before="$(PGOPTIONS='-c default_transaction_read_only=on' psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "SELECT COUNT(*) FROM \"EngageWhatsAppAutomationEvent\" WHERE \"sourceEventId\" LIKE '${P1_PREFIX}%';")"
+          test "$prefix_count_before" = "0"
+          printf 'P1V2_CONTROLLED_STATE_BEFORE=%s\n' "$state_before"
+          printf 'P1V2_ACTIVE_APPROVALS_BEFORE=0\n'
+          printf 'P1V2_PREFIX_EVENTS_BEFORE=0\n'
+
+          cert_output="$(
+            PHASE22F_P1_PREFIX="$P1_PREFIX" \
+            WHATSAPP_AUTOMATION_SCHEDULER_ENABLED=true \
+            AUTOMATION_RUNTIME_ENABLED=true \
+            AUTOMATION_ACTIONS_ENABLED=true \
+            WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX="$P1_PREFIX" \
+            JOURNEY_RUNTIME_ENABLED=false \
+            JOURNEY_ACTIONS_ENABLED=false \
+            WHATSAPP_CAMPAIGNS_ENABLED=false \
+            WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED=true \
+            WHATSAPP_AUTOMATION_ALLOW_GLOBAL_QUEUED_DISPATCH=false \
+            WHATSAPP_OUTBOUND_MODE=live \
+            WHATSAPP_CUTOVER_APPROVED=true \
+            WHATSAPP_OUTBOUND_LIVE_ACK=I_UNDERSTAND_LIVE_WHATSAPP_SENDS \
+            WHATSAPP_OUTBOUND_KILL_SWITCH=off \
+            INTEGRATION_EXTERNAL_WRITES_ENABLED=false \
+            AGENT_AUTO_REPLY_ENABLED=false \
+            AGENT_IMMEDIATE_DISPATCH_ENABLED=false \
+            npx tsx "$P1_REMOTE_SCRIPT"
+          )"
+          printf '%s\n' "$cert_output"
+          printf '%s' "$cert_output" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const line=s.trim().split(/\r?\n/).filter(Boolean).at(-1);const o=JSON.parse(line);if(o.certification!=="WHATSAPP_PHASE22F_P1_CAUSAL_LIVE_CERTIFICATION_PASS"||o.effectiveOutboundMode!=="live"||o.globalQueuedDispatch!==false||o.causalEventsInspected!==0||o.causalQueuedMessageIds!==0||o.outboundInspected!==0||o.outboundProcessed!==0||o.outboundSent!==0||o.providerFetchAttempts!==0||o.externalWhatsAppWriteSent!==false)process.exit(2);})'
+
+          state_after="$(PGOPTIONS='-c default_transaction_read_only=on' psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,COALESCE((\"scope\"->>'externalWritesRequested'),'false') FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='engagews_default';")"
+          approvals_after="$(PGOPTIONS='-c default_transaction_read_only=on' psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "SELECT COUNT(*) FROM \"EngageControlledLaunchOutboundApproval\" WHERE \"workspaceId\"='engagews_default' AND \"consumedAt\" IS NULL AND \"revokedAt\" IS NULL AND \"expiresAt\">NOW();")"
+          prefix_count_after="$(PGOPTIONS='-c default_transaction_read_only=on' psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "SELECT COUNT(*) FROM \"EngageWhatsAppAutomationEvent\" WHERE \"sourceEventId\" LIKE '${P1_PREFIX}%';")"
+          test "$state_after" = "$state_before"
+          test "$approvals_after" = "0"
+          test "$prefix_count_after" = "0"
+
+          cd "$ROOT"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
+          post_dirty="$(git status --porcelain --untracked-files=no | sort)"
+          test "$post_dirty" = "$pre_dirty"
+          pm2_json="$(pm2 jlist 2>/dev/null)"
+          test "$(pm2v "$WEB" status)" = "online"
+          test "$(pm2v "$SCHEDULER" status)" = "online"
+          test "$(pm2v "$SCHEDULER" AUTOMATION_RUNTIME_ENABLED)" = "$pre_runtime"
+          test "$(pm2v "$SCHEDULER" AUTOMATION_ACTIONS_ENABLED)" = "false"
+          test "$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)" = "false"
+          test "$(pm2v "$SCHEDULER" WHATSAPP_OUTBOUND_MODE)" = "disabled"
+          test "$(pm2v "$SCHEDULER" WHATSAPP_OUTBOUND_KILL_SWITCH)" = "on"
+          pm2off "$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_ALLOW_GLOBAL_QUEUED_DISPATCH)"
+          login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login || true)"
+          test "$login_http" = "200"
+
+          printf 'P1V2_CONTROLLED_STATE_AFTER=%s\n' "$state_after"
+          printf 'P1V2_ACTIVE_APPROVALS_AFTER=0\n'
+          printf 'P1V2_PREFIX_EVENTS_AFTER=0\n'
+          printf 'P1V2_PERSISTENT_RUNTIME_PRESERVED=true\n'
+          printf 'P1V2_PERSISTENT_SEND_PATH_FAIL_CLOSED_AFTER=true\n'
+          printf 'P1V2_LOGIN_HTTP=200\n'
+          printf 'P1V2_PROVIDER_WRITE_REQUESTED=false\n'
+          printf 'P1V2_EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          printf 'P1V2_PERSISTENT_OUTBOUND_ENABLEMENT=false\n'
+          printf 'WHATSAPP_PHASE22F_P1_PRODUCTION_CAUSAL_LIVE_CERTIFICATION=PASS\n'
+          REMOTE
