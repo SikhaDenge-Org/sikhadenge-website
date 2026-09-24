@@ -1,13 +1,20 @@
-name: Email Phase D Deliverability CI
+name: Email Deliverability Evidence CI
 
 on:
   pull_request:
     paths:
       - "apps/whatsapp-agent-dashboard/.env.example"
       - "apps/whatsapp-agent-dashboard/modules/email-automation/application/deliverability-guardrails.ts"
+      - "apps/whatsapp-agent-dashboard/modules/email-automation/application/deliverability-evidence-service.ts"
       - "apps/whatsapp-agent-dashboard/modules/email-automation/application/automation-send-policy.ts"
+      - "apps/whatsapp-agent-dashboard/modules/email-automation/application/manual-send-service.ts"
+      - "apps/whatsapp-agent-dashboard/modules/email-automation/automation/scheduler.ts"
       - "apps/whatsapp-agent-dashboard/modules/email-automation/tests/deliverability-guardrails.test.ts"
+      - "apps/whatsapp-agent-dashboard/modules/email-automation/tests/deliverability-evidence.test.ts"
       - "apps/whatsapp-agent-dashboard/modules/email-automation/docs/phase-d-deliverability-guardrails.md"
+      - "apps/whatsapp-agent-dashboard/modules/email-automation/docs/P1_AUTOMATED_DELIVERABILITY_EVIDENCE.md"
+      - "apps/whatsapp-agent-dashboard/app/api/email/deliverability/route.ts"
+      - "apps/whatsapp-agent-dashboard/scripts/email-deliverability-refresh.ts"
       - "apps/whatsapp-agent-dashboard/scripts/email-automation-deliverability-preflight.ts"
       - "apps/whatsapp-agent-dashboard/scripts/email-automation-production-preflight.sh"
       - "apps/whatsapp-agent-dashboard/tests/email-automation-deliverability-preflight-policy.test.sh"
@@ -19,9 +26,16 @@ on:
     paths:
       - "apps/whatsapp-agent-dashboard/.env.example"
       - "apps/whatsapp-agent-dashboard/modules/email-automation/application/deliverability-guardrails.ts"
+      - "apps/whatsapp-agent-dashboard/modules/email-automation/application/deliverability-evidence-service.ts"
       - "apps/whatsapp-agent-dashboard/modules/email-automation/application/automation-send-policy.ts"
+      - "apps/whatsapp-agent-dashboard/modules/email-automation/application/manual-send-service.ts"
+      - "apps/whatsapp-agent-dashboard/modules/email-automation/automation/scheduler.ts"
       - "apps/whatsapp-agent-dashboard/modules/email-automation/tests/deliverability-guardrails.test.ts"
+      - "apps/whatsapp-agent-dashboard/modules/email-automation/tests/deliverability-evidence.test.ts"
       - "apps/whatsapp-agent-dashboard/modules/email-automation/docs/phase-d-deliverability-guardrails.md"
+      - "apps/whatsapp-agent-dashboard/modules/email-automation/docs/P1_AUTOMATED_DELIVERABILITY_EVIDENCE.md"
+      - "apps/whatsapp-agent-dashboard/app/api/email/deliverability/route.ts"
+      - "apps/whatsapp-agent-dashboard/scripts/email-deliverability-refresh.ts"
       - "apps/whatsapp-agent-dashboard/scripts/email-automation-deliverability-preflight.ts"
       - "apps/whatsapp-agent-dashboard/scripts/email-automation-production-preflight.sh"
       - "apps/whatsapp-agent-dashboard/tests/email-automation-deliverability-preflight-policy.test.sh"
@@ -33,11 +47,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: email-phase-d-deliverability-${{ github.ref }}
+  group: email-deliverability-evidence-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  deliverability-guardrails:
+  deliverability-evidence:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     defaults:
@@ -55,8 +69,11 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Run Phase D deliverability guardrail contracts
+      - name: Run persisted deliverability guardrail contracts
         run: npx tsx modules/email-automation/tests/deliverability-guardrails.test.ts
+
+      - name: Run DNS deliverability evidence contracts
+        run: npx tsx modules/email-automation/tests/deliverability-evidence.test.ts
 
       - name: Run scaled production deliverability preflight contracts
         run: bash tests/email-automation-deliverability-preflight-policy.test.sh
