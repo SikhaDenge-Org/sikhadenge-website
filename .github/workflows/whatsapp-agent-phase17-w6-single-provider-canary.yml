@@ -46,7 +46,7 @@ jobs:
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       VERIFIED_CANARY_WA_ID: ${{ secrets.WHATSAPP_INTERNAL_CANARY_WA_ID }}
-      EXPECTED_LIVE_SHA: 4b12c4923ec1d1b89e24588cb252b310b84e171b
+      EXPECTED_LIVE_SHA: d43e634426c10020c6b3e670b6a5712b96902003
       REVIEWED_EMAIL_INTERNAL_TEST_SHA256: d7dc9e6950379aca830830680778d71fc083bfeaa5fea67dd3117fc0696eda0e
       REVIEWED_EMAIL_READINESS_SHA256: a3c15e6b03e31ed9f4df38391a737a56a36625ae89c36f185a3d7df13fa8254c
       CANARY_PREFIX: "phase17-w5-internal-canary:"
@@ -140,10 +140,7 @@ jobs:
 
           test "$(git rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
           actual_dirty="$(git status --porcelain --untracked-files=no | sed '/^$/d' | sort)"
-          expected_dirty="$(printf '%s\n%s\n' \
-            ' M apps/whatsapp-agent-dashboard/scripts/email-automation-production-internal-test.sh' \
-            ' M apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts' | sort)"
-          test "$actual_dirty" = "$expected_dirty"
+          test -z "$actual_dirty"
           test "$(sha256sum "$APP/scripts/email-automation-production-internal-test.sh" | awk '{print $1}')" = "$REVIEWED_EMAIL_INTERNAL_TEST_SHA256"
           test "$(sha256sum "$APP/scripts/email-inbound-production-readiness.ts" | awk '{print $1}')" = "$REVIEWED_EMAIL_READINESS_SHA256"
           test -f "$REVIEWED_W6_SCRIPT_REMOTE"
