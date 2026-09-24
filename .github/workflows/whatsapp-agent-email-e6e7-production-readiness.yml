@@ -1,11 +1,16 @@
 name: WhatsApp Agent Email E6 E7 Production Readiness
 
 on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - "apps/whatsapp-agent-dashboard/docs/email-e6e7-live-certification-trigger.md"
   workflow_dispatch:
     inputs:
       deployed_sha:
-        description: Exact production SHA to audit
-        required: true
+        description: Optional exact production SHA assertion; leave empty to discover live SHA
+        required: false
         type: string
 
 permissions:
@@ -14,7 +19,7 @@ permissions:
 jobs:
   email-e6e7-production-readiness:
     concurrency:
-      group: whatsapp-agent-production
+      group: whatsapp-agent-email-e6e7-readiness
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -25,7 +30,7 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
-      DEPLOYED_SHA: ${{ inputs.deployed_sha }}
+      REQUESTED_DEPLOYED_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.deployed_sha || '' }}
       AUDIT_RUN_ID: email-e6e7-readiness-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
@@ -33,7 +38,9 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          [[ "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ -n "$REQUESTED_DEPLOYED_SHA" ]]; then
+            [[ "$REQUESTED_DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          fi
           missing=0
           for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
             [[ -n "${!variable_name:-}" ]] || { echo "Missing production secret: $variable_name" >&2; missing=1; }
@@ -66,14 +73,101 @@ jobs:
           ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "$SSH_USER@$SSH_HOST" \
-            "DEPLOYED_SHA='$DEPLOYED_SHA' RUN_ID='$AUDIT_RUN_ID' bash -s" <<'REMOTE' | tee email-e6e7-readiness.log
+            "REQUESTED_DEPLOYED_SHA='$REQUESTED_DEPLOYED_SHA' RUN_ID='$AUDIT_RUN_ID' bash -s" <<'REMOTE' | tee email-e6e7-readiness.log
           set -Eeuo pipefail
           APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
           BACKUP=/root/sikhadenge-backups/$RUN_ID
           test "$(id -u)" = "0"
           cd "$APP"
-          test "$(git rev-parse HEAD)" = "$DEPLOYED_SHA"
           install -d -m 700 "$BACKUP"
+          IDENTITY_LOG="$BACKUP/runtime-identity.log"
+          : > "$IDENTITY_LOG"
+          chmod 600 "$IDENTITY_LOG"
+          exec > >(tee -a "$IDENTITY_LOG") 2>&1
+
+          DEPLOYED_SHA="$(git rev-parse HEAD)"
+          [[ "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ -n "${REQUESTED_DEPLOYED_SHA:-}" ]]; then
+            test "$DEPLOYED_SHA" = "$REQUESTED_DEPLOYED_SHA"
+          fi
+
+          latest_evidence=""
+          latest_mtime=0
+          evidence_count=0
+          shopt -s nullglob
+          for candidate in /root/sikhadenge-backups/engageos-github-*/post-deploy-evidence.txt; do
+            evidence_count=$((evidence_count + 1))
+            candidate_mtime="$(stat -c %Y "$candidate" 2>/dev/null || printf '0')"
+            if [[ "$candidate_mtime" =~ ^[0-9]+$ ]] && (( candidate_mtime > latest_mtime )); then
+              latest_mtime="$candidate_mtime"
+              latest_evidence="$candidate"
+            fi
+          done
+          shopt -u nullglob
+          printf 'EVIDENCE_CANDIDATE_COUNT=%s\n' "$evidence_count"
+          if [[ -z "$latest_evidence" ]]; then
+            printf 'EVIDENCE_DISCOVERY=FAIL reason=no_post_deploy_evidence\n'
+            exit 40
+          fi
+          printf 'EVIDENCE_DISCOVERY=PASS file=%s\n' "$(basename "$(dirname "$latest_evidence")")/$(basename "$latest_evidence")"
+          read_evidence_value() {
+            local key="$1"
+            awk -F= -v key="$key" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "$latest_evidence"
+          }
+          CERTIFIED_RELEASE_SHA="$(read_evidence_value RELEASE_SHA)"
+          CERTIFIED_BUILD_ID="$(read_evidence_value BUILD_ID)"
+          CERTIFIED_PM2_STATUS="$(read_evidence_value PM2_STATUS)"
+          CERTIFIED_PM2_CWD="$(read_evidence_value PM2_CWD)"
+          LIVE_APP_BUILD_ID="$(cat "$APP/.next/BUILD_ID" 2>/dev/null || true)"
+          printf 'IDENTITY_DISCOVERED_SHA=%s\n' "$DEPLOYED_SHA"
+          printf 'IDENTITY_CERTIFIED_SHA=%s\n' "$CERTIFIED_RELEASE_SHA"
+          printf 'IDENTITY_LIVE_APP_BUILD_ID=%s\n' "$LIVE_APP_BUILD_ID"
+          printf 'IDENTITY_CERTIFIED_BUILD_ID=%s\n' "$CERTIFIED_BUILD_ID"
+          printf 'IDENTITY_CERTIFIED_PM2_STATUS=%s\n' "$CERTIFIED_PM2_STATUS"
+          printf 'IDENTITY_CERTIFIED_PM2_CWD=%s\n' "$CERTIFIED_PM2_CWD"
+
+          identity_failures=0
+          [[ "$CERTIFIED_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { printf 'IDENTITY_CHECK=certified_sha_format:FAIL\n'; identity_failures=$((identity_failures+1)); }
+          [[ -n "$CERTIFIED_BUILD_ID" ]] || { printf 'IDENTITY_CHECK=certified_build_present:FAIL\n'; identity_failures=$((identity_failures+1)); }
+          [[ "$CERTIFIED_PM2_STATUS" = "online" ]] || { printf 'IDENTITY_CHECK=certified_pm2_online:FAIL\n'; identity_failures=$((identity_failures+1)); }
+          [[ "$DEPLOYED_SHA" = "$CERTIFIED_RELEASE_SHA" ]] || { printf 'IDENTITY_CHECK=git_sha_matches_certified:FAIL\n'; identity_failures=$((identity_failures+1)); }
+          [[ "$LIVE_APP_BUILD_ID" = "$CERTIFIED_BUILD_ID" ]] || { printf 'IDENTITY_CHECK=live_build_matches_certified:FAIL\n'; identity_failures=$((identity_failures+1)); }
+          if (( identity_failures == 0 )); then printf 'IDENTITY_PRE_PM2_CHECKS=PASS\n'; else printf 'IDENTITY_PRE_PM2_CHECKS=FAIL count=%s\n' "$identity_failures"; exit 41; fi
+
+          PM2_SNAPSHOT="$(mktemp)"
+          trap 'rm -f "$PM2_SNAPSHOT"' EXIT
+          pm2 jlist > "$PM2_SNAPSHOT"
+          IFS='|' read -r START_PM2_PID START_PM2_STATUS START_PM2_CWD < <(
+            node - "$PM2_SNAPSHOT" <<'NODE'
+          const fs=require('node:fs');
+          const rows=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const p=rows.find(x=>x.name==='sikhadenge-whatsapp-agent');
+          if(!p){ process.stdout.write('||'); process.exit(0); }
+          process.stdout.write([p.pid||'',p.pm2_env?.status||'',p.pm2_env?.pm_cwd||''].join('|') + '\n');
+          NODE
+          )
+          RUNTIME_BUILD_ID=""
+          if [[ -n "$START_PM2_CWD" && -f "$START_PM2_CWD/.next/BUILD_ID" ]]; then
+            RUNTIME_BUILD_ID="$(cat "$START_PM2_CWD/.next/BUILD_ID")"
+          fi
+          printf 'IDENTITY_START_PM2_PID=%s\n' "$START_PM2_PID"
+          printf 'IDENTITY_START_PM2_STATUS=%s\n' "$START_PM2_STATUS"
+          printf 'IDENTITY_START_PM2_CWD=%s\n' "$START_PM2_CWD"
+          printf 'IDENTITY_RUNTIME_BUILD_ID=%s\n' "$RUNTIME_BUILD_ID"
+
+          pm2_identity_failures=0
+          [[ "$START_PM2_STATUS" = "online" ]] || { printf 'IDENTITY_CHECK=live_pm2_online:FAIL\n'; pm2_identity_failures=$((pm2_identity_failures+1)); }
+          [[ -n "$START_PM2_PID" ]] || { printf 'IDENTITY_CHECK=live_pm2_pid_present:FAIL\n'; pm2_identity_failures=$((pm2_identity_failures+1)); }
+          [[ "$START_PM2_CWD" = "$CERTIFIED_PM2_CWD" ]] || { printf 'IDENTITY_CHECK=pm2_cwd_matches_certified:FAIL\n'; pm2_identity_failures=$((pm2_identity_failures+1)); }
+          [[ -f "$START_PM2_CWD/.next/BUILD_ID" ]] || { printf 'IDENTITY_CHECK=runtime_build_file_present:FAIL\n'; pm2_identity_failures=$((pm2_identity_failures+1)); }
+          [[ "$RUNTIME_BUILD_ID" = "$CERTIFIED_BUILD_ID" ]] || { printf 'IDENTITY_CHECK=runtime_build_matches_certified:FAIL\n'; pm2_identity_failures=$((pm2_identity_failures+1)); }
+          if (( pm2_identity_failures == 0 )); then printf 'IDENTITY_PM2_CHECKS=PASS\n'; else printf 'IDENTITY_PM2_CHECKS=FAIL count=%s\n' "$pm2_identity_failures"; exit 42; fi
+
+          printf 'DISCOVERED_DEPLOYED_SHA=%s\n' "$DEPLOYED_SHA"
+          printf 'CERTIFIED_BUILD_ID=%s\n' "$CERTIFIED_BUILD_ID"
+          printf 'START_PM2_PID=%s\n' "$START_PM2_PID"
+          START_DEPLOYED_SHA="$DEPLOYED_SHA"
+          START_BUILD_ID="$CERTIFIED_BUILD_ID"
           set -a
           source "$APP/.env"
           set +a
@@ -84,11 +178,36 @@ jobs:
           EMAIL_E6E7_WORKSPACE_ID=engagews_default npx tsx scripts/email-e6e7-production-readiness.ts | tee "$BACKUP/email-e6e7-readiness.json"
           readiness_code=${PIPESTATUS[0]}
           set -e
+          END_DEPLOYED_SHA="$(git rev-parse HEAD)"
+          END_BUILD_ID="$(cat "$APP/.next/BUILD_ID")"
+          pm2 jlist > "$PM2_SNAPSHOT"
+          IFS='|' read -r END_PM2_PID END_PM2_STATUS END_PM2_CWD < <(
+            node - "$PM2_SNAPSHOT" <<'NODE'
+          const fs=require('node:fs');
+          const rows=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const p=rows.find(x=>x.name==='sikhadenge-whatsapp-agent');
+          if(!p){ process.stdout.write('||'); process.exit(0); }
+          process.stdout.write([p.pid||'',p.pm2_env?.status||'',p.pm2_env?.pm_cwd||''].join('|') + '\n');
+          NODE
+          )
+          deploy_stable_code=0
+          if [[ "$END_DEPLOYED_SHA" != "$START_DEPLOYED_SHA" || "$END_BUILD_ID" != "$START_BUILD_ID" || "$END_PM2_PID" != "$START_PM2_PID" || "$END_PM2_STATUS" != "online" || "$END_PM2_CWD" != "$START_PM2_CWD" ]]; then
+            printf 'RUNTIME_IDENTITY_CHANGED_DURING_AUDIT start_sha=%s end_sha=%s start_build=%s end_build=%s start_pid=%s end_pid=%s\n' "$START_DEPLOYED_SHA" "$END_DEPLOYED_SHA" "$START_BUILD_ID" "$END_BUILD_ID" "$START_PM2_PID" "$END_PM2_PID" >&2
+            deploy_stable_code=3
+          fi
           {
             printf 'SCHEDULER_EXIT_CODE=%s\n' "$scheduler_code"
             printf 'READINESS_EXIT_CODE=%s\n' "$readiness_code"
+            printf 'DEPLOY_STABLE_EXIT_CODE=%s\n' "$deploy_stable_code"
+            printf 'START_DEPLOYED_SHA=%s\n' "$START_DEPLOYED_SHA"
+            printf 'END_DEPLOYED_SHA=%s\n' "$END_DEPLOYED_SHA"
+            printf 'START_BUILD_ID=%s\n' "$START_BUILD_ID"
+            printf 'END_BUILD_ID=%s\n' "$END_BUILD_ID"
+            printf 'START_PM2_PID=%s\n' "$START_PM2_PID"
+            printf 'END_PM2_PID=%s\n' "$END_PM2_PID"
           } > "$BACKUP/email-e6e7-readiness-result.txt"
           chmod 600 "$BACKUP"/*
+          if (( deploy_stable_code != 0 )); then exit "$deploy_stable_code"; fi
           if (( scheduler_code != 0 )); then exit "$scheduler_code"; fi
           exit "$readiness_code"
           REMOTE
@@ -99,9 +218,9 @@ jobs:
         run: |
           set +e
           mkdir -p email-e6e7-readiness-evidence
-          for file_name in email-e6e7-readiness.json email-e6e7-readiness-result.txt email-scheduler-verify.log; do
+          for file_name in email-e6e7-readiness.json email-e6e7-readiness-result.txt email-scheduler-verify.log runtime-identity.log; do
             scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
-              -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+              -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
               "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${AUDIT_RUN_ID}/${file_name}" \
               "email-e6e7-readiness-evidence/${file_name}" >/dev/null 2>&1 || true
           done
@@ -117,10 +236,17 @@ jobs:
           {
             echo "## Email E6/E7 production readiness"
             echo
-            printf -- '- Audited SHA: `%s`\n' "$DEPLOYED_SHA"
+            audited_sha=""
+            if [[ -s email-e6e7-readiness.log ]]; then
+              audited_sha="$(awk -F= '/^DISCOVERED_DEPLOYED_SHA=/{print $2}' email-e6e7-readiness.log | tail -1 || true)"
+            fi
+            if [[ -z "$audited_sha" ]]; then audited_sha="${REQUESTED_DEPLOYED_SHA:-unknown}"; fi
+            printf -- '- Audited SHA: `%s`\n' "$audited_sha"
             if [[ -s "$result" ]]; then
               scheduler_exit="$(awk -F= '$1=="SCHEDULER_EXIT_CODE"{print $2}' "$result")"
+              deploy_stable_exit="$(awk -F= '$1=="DEPLOY_STABLE_EXIT_CODE"{print $2}' "$result")"
               printf -- '- Live scheduler verification exit: `%s`\n' "${scheduler_exit:-unknown}"
+              printf -- '- Deployment stable during audit: `%s`\n' "$( [[ "${deploy_stable_exit:-1}" == "0" ]] && echo true || echo false )"
             fi
             if [[ -s "$json" ]]; then
               status="$(jq -r '.status' "$json")"
