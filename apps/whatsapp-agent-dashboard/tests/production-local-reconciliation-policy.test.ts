@@ -63,6 +63,7 @@ assert.deepEqual(
 
 const root = process.cwd();
 const layoutSource = readFileSync(resolve(root, "app/layout.tsx"), "utf8");
+const fontLockSource = readFileSync(resolve(root, "app/font-hard-lock-v15.css"), "utf8");
 const inboxSource = readFileSync(
   resolve(root, "components/inbox/InboxDashboardV2.tsx"),
   "utf8",
@@ -72,11 +73,11 @@ const repositorySource = readFileSync(
   "utf8",
 );
 
-assert.match(layoutSource, /import \{ Manrope \} from "next\/font\/google";/u);
-assert.match(layoutSource, /const manrope = Manrope\(/u);
-assert.match(layoutSource, /variable: "--font-manrope"/u);
-assert.match(layoutSource, /className=\{manrope\.variable\}/u);
-assert.match(layoutSource, /className=\{manrope\.className\}/u);
+assert.doesNotMatch(layoutSource, /next\/font\/google/u);
+assert.match(layoutSource, /const MANROPE_STYLESHEET = "https:\/\/fonts\.googleapis\.com\/css2\?family=Manrope:wght@400;500;600;700;800&display=swap";/u);
+assert.match(layoutSource, /<link rel="stylesheet" href=\{MANROPE_STYLESHEET\} \/>/u);
+assert.match(fontLockSource, /--font-manrope: "Manrope";/u);
+assert.match(fontLockSource, /--engageos-font: var\(--font-manrope\), "Manrope", sans-serif;/u);
 assert.match(layoutSource, /data-ui-foundation="manrope-v15-hard-lock"/u);
 assert.match(layoutSource, /import "\.\/font-hard-lock-v15\.css";/u);
 assert.match(layoutSource, /ServiceWorkerRegistration/u);
