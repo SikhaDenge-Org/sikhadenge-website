@@ -92,15 +92,14 @@ else
 fi
 
 if [[ "$EXPECTED_MODE" == "LIMITED_COHORT" || "$EXPECTED_MODE" == "LIVE" ]]; then
-  if EMAIL_DELIVERABILITY_SPF_ALIGNED="$(value_for EMAIL_DELIVERABILITY_SPF_ALIGNED)" \
-    EMAIL_DELIVERABILITY_DKIM_ALIGNED="$(value_for EMAIL_DELIVERABILITY_DKIM_ALIGNED)" \
-    EMAIL_DELIVERABILITY_DMARC_ALIGNED="$(value_for EMAIL_DELIVERABILITY_DMARC_ALIGNED)" \
-    EMAIL_DELIVERABILITY_HARD_BOUNCE_RATE_PCT="$(value_for EMAIL_DELIVERABILITY_HARD_BOUNCE_RATE_PCT)" \
-    EMAIL_DELIVERABILITY_COMPLAINT_RATE_PCT="$(value_for EMAIL_DELIVERABILITY_COMPLAINT_RATE_PCT)" \
+  preflight_workspace="$(value_for EMAIL_DELIVERABILITY_PREFLIGHT_WORKSPACE_ID)"
+  preflight_sender="$(value_for EMAIL_DELIVERABILITY_PREFLIGHT_SENDER_EMAIL)"
+  if EMAIL_DELIVERABILITY_PREFLIGHT_WORKSPACE_ID="$preflight_workspace" \
+    EMAIL_DELIVERABILITY_PREFLIGHT_SENDER_EMAIL="$preflight_sender" \
     npm exec -- tsx scripts/email-automation-deliverability-preflight.ts "$EXPECTED_MODE"; then
-    pass "scaled-delivery deliverability guardrails qualified"
+    pass "scaled-delivery persisted deliverability evidence qualified"
   else
-    fail "scaled-delivery deliverability guardrails are not qualified"
+    fail "scaled-delivery persisted deliverability evidence is not qualified"
   fi
 else
   pass "deliverability guardrails are intentionally not enforced for DRY_RUN"
