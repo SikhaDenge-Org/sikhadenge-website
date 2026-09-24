@@ -27,9 +27,9 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
-      EXPECTED_OLD_SHA: 60cd180e7a728b4ac546777605b4257504df483a
-      TARGET_REF: prod/email-p0-phase-d-aligned-20260924
-      TARGET_SHA: 9b83afc449c2b8038423d1b3e211c28413fa8c1f
+      EXPECTED_OLD_SHA: 4b12c4923ec1d1b89e24588cb252b310b84e171b
+      TARGET_REF: prod/email-p0-current-lineage-20260924
+      TARGET_SHA: d43e634426c10020c6b3e670b6a5712b96902003
       ALIGN_RUN_ID: email-p0-prod-align-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
@@ -47,9 +47,9 @@ jobs:
           test "$missing" = "0"
           [[ "$EXPECTED_OLD_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
-          test "$EXPECTED_OLD_SHA" = "60cd180e7a728b4ac546777605b4257504df483a"
-          test "$TARGET_SHA" = "9b83afc449c2b8038423d1b3e211c28413fa8c1f"
-          test "$TARGET_REF" = "prod/email-p0-phase-d-aligned-20260924"
+          test "$EXPECTED_OLD_SHA" = "4b12c4923ec1d1b89e24588cb252b310b84e171b"
+          test "$TARGET_SHA" = "d43e634426c10020c6b3e670b6a5712b96902003"
+          test "$TARGET_REF" = "prod/email-p0-current-lineage-20260924"
           test -f apps/whatsapp-agent-dashboard/scripts/email-p0-prod-lineage-deploy.sh
           bash -n apps/whatsapp-agent-dashboard/scripts/email-p0-prod-lineage-deploy.sh
           if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
