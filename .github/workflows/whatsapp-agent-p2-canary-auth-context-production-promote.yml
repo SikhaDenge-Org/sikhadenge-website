@@ -1,0 +1,206 @@
+name: WhatsApp P2 Canary Auth Context Production Promote
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - .github/workflows/whatsapp-agent-p2-canary-auth-context-production-promote.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_OLD_SHA: d43e634426c10020c6b3e670b6a5712b96902003
+      TARGET_REF: production/whatsapp-p2-canary-auth-context-20260924
+      TARGET_SHA: c982931f3e306771144565ab586b901d383fcb1c
+      EXPECTED_PAGE_BLOB: 767a5582c85ba0ef0128fbf383befdebc090050c
+      EXPECTED_HELPER_BLOB: 4155fcb40dd17a11f2a2bf46fc8d3089ed137fb9
+
+    steps:
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for value in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            test -n "${!value:-}"
+          done
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            SSH_PORT=22
+            echo 'SSH_PORT=22' >> "$GITHUB_ENV"
+          fi
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          ssh-keygen -y -f "$key" >/dev/null
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Promote certified canary authorization context to exact production lineage
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 -o ConnectionAttempts=3 -o ServerAliveInterval=10 -o ServerAliveCountMax=2 \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_OLD_SHA='$EXPECTED_OLD_SHA' TARGET_REF='$TARGET_REF' TARGET_SHA='$TARGET_SHA' EXPECTED_PAGE_BLOB='$EXPECTED_PAGE_BLOB' EXPECTED_HELPER_BLOB='$EXPECTED_HELPER_BLOB' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          APP="$ROOT/apps/whatsapp-agent-dashboard"
+          WEB=sikhadenge-whatsapp-agent
+          SCHEDULER=sikhadenge-whatsapp-automation-scheduler
+          PAGE='apps/whatsapp-agent-dashboard/app/admin/page.tsx'
+          HELPER='apps/whatsapp-agent-dashboard/lib/admin/canary-authorization-context.ts'
+          cd "$ROOT"
+
+          deployed=false
+          rollback() {
+            rc=$?
+            set +e
+            if [[ "$deployed" = "true" ]]; then
+              git reset --keep "$EXPECTED_OLD_SHA"
+              cd "$APP"
+              npm run build >/tmp/whatsapp-p2-canary-auth-context-rollback-build.log 2>&1 || true
+              pm2 restart "$WEB" >/dev/null 2>&1 || true
+              sleep 3
+            fi
+            printf 'P2_CANARY_AUTH_CONTEXT_ROLLBACK_ATTEMPTED=%s\n' "$deployed"
+            exit "$rc"
+          }
+          trap rollback ERR
+
+          current_sha="$(git rev-parse HEAD)"
+          printf 'P2_CANARY_AUTH_CONTEXT_PRE_SHA=%s\n' "$current_sha"
+          test "$current_sha" = "$EXPECTED_OLD_SHA"
+
+          pre_dirty="$(git status --porcelain --untracked-files=no | sort)"
+          printf 'P2_CANARY_AUTH_CONTEXT_PRE_DIRTY_COUNT=%s\n' "$(printf '%s\n' "$pre_dirty" | sed '/^$/d' | wc -l | tr -d ' ')"
+
+          pm2_json="$(pm2 jlist 2>/dev/null)"
+          pm2v() {
+            printf '%s' "$pm2_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const [name,key]=process.argv.slice(1);const p=JSON.parse(s||"[]").find(x=>x.name===name);process.stdout.write(String(p?.pm2_env?.[key]??""))})' "$1" "$2"
+          }
+          pm2off() {
+            case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+              ""|0|false|no|off|disabled) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          test "$(pm2v "$WEB" status)" = "online"
+          test "$(pm2v "$SCHEDULER" status)" = "online"
+          scheduler_restart_before="$(pm2v "$SCHEDULER" restart_time)"
+          scheduler_uptime_before="$(pm2v "$SCHEDULER" pm_uptime)"
+          pre_runtime="$(pm2v "$SCHEDULER" AUTOMATION_RUNTIME_ENABLED)"
+          pre_actions="$(pm2v "$SCHEDULER" AUTOMATION_ACTIONS_ENABLED)"
+          pre_dispatch="$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)"
+          pre_mode="$(pm2v "$SCHEDULER" WHATSAPP_OUTBOUND_MODE)"
+          pre_kill="$(pm2v "$SCHEDULER" WHATSAPP_OUTBOUND_KILL_SWITCH)"
+          pre_prefix="$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX)"
+          test "$pre_actions" = "false"
+          test "$pre_dispatch" = "false"
+          test "$pre_mode" = "disabled"
+          test "$pre_kill" = "on"
+          pm2off "$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_ALLOW_GLOBAL_QUEUED_DISPATCH)"
+          printf 'P2_CANARY_AUTH_CONTEXT_PRE_FAIL_CLOSED=true\n'
+
+          set -a
+          source "$APP/.env"
+          set +a
+          test "${WHATSAPP_OUTBOUND_MODE:-disabled}" != "live"
+          test "${WHATSAPP_CUTOVER_APPROVED:-false}" != "true"
+          test -z "${WHATSAPP_OUTBOUND_LIVE_ACK:-}"
+          test "${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}" = "on"
+
+          DB="$(node "$APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")"
+          state="$(PGOPTIONS='-c default_transaction_read_only=on' psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,COALESCE((\"scope\"->>'externalWritesRequested'),'false') FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='engagews_default';")"
+          printf 'P2_CANARY_AUTH_CONTEXT_CONTROLLED_STATE=%s\n' "$state"
+          IFS='|' read -r mode policy external requested <<< "$state"
+          test "$mode" = "SHADOW"
+          test "$policy" = "NO_EXTERNAL_WRITES"
+          test "$external" = "false"
+          test "$requested" = "false"
+          approvals="$(PGOPTIONS='-c default_transaction_read_only=on' psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "SELECT COUNT(*) FROM \"EngageControlledLaunchOutboundApproval\" WHERE \"workspaceId\"='engagews_default' AND \"consumedAt\" IS NULL AND \"revokedAt\" IS NULL AND \"expiresAt\">NOW();")"
+          test "$approvals" = "0"
+          printf 'P2_CANARY_AUTH_CONTEXT_ACTIVE_APPROVALS=0\n'
+
+          git fetch --no-tags origin "$TARGET_REF"
+          fetched_sha="$(git rev-parse FETCH_HEAD)"
+          printf 'P2_CANARY_AUTH_CONTEXT_TARGET_SHA=%s\n' "$fetched_sha"
+          test "$fetched_sha" = "$TARGET_SHA"
+
+          actual_diff="$(git diff --name-only "$EXPECTED_OLD_SHA" "$TARGET_SHA" | sort)"
+          expected_diff="$(printf '%s\n%s\n' "$PAGE" "$HELPER" | sort)"
+          printf 'P2_CANARY_AUTH_CONTEXT_DIFF_BEGIN\n%s\nP2_CANARY_AUTH_CONTEXT_DIFF_END\n' "$actual_diff"
+          test "$actual_diff" = "$expected_diff"
+
+          test "$(git rev-parse "$TARGET_SHA:$PAGE")" = "$EXPECTED_PAGE_BLOB"
+          test "$(git rev-parse "$TARGET_SHA:$HELPER")" = "$EXPECTED_HELPER_BLOB"
+          printf 'P2_CANARY_AUTH_CONTEXT_CERTIFIED_BLOBS=true\n'
+
+          git merge --ff-only "$TARGET_SHA"
+          deployed=true
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+
+          cd "$APP"
+          npm run typecheck
+          npm run build
+          pm2 restart "$WEB" >/dev/null
+          sleep 5
+
+          pm2_json="$(pm2 jlist 2>/dev/null)"
+          test "$(pm2v "$WEB" status)" = "online"
+          test "$(pm2v "$SCHEDULER" status)" = "online"
+          test "$(pm2v "$SCHEDULER" restart_time)" = "$scheduler_restart_before"
+          test "$(pm2v "$SCHEDULER" pm_uptime)" = "$scheduler_uptime_before"
+          test "$(pm2v "$SCHEDULER" AUTOMATION_RUNTIME_ENABLED)" = "$pre_runtime"
+          test "$(pm2v "$SCHEDULER" AUTOMATION_ACTIONS_ENABLED)" = "$pre_actions"
+          test "$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)" = "$pre_dispatch"
+          test "$(pm2v "$SCHEDULER" WHATSAPP_OUTBOUND_MODE)" = "$pre_mode"
+          test "$(pm2v "$SCHEDULER" WHATSAPP_OUTBOUND_KILL_SWITCH)" = "$pre_kill"
+          test "$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX)" = "$pre_prefix"
+          pm2off "$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_ALLOW_GLOBAL_QUEUED_DISPATCH)"
+          printf 'P2_CANARY_AUTH_CONTEXT_POST_FAIL_CLOSED=true\n'
+          printf 'P2_CANARY_AUTH_CONTEXT_SCHEDULER_RESTARTED=false\n'
+
+          cd "$ROOT"
+          post_dirty="$(git status --porcelain --untracked-files=no | sort)"
+          test "$post_dirty" = "$pre_dirty"
+
+          login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login || true)"
+          test "$login_http" = "200"
+          printf 'P2_CANARY_AUTH_CONTEXT_LOGIN_HTTP=200\n'
+
+          admin_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/admin || true)"
+          case "$admin_http" in
+            301|302|303|307|308) ;;
+            *) printf 'Unexpected unauthenticated /admin HTTP=%s\n' "$admin_http"; exit 1 ;;
+          esac
+          printf 'P2_CANARY_AUTH_CONTEXT_ADMIN_UNAUTH_HTTP=%s\n' "$admin_http"
+          printf 'P2_CANARY_AUTH_CONTEXT_PROVIDER_WRITE_REQUESTED=false\n'
+          printf 'P2_CANARY_AUTH_CONTEXT_EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          printf 'WHATSAPP_P2_CANARY_AUTH_CONTEXT_PRODUCTION_PROMOTE=PASS\n'
+          REMOTE
