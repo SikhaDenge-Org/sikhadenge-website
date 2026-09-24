@@ -10,6 +10,7 @@ on:
       - "apps/whatsapp-agent-dashboard/app/api/internal/email/**"
       - "apps/whatsapp-agent-dashboard/scripts/email-automation-*.ts"
       - "apps/whatsapp-agent-dashboard/scripts/email-automation-*.sh"
+      - "apps/whatsapp-agent-dashboard/scripts/email-deliverability-*.ts"
       - "apps/whatsapp-agent-dashboard/scripts/email-inbound-*.ts"
       - "apps/whatsapp-agent-dashboard/scripts/email-inbound-*.sh"
       - "apps/whatsapp-agent-dashboard/scripts/email-lifecycle-*.ts"
@@ -72,6 +73,12 @@ jobs:
 
       - name: Run email automation dispatcher contracts
         run: npx tsx modules/email-automation/tests/automation-dispatcher.test.ts
+
+      - name: Run Email P1 persisted deliverability guardrails
+        run: npx tsx modules/email-automation/tests/deliverability-guardrails.test.ts
+
+      - name: Run Email P1 DNS deliverability evidence contracts
+        run: npx tsx modules/email-automation/tests/deliverability-evidence.test.ts
 
       - name: Run email provider retry safety contracts
         run: npx tsx modules/email-automation/tests/provider-error-policy.test.ts
