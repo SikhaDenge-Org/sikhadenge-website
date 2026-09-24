@@ -6,6 +6,7 @@ import {
   validateAutomationFlow,
 } from "../../../lib/automation/automation-service";
 import { assertAutomationEmailDispatchPolicy } from "../application/automation-send-policy";
+import type { EmailDeliverabilitySnapshot } from "../application/deliverability-guardrails";
 import { resolveEmailSender } from "../domain/sender-resolution";
 
 assert.ok(AUTOMATION_TRIGGER_TYPES.includes("NEW_LEAD"));
@@ -98,13 +99,15 @@ const dryRun = assertAutomationEmailDispatchPolicy({
 });
 assert.deepEqual(dryRun, { mode: "DRY_RUN", externalRequestAllowed: false });
 
-Object.assign(process.env, {
-  EMAIL_DELIVERABILITY_SPF_ALIGNED: "true",
-  EMAIL_DELIVERABILITY_DKIM_ALIGNED: "true",
-  EMAIL_DELIVERABILITY_DMARC_ALIGNED: "true",
-  EMAIL_DELIVERABILITY_HARD_BOUNCE_RATE_PCT: "0.4",
-  EMAIL_DELIVERABILITY_COMPLAINT_RATE_PCT: "0.02",
-});
+const qualifiedEvidence: EmailDeliverabilitySnapshot = {
+  checkedAt: new Date().toISOString(),
+  spfAligned: true,
+  dkimAligned: true,
+  dmarcAligned: true,
+  hardBounceRatePct: 0.4,
+  complaintRatePct: 0.02,
+  complaintTelemetryQualified: true,
+};
 
 const limited = assertAutomationEmailDispatchPolicy({
   policy: {
@@ -118,6 +121,7 @@ const limited = assertAutomationEmailDispatchPolicy({
   recipients: [{ email: "pilot@example.com" }],
   internalAllowlist: new Set(),
   cohortAllowlist: new Set(["pilot@example.com"]),
+  deliverabilitySnapshot: qualifiedEvidence,
 });
 assert.deepEqual(limited, { mode: "LIMITED_COHORT", externalRequestAllowed: true });
 
@@ -135,6 +139,7 @@ assert.throws(
       recipients: [{ email: "outside@example.com" }],
       internalAllowlist: new Set(),
       cohortAllowlist: new Set(["pilot@example.com"]),
+      deliverabilitySnapshot: qualifiedEvidence,
     }),
   /not in the email automation cohort allowlist/,
 );
@@ -151,6 +156,7 @@ const live = assertAutomationEmailDispatchPolicy({
   recipients: [{ email: "customer@example.com" }],
   internalAllowlist: new Set(),
   cohortAllowlist: new Set(),
+  deliverabilitySnapshot: qualifiedEvidence,
 });
 assert.deepEqual(live, { mode: "LIVE", externalRequestAllowed: true });
 
