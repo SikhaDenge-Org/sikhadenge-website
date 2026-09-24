@@ -1,0 +1,78 @@
+name: WhatsApp P2 Current Production Guard Patcher
+
+on:
+  push:
+    branches:
+      - phase/whatsapp-p2-current-prod-reconcile-20260924
+    paths:
+      - ".github/workflows/whatsapp-p2-current-prod-reconcile-patcher.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase/whatsapp-p2-current-prod-reconcile-20260924
+          fetch-depth: 0
+
+      - name: Patch only W6 current-production source guards
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          paths = [
+              Path('.github/workflows/whatsapp-agent-phase17-w6-single-provider-canary.yml'),
+              Path('.github/workflows/whatsapp-agent-phase17-w6-stale-queue-refresh.yml'),
+          ]
+          old_sha = 'EXPECTED_LIVE_SHA: 4b12c4923ec1d1b89e24588cb252b310b84e171b'
+          new_sha = 'EXPECTED_LIVE_SHA: d43e634426c10020c6b3e670b6a5712b96902003'
+          old_dirty = '''          expected_dirty="$(printf '%s\\n%s\\n' \\
+            ' M apps/whatsapp-agent-dashboard/scripts/email-automation-production-internal-test.sh' \\
+            ' M apps/whatsapp-agent-dashboard/scripts/email-inbound-production-readiness.ts' | sort)"
+          test "$actual_dirty" = "$expected_dirty"'''
+          new_dirty = '''          test -z "$actual_dirty"'''
+
+          for path in paths:
+              text = path.read_text()
+              if text.count(old_sha) != 1:
+                  raise SystemExit(f'{path}: expected exactly one old SHA pin')
+              if text.count(old_dirty) != 1:
+                  raise SystemExit(f'{path}: expected exactly one legacy dirty-set guard')
+              text = text.replace(old_sha, new_sha)
+              text = text.replace(old_dirty, new_dirty)
+              if 'SEND_EXACTLY_ONE_INTERNAL_WHATSAPP_CANARY' in path.read_text():
+                  if text.count('SEND_EXACTLY_ONE_INTERNAL_WHATSAPP_CANARY') != 1:
+                      raise SystemExit('authorization phrase changed unexpectedly')
+              path.write_text(text)
+          PY
+
+          git diff --check
+          changed="$(git diff --name-only | sort)"
+          expected="$(printf '%s\n%s\n' \
+            '.github/workflows/whatsapp-agent-phase17-w6-single-provider-canary.yml' \
+            '.github/workflows/whatsapp-agent-phase17-w6-stale-queue-refresh.yml' | sort)"
+          test "$changed" = "$expected"
+          grep -Fxq '      EXPECTED_LIVE_SHA: d43e634426c10020c6b3e670b6a5712b96902003' .github/workflows/whatsapp-agent-phase17-w6-single-provider-canary.yml
+          grep -Fxq '      EXPECTED_LIVE_SHA: d43e634426c10020c6b3e670b6a5712b96902003' .github/workflows/whatsapp-agent-phase17-w6-stale-queue-refresh.yml
+          grep -Fq 'SEND_EXACTLY_ONE_INTERNAL_WHATSAPP_CANARY' .github/workflows/whatsapp-agent-phase17-w6-single-provider-canary.yml
+          echo 'P2_GUARD_PATCH=PASS'
+
+      - name: Commit exact two-file reconciliation and remove patcher
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            .github/workflows/whatsapp-agent-phase17-w6-single-provider-canary.yml \
+            .github/workflows/whatsapp-agent-phase17-w6-stale-queue-refresh.yml
+          git rm .github/workflows/whatsapp-p2-current-prod-reconcile-patcher.yml
+          git commit -m 'WhatsApp P2: reconcile W6 guards to current production lineage'
+          git push origin HEAD:phase/whatsapp-p2-current-prod-reconcile-20260924
