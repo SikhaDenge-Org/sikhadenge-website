@@ -1,3 +1,4 @@
+# P0 protected launcher CI trigger: PR #572
 name: WhatsApp Agent CI
 
 on:
