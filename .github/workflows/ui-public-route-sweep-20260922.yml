@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   sweep:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, sikhadenge-ci]
     timeout-minutes: 20
     steps:
       - name: Sweep sitemap routes and unique CSS JS assets

@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   recorder-preflight:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, sikhadenge-ci]
     timeout-minutes: 12
     environment: whatsapp-agent-production
     env:

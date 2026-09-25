@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   prepare-consolidated-package:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, sikhadenge-ci]
     timeout-minutes: 8
     env:
       EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}

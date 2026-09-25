@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   prepare-two-gate-review-package:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, sikhadenge-ci]
     timeout-minutes: 8
     steps:
       - name: Validate inputs and freeze current release

@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   audit-host:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, sikhadenge-ci]
     timeout-minutes: 8
     env:
       SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
