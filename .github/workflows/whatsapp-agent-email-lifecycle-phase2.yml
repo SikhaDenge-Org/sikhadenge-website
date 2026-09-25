@@ -1,0 +1,195 @@
+name: Email Lifecycle Phase2 DRY_RUN Activation
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  lifecycle-phase2:
+    if: contains(github.event.head_commit.message, '[email-lifecycle-phase2]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_PROD_SHA: b3690921b749025fa1cbc502b2fff22e07cf7176
+      PHASE_RUN_ID: email-lifecycle-phase2-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Validate production secrets and pinned source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$EXPECTED_PROD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          missing=0
+          for name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            [[ -n "${!name:-}" ]] || { echo "Missing production secret: $name" >&2; missing=1; }
+          done
+          test "$missing" = "0"
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
+          [[ "${SSH_PORT:-22}" =~ ^[0-9]+$ ]]
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/email-lifecycle-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          ssh-keygen -y -f "$key" >/dev/null
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Provision, approve when safe, activate, and certify lifecycle flows
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/email-lifecycle-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=10 -o ConnectionAttempts=1 \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_PROD_SHA='$EXPECTED_PROD_SHA' RUN_ID='$PHASE_RUN_ID' bash -s" <<'REMOTE' | tee email-lifecycle-phase2.log
+          set -Eeuo pipefail
+          ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          APP="$ROOT/apps/whatsapp-agent-dashboard"
+          BACKUP="/root/sikhadenge-backups/${RUN_ID}"
+          install -d -m 700 "$BACKUP"
+
+          cd "$ROOT"
+          current_sha="$(git rev-parse HEAD)"
+          printf 'CURRENT_SHA=%s\n' "$current_sha"
+          test "$current_sha" = "$EXPECTED_PROD_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
+
+          cd "$APP"
+          set -a
+          source "$APP/.env"
+          set +a
+          test "${EMAIL_RUNTIME_MODE:-}" = "DRY_RUN"
+          test "${EMAIL_RUNTIME_ENABLED:-false}" = "true"
+          test "${EMAIL_AUTOMATION_ENABLED:-false}" = "true"
+          test "${EMAIL_EXTERNAL_WRITES_ENABLED:-false}" != "true"
+          systemctl is-enabled --quiet sikhadenge-email-automation-scheduler.timer
+          systemctl is-active --quiet sikhadenge-email-automation-scheduler.timer
+          printf 'LIFECYCLE_RUNTIME_PRECHECK=PASS\n'
+
+          npx tsx scripts/email-lifecycle-provision.ts | tee "$BACKUP/provision.log"
+          grep -q '"totalTemplates":5' "$BACKUP/provision.log"
+          grep -q '"totalFlows":5' "$BACKUP/provision.log"
+
+          npx tsx scripts/email-lifecycle-readiness.ts | tee "$BACKUP/readiness-before.log"
+          grep -q '^EMAIL_LIFECYCLE_READINESS_AUDIT=PASS$' "$BACKUP/readiness-before.log"
+          pre_json="$(head -n 1 "$BACKUP/readiness-before.log")"
+          draft_flows="$(printf '%s' "$pre_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(String(JSON.parse(s).lifecycle.draftFlows)))')"
+          safe_existing="$(printf '%s' "$pre_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s);const ok=r.lifecycle.approvedTemplates===5&&r.lifecycle.flowPinsValid===true&&r.lifecycle.marketingUnsubscribeValid===true&&r.lifecycle.flows.length===5&&r.lifecycle.flows.every(f=>f.status==="DRAFT"||f.status==="ACTIVE");process.stdout.write(ok?"true":"false")})')"
+
+          if [[ "$draft_flows" = "5" ]]; then
+            npx tsx scripts/email-lifecycle-approve.ts | tee "$BACKUP/approval.log"
+            grep -q '^EMAIL_LIFECYCLE_APPROVAL=PASS$' "$BACKUP/approval.log"
+            grep -q '"approvedTemplates":5' "$BACKUP/approval.log"
+            grep -q '"draftFlows":5' "$BACKUP/approval.log"
+            printf 'LIFECYCLE_APPROVAL_ACTION=EXECUTED\n'
+          elif [[ "$safe_existing" = "true" ]]; then
+            printf 'LIFECYCLE_APPROVAL_ACTION=SKIPPED_ALREADY_PINNED\n' | tee "$BACKUP/approval.log"
+          else
+            echo 'Lifecycle state is neither safely approvable nor already pinned for activation.' >&2
+            exit 1
+          fi
+
+          npx tsx scripts/email-lifecycle-activate.ts | tee "$BACKUP/activation.log"
+          grep -q '^EMAIL_LIFECYCLE_ACTIVATION=PASS$' "$BACKUP/activation.log"
+          grep -q '"activeFlows":5' "$BACKUP/activation.log"
+          grep -q '"externalRequestSent":false' "$BACKUP/activation.log"
+
+          npx tsx scripts/email-lifecycle-activate.ts | tee "$BACKUP/idempotency.log"
+          grep -q '^EMAIL_LIFECYCLE_ACTIVATION=PASS$' "$BACKUP/idempotency.log"
+          grep -q '"activeFlows":5' "$BACKUP/idempotency.log"
+          grep -q '"alreadyActive":5' "$BACKUP/idempotency.log"
+          grep -q '"activatedNow":0' "$BACKUP/idempotency.log"
+          grep -q '"externalRequestSent":false' "$BACKUP/idempotency.log"
+
+          test "${EMAIL_RUNTIME_MODE:-}" = "DRY_RUN"
+          test "${EMAIL_EXTERNAL_WRITES_ENABLED:-false}" != "true"
+          systemctl is-enabled --quiet sikhadenge-email-automation-scheduler.timer
+          systemctl is-active --quiet sikhadenge-email-automation-scheduler.timer
+          cd "$ROOT"
+          test -z "$(git status --porcelain --untracked-files=no)"
+
+          cat > "$BACKUP/phase-result.txt" <<RESULT
+          STATUS=PASS
+          TARGET_SHA=$EXPECTED_PROD_SHA
+          ACTIVE_FLOWS=5
+          IDEMPOTENT_ACTIVE_FLOWS=5
+          RUNTIME_MODE=DRY_RUN
+          EXTERNAL_WRITES=false
+          EXTERNAL_REQUEST_SENT=false
+          SCHEDULER_ACTIVE=true
+          TRACKED_DIRTY_AFTER=0
+          SCALED_DELIVERY_ENABLED=false
+          RESULT
+          cat "$BACKUP/phase-result.txt"
+          printf 'EMAIL_LIFECYCLE_PHASE2=PASS\n'
+          REMOTE
+
+      - name: Collect protected lifecycle evidence
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p email-lifecycle-phase2-evidence
+          for file in phase-result.txt provision.log readiness-before.log approval.log activation.log idempotency.log; do
+            scp -P "$SSH_PORT" -i "$HOME/.ssh/email-lifecycle-production" \
+              -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+              -o ConnectTimeout=10 -o ConnectionAttempts=1 \
+              "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${PHASE_RUN_ID}/${file}" \
+              "email-lifecycle-phase2-evidence/${file}" >/dev/null 2>&1 || true
+          done
+          chmod -R go-rwx email-lifecycle-phase2-evidence 2>/dev/null || true
+
+      - name: Assert lifecycle phase evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          result=email-lifecycle-phase2-evidence/phase-result.txt
+          test -s "$result"
+          grep -Fxq 'STATUS=PASS' "$result"
+          grep -Fxq "TARGET_SHA=$EXPECTED_PROD_SHA" "$result"
+          grep -Fxq 'ACTIVE_FLOWS=5' "$result"
+          grep -Fxq 'IDEMPOTENT_ACTIVE_FLOWS=5' "$result"
+          grep -Fxq 'RUNTIME_MODE=DRY_RUN' "$result"
+          grep -Fxq 'EXTERNAL_WRITES=false' "$result"
+          grep -Fxq 'EXTERNAL_REQUEST_SENT=false' "$result"
+          grep -Fxq 'SCHEDULER_ACTIVE=true' "$result"
+          grep -Fxq 'TRACKED_DIRTY_AFTER=0' "$result"
+          grep -Fxq 'SCALED_DELIVERY_ENABLED=false' "$result"
+          echo 'EMAIL_LIFECYCLE_PHASE2_EVIDENCE=PASS'
+
+      - name: Upload lifecycle phase evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: email-lifecycle-phase2-${{ env.PHASE_RUN_ID }}
+          path: |
+            email-lifecycle-phase2.log
+            email-lifecycle-phase2-evidence
+          if-no-files-found: error
+          retention-days: 14
