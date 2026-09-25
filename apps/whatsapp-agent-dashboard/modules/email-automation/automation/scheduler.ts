@@ -6,6 +6,7 @@ import { enqueueEmailAutomationEvent } from "./event-outbox";
 import { processDueEmailCampaigns } from "../campaigns/campaign-service";
 import { processDueEmailSequences } from "../sequences/sequence-service";
 import { syncWatchedGmailMailboxes } from "../inbound/gmail-inbound-service";
+import { refreshEmailDeliverabilityEvidence } from "../application/deliverability-evidence-service";
 import { getEmailRuntimePolicy } from "../application/runtime-policy";
 import { processEmailAutomationEvents } from "./dispatcher";
 import { EMAIL_AUTOMATION_RETRY_PENDING_PREFIX } from "../providers/provider-error-policy";
@@ -91,6 +92,17 @@ export async function processEmailAutomationScheduler(input: {
     take: Math.min(Math.max(input.workspaceLimit ?? 20, 1), 100),
   });
 
+  let deliverabilityRefresh: Record<string, unknown>;
+  try {
+    const refreshed = await refreshEmailDeliverabilityEvidence();
+    deliverabilityRefresh = { ok: true, ...refreshed };
+  } catch (error) {
+    deliverabilityRefresh = {
+      ok: false,
+      error: error instanceof Error ? error.message : "Email deliverability evidence refresh failed.",
+    };
+  }
+
   const results = [];
   for (const candidate of candidates) {
     const result = await processEmailAutomationEvents({
@@ -106,6 +118,7 @@ export async function processEmailAutomationScheduler(input: {
   const summary = {
     workspacesScanned: candidates.length,
     scheduledMaterialized,
+    deliverabilityRefresh,
     inboundSync,
     campaignRuns: campaignResults.length,
     campaignResults,
