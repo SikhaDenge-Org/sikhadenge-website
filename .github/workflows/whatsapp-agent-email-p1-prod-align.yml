@@ -28,8 +28,8 @@ jobs:
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       EXPECTED_OLD_SHA: c982931f3e306771144565ab586b901d383fcb1c
-      TARGET_REF: prod/email-p1-deliverability-current-live-v3-20260924
-      TARGET_SHA: b3690921b749025fa1cbc502b2fff22e07cf7176
+      TARGET_REF: prod/email-p1-deliverability-current-live-v3-20260925
+      TARGET_SHA: b3c53357cf5c1c9acbbc18e277e0c781e87c4393
       ALIGN_RUN_ID: email-p1-prod-align-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
@@ -48,8 +48,8 @@ jobs:
           [[ "$EXPECTED_OLD_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$EXPECTED_OLD_SHA" = "c982931f3e306771144565ab586b901d383fcb1c"
-          test "$TARGET_SHA" = "b3690921b749025fa1cbc502b2fff22e07cf7176"
-          test "$TARGET_REF" = "prod/email-p1-deliverability-current-live-v3-20260924"
+          test "$TARGET_SHA" = "b3c53357cf5c1c9acbbc18e277e0c781e87c4393"
+          test "$TARGET_REF" = "prod/email-p1-deliverability-current-live-v3-20260925"
           test -f apps/whatsapp-agent-dashboard/scripts/email-p1-prod-lineage-deploy.sh
           bash -n apps/whatsapp-agent-dashboard/scripts/email-p1-prod-lineage-deploy.sh
           if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
