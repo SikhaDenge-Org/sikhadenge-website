@@ -116,7 +116,14 @@ case "$RUNTIME_APP" in /var/www/sikhadenge-whatsapp-agent/*) ;; *) fail "unexpec
 [[ -d "$APP/.next" && -d "$RUNTIME_APP/.next" ]] || fail "current production build is missing"
 PRE_APP_BUILD_ID="$(cat "$APP/.next/BUILD_ID")"
 PRE_RUNTIME_BUILD_ID="$(cat "$RUNTIME_APP/.next/BUILD_ID")"
-[[ "$PRE_APP_BUILD_ID" == "$PRE_RUNTIME_BUILD_ID" ]] || fail "source/runtime build IDs differ before deploy"
+[[ -n "$PRE_APP_BUILD_ID" && -n "$PRE_RUNTIME_BUILD_ID" ]] || fail "current production build ID is empty"
+if [[ "$RUNTIME_APP" == "$APP" ]]; then
+  [[ "$PRE_APP_BUILD_ID" == "$PRE_RUNTIME_BUILD_ID" ]] || fail "single-runtime source/runtime build IDs differ before deploy"
+  printf 'PRE_BUILD_TOPOLOGY=SINGLE_RUNTIME\nPRE_BUILD_IDS_MATCH=true\n'
+else
+  printf 'PRE_BUILD_TOPOLOGY=DUAL_RUNTIME\nPRE_APP_BUILD_ID=%s\nPRE_RUNTIME_BUILD_ID=%s\n' "$PRE_APP_BUILD_ID" "$PRE_RUNTIME_BUILD_ID"
+  if [[ "$PRE_APP_BUILD_ID" == "$PRE_RUNTIME_BUILD_ID" ]]; then printf 'PRE_BUILD_IDS_MATCH=true\n'; else printf 'PRE_BUILD_IDS_MATCH=false\n'; fi
+fi
 
 cleanup
 git worktree add --detach "$WORKTREE" "$TARGET_SHA" >/dev/null
