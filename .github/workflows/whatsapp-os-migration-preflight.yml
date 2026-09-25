@@ -1,0 +1,123 @@
+name: WhatsApp OS Migration Preflight
+
+on:
+  push:
+    branches:
+      - migration/whatsapp-os-preflight-20260925
+    paths:
+      - .github/workflows/whatsapp-os-migration-preflight.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-os-migration-preflight
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    name: Read-only production and target-access preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+
+    steps:
+      - name: Validate production transport inputs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          missing=0
+          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            if [[ -z "${!variable_name:-}" ]]; then
+              printf 'MISSING=%s\n' "$variable_name"
+              missing=1
+            fi
+          done
+          test "$missing" = "0"
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
+          echo 'PASS: PRODUCTION_TRANSPORT_INPUTS_PRESENT'
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = 'ssh-ed25519'
+          if [[ "$SSH_PORT" = '22' ]]; then host_entry="$SSH_HOST"; else host_entry="[$SSH_HOST]:$SSH_PORT"; fi
+          printf '%s %s %s\n' "$host_entry" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          echo 'PASS: PINNED_PRODUCTION_SSH_READY'
+
+      - name: Inspect production checkout and target repository access
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" \
+            -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+          LIVE_ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          LIVE_APP="$LIVE_ROOT/apps/whatsapp-agent-dashboard"
+          test -d "$LIVE_APP"
+          test -d "$LIVE_ROOT/.git" || git -C "$LIVE_APP" rev-parse --git-dir >/dev/null
+
+          echo "LIVE_ROOT=$LIVE_ROOT"
+          echo "LIVE_HEAD=$(git -C "$LIVE_ROOT" rev-parse HEAD)"
+          echo "LIVE_BRANCH=$(git -C "$LIVE_ROOT" branch --show-current)"
+          echo "LIVE_ORIGIN=$(git -C "$LIVE_ROOT" remote get-url origin | sed -E 's#(https://)[^/@]+@#\1***@#')"
+          dirty_count="$(git -C "$LIVE_ROOT" status --porcelain --untracked-files=no | wc -l | tr -d ' ')"
+          echo "LIVE_TRACKED_DIRTY_COUNT=$dirty_count"
+          if [[ "$dirty_count" != '0' ]]; then
+            echo 'LIVE_TRACKED_DIRTY_PATHS_BEGIN'
+            git -C "$LIVE_ROOT" status --porcelain --untracked-files=no | sed -E 's/^...//'
+            echo 'LIVE_TRACKED_DIRTY_PATHS_END'
+          fi
+
+          echo 'TARGET_ACCESS_BEGIN'
+          target_ssh='git@github.com:SikhaDenge-Org/sikhadenge-whatsapp-os.git'
+          if GIT_TERMINAL_PROMPT=0 timeout 20 git ls-remote "$target_ssh" HEAD >/dev/null 2>&1; then
+            echo 'TARGET_SSH_READ=PASS'
+            tmp="$(mktemp -d /tmp/whatsapp-os-access.XXXXXX)"
+            trap 'rm -rf "$tmp"' EXIT
+            git -C "$tmp" init -q
+            git -C "$tmp" remote add origin "$target_ssh"
+            git -C "$tmp" config user.name migration-preflight
+            git -C "$tmp" config user.email migration-preflight@example.invalid
+            printf 'preflight\n' > "$tmp/probe.txt"
+            git -C "$tmp" add probe.txt
+            git -C "$tmp" commit -qm preflight
+            if GIT_TERMINAL_PROMPT=0 timeout 20 git -C "$tmp" push --dry-run origin HEAD:refs/heads/migration/preflight-access-probe >/dev/null 2>&1; then
+              echo 'TARGET_SSH_WRITE=PASS'
+            else
+              echo 'TARGET_SSH_WRITE=FAIL'
+            fi
+          else
+            echo 'TARGET_SSH_READ=FAIL'
+            echo 'TARGET_SSH_WRITE=FAIL'
+          fi
+          echo 'TARGET_ACCESS_END'
+
+          command -v node >/dev/null && echo "NODE_VERSION=$(node --version)" || echo 'NODE_VERSION=MISSING'
+          command -v npm >/dev/null && echo "NPM_VERSION=$(npm --version)" || echo 'NPM_VERSION=MISSING'
+          command -v pm2 >/dev/null && echo 'PM2_PRESENT=YES' || echo 'PM2_PRESENT=NO'
+          echo 'PASS: READ_ONLY_PRODUCTION_PREFLIGHT_COMPLETE'
+          REMOTE
