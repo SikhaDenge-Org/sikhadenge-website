@@ -109,7 +109,7 @@ jobs:
           console.log('LIFECYCLE_PINS_VALID=true');
           console.log('LIFECYCLE_MARKETING_UNSUBSCRIBE_VALID=true');
           console.log('LIFECYCLE_IDEMPOTENT_RECHECK=PASS');
-NODE
+          NODE
 
           test "$(git rev-parse HEAD)" = "$current_sha"
           test -z "$(git status --porcelain --untracked-files=no)"
