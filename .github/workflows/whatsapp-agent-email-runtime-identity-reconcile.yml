@@ -1,0 +1,144 @@
+name: Email Runtime Identity Reconcile
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - .github/workflows/whatsapp-agent-email-runtime-identity-reconcile.yml
+      - apps/whatsapp-agent-dashboard/modules/email-automation/docs/P1_RUNTIME_IDENTITY_RECONCILE.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: contains(github.event.head_commit.message, '[email-runtime-align]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_SOURCE_SHA: c982931f3e306771144565ab586b901d383fcb1c
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then SSH_PORT=22; echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"
+          ssh-keygen -y -f "$key" >/dev/null
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Reconcile source and PM2 runtime build identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=10 -o ConnectionAttempts=1 \
+            "$SSH_USER@$SSH_HOST" "EXPECTED_SOURCE_SHA='$EXPECTED_SOURCE_SHA' bash -s" <<'REMOTE' | tee email-runtime-identity-reconcile.log
+          set -Eeuo pipefail
+          ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          APP="$ROOT/apps/whatsapp-agent-dashboard"
+          PROCESS=sikhadenge-whatsapp-agent
+          EXPECTED_SOURCE_SHA="${EXPECTED_SOURCE_SHA:?}"
+          BACKUP="/root/sikhadenge-backups/email-runtime-identity-$(date -u +%Y%m%dT%H%M%SZ)"
+          install -d -m 700 "$BACKUP"
+          changed=false
+          RUNTIME_APP=""
+          rollback(){
+            rc=$?
+            trap - ERR INT TERM
+            set +e
+            if [[ "$changed" == true && -n "$RUNTIME_APP" && -d "$BACKUP/runtime.next.before" ]]; then
+              rm -rf "$RUNTIME_APP/.next"
+              mv "$BACKUP/runtime.next.before" "$RUNTIME_APP/.next"
+              pm2 restart "$PROCESS" >/dev/null 2>&1 || true
+            fi
+            printf 'EMAIL_RUNTIME_IDENTITY_RECONCILE=ROLLED_BACK exit_code=%s\n' "$rc" >&2
+            exit "$rc"
+          }
+          trap rollback ERR INT TERM
+          fail(){ printf 'FAIL: %s\n' "$*" >&2; return 1; }
+
+          cd "$ROOT"
+          current_sha="$(git rev-parse HEAD)"
+          printf 'SOURCE_SHA=%s\n' "$current_sha"
+          [[ "$current_sha" == "$EXPECTED_SOURCE_SHA" ]] || fail 'production source moved'
+          [[ -z "$(git status --porcelain --untracked-files=no | sed '/^$/d')" ]] || fail 'tracked source is dirty'
+
+          set -a; source "$APP/.env"; set +a
+          [[ "${EMAIL_RUNTIME_ENABLED:-false}" == "true" ]] || fail 'Email runtime disabled'
+          [[ "${EMAIL_RUNTIME_MODE:-}" == "DRY_RUN" ]] || fail 'Email runtime not DRY_RUN'
+          [[ "${EMAIL_EXTERNAL_WRITES_ENABLED:-true}" == "false" ]] || fail 'Email external writes enabled'
+
+          pm2_json="$(pm2 jlist)"
+          IFS='|' read -r pid status cwd < <(printf '%s' "$pm2_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write((p?[p.pid||"",p.pm2_env?.status||"",p.pm2_env?.pm_cwd||""].join("|"):"||")+"\n")})')
+          [[ -n "$pid" && "$status" == "online" ]] || fail 'PM2 web process not online'
+          RUNTIME_APP="${cwd:-$APP}"
+          case "$RUNTIME_APP" in /var/www/sikhadenge-whatsapp-agent/*) ;; *) fail "unexpected runtime cwd: $RUNTIME_APP" ;; esac
+          [[ -f "$APP/.next/BUILD_ID" && -f "$RUNTIME_APP/.next/BUILD_ID" ]] || fail 'build ID missing'
+          source_build="$(cat "$APP/.next/BUILD_ID")"
+          runtime_before="$(cat "$RUNTIME_APP/.next/BUILD_ID")"
+          [[ -n "$source_build" && -n "$runtime_before" ]] || fail 'empty build ID'
+          printf 'PM2_CWD=%s\nSOURCE_BUILD_ID=%s\nRUNTIME_BUILD_ID_BEFORE=%s\n' "$RUNTIME_APP" "$source_build" "$runtime_before"
+
+          if [[ "$source_build" != "$runtime_before" ]]; then
+            [[ "$RUNTIME_APP" != "$APP" ]] || fail 'same runtime path reported different build IDs'
+            cp -a "$RUNTIME_APP/.next" "$BACKUP/runtime.next.before"
+            rm -rf "$RUNTIME_APP/.next"
+            cp -a "$APP/.next" "$RUNTIME_APP/.next"
+            changed=true
+            pm2 restart "$PROCESS" >/dev/null
+            sleep 5
+          fi
+
+          pm2_json="$(pm2 jlist)"
+          IFS='|' read -r post_pid post_status post_cwd < <(printf '%s' "$pm2_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s||"[]").find(x=>x.name==="sikhadenge-whatsapp-agent");process.stdout.write((p?[p.pid||"",p.pm2_env?.status||"",p.pm2_env?.pm_cwd||""].join("|"):"||")+"\n")})')
+          [[ -n "$post_pid" && "$post_status" == "online" && "$post_cwd" == "$RUNTIME_APP" ]] || fail 'PM2 unhealthy after reconcile'
+          runtime_after="$(cat "$RUNTIME_APP/.next/BUILD_ID")"
+          [[ "$runtime_after" == "$source_build" ]] || fail 'runtime build ID still differs'
+          [[ "$(git -C "$ROOT" rev-parse HEAD)" == "$EXPECTED_SOURCE_SHA" ]] || fail 'source SHA changed'
+          [[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no | sed '/^$/d')" ]] || fail 'source became dirty'
+          local_http="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/login || true)"
+          public_http="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' https://whatsapp.sikhadenge.in/login || true)"
+          [[ "$local_http" == "200" && "$public_http" == "200" ]] || fail "login health failed local=$local_http public=$public_http"
+          printf 'RUNTIME_BUILD_ID_AFTER=%s\nPM2_STATUS=online\nLOGIN_LOCAL_HTTP=200\nLOGIN_PUBLIC_HTTP=200\nRUNTIME_MODE=DRY_RUN\nEXTERNAL_WRITES=false\nTRACKED_DIRTY=0\nEMAIL_RUNTIME_IDENTITY_RECONCILE=PASS\n' "$runtime_after"
+          trap - ERR INT TERM
+          REMOTE
+
+      - name: Assert reconciliation evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          grep -q '^EMAIL_RUNTIME_IDENTITY_RECONCILE=PASS$' email-runtime-identity-reconcile.log
+          grep -q '^RUNTIME_MODE=DRY_RUN$' email-runtime-identity-reconcile.log
+          grep -q '^EXTERNAL_WRITES=false$' email-runtime-identity-reconcile.log
+          grep -q '^TRACKED_DIRTY=0$' email-runtime-identity-reconcile.log
+          grep -q '^LOGIN_PUBLIC_HTTP=200$' email-runtime-identity-reconcile.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: email-runtime-identity-reconcile-${{ github.run_id }}
+          path: email-runtime-identity-reconcile.log
+          retention-days: 14
