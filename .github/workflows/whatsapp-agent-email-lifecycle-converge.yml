@@ -1,0 +1,147 @@
+name: WhatsApp Agent Email Lifecycle Converge
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  converge-email-lifecycle:
+    if: contains(github.event.head_commit.message, '[email-lifecycle-converge]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+    steps:
+      - name: Validate production secrets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          missing=0
+          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            [[ -n "${!variable_name:-}" ]] || { echo "Missing production secret: $variable_name" >&2; missing=1; }
+          done
+          test "$missing" = "0"
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/email-lifecycle-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"
+          ssh-keygen -y -f "$key" >/dev/null
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Converge lifecycle flows under DRY_RUN guard
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/email-lifecycle-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
+            "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE' | tee email-lifecycle-converge.log
+          set -Eeuo pipefail
+          ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          APP="$ROOT/apps/whatsapp-agent-dashboard"
+          cd "$ROOT"
+          current_sha="$(git rev-parse HEAD)"
+          printf 'CURRENT_SHA=%s\n' "$current_sha"
+          test -z "$(git status --porcelain --untracked-files=no)"
+
+          test "$(git hash-object "$APP/scripts/email-lifecycle-readiness.ts")" = "cf8ecb2e3d904884381ee1e759a4b18e8d526783"
+          test "$(git hash-object "$APP/scripts/email-lifecycle-activate.ts")" = "eb6ba96e3cb0d476ad3af10ecb9c0254f30fab40"
+          test "$(git hash-object "$APP/scripts/email-automation-production-preflight.sh")" = "a26a671137b085a54103df977901a754f67446a7"
+          test "$(git hash-object "$APP/scripts/email-automation-scheduler-verify.sh")" = "7934262e886547c2f423dd093ddab248045c6f4c"
+          test "$(git hash-object "$APP/modules/email-automation/application/deliverability-evidence-service.ts")" = "ac89d8c15d0bdf0bd377c7ff0ae1dd64f1b9aa54"
+          printf 'PINNED_LIFECYCLE_RUNTIME=PASS\n'
+
+          cd "$APP"
+          set -a
+          source .env
+          set +a
+          test "${EMAIL_RUNTIME_MODE:-}" = "DRY_RUN"
+          test "${EMAIL_RUNTIME_ENABLED:-false}" = "true"
+          test "${EMAIL_AUTOMATION_ENABLED:-false}" = "true"
+          test "${EMAIL_EXTERNAL_WRITES_ENABLED:-false}" != "true"
+
+          EXPECTED_RELEASE_SHA="$current_sha" EMAIL_PREFLIGHT_EXPECTED_MODE=DRY_RUN bash scripts/email-automation-production-preflight.sh
+          EXPECTED_RELEASE_SHA="$current_sha" bash scripts/email-automation-scheduler-verify.sh
+
+          npx tsx scripts/email-lifecycle-readiness.ts | tee /tmp/email-lifecycle-readiness-before.log
+          npx tsx scripts/email-lifecycle-activate.ts | tee /tmp/email-lifecycle-activate-first.log
+          npx tsx scripts/email-lifecycle-activate.ts | tee /tmp/email-lifecycle-activate-idempotent.log
+          npx tsx scripts/email-lifecycle-readiness.ts | tee /tmp/email-lifecycle-readiness-after.log
+
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const first = JSON.parse(fs.readFileSync('/tmp/email-lifecycle-activate-first.log','utf8').split(/\r?\n/).find(x=>x.startsWith('{')));
+          const second = JSON.parse(fs.readFileSync('/tmp/email-lifecycle-activate-idempotent.log','utf8').split(/\r?\n/).find(x=>x.startsWith('{')));
+          const after = JSON.parse(fs.readFileSync('/tmp/email-lifecycle-readiness-after.log','utf8').split(/\r?\n/).find(x=>x.startsWith('{')));
+          if (first.totalFlows !== 5 || first.activeFlows !== 5 || first.externalRequestSent !== false) throw new Error('first lifecycle convergence evidence invalid');
+          if (second.totalFlows !== 5 || second.activeFlows !== 5 || second.activatedNow !== 0 || second.alreadyActive !== 5 || second.externalRequestSent !== false) throw new Error('idempotent lifecycle convergence evidence invalid');
+          const lc = after.lifecycle || {};
+          if (after.runtime?.safeRuntime !== true) throw new Error('runtime not safe after lifecycle convergence');
+          if (lc.totalTemplates !== 5 || lc.totalFlows !== 5 || lc.approvedTemplates !== 5 || lc.draftFlows !== 0) throw new Error('lifecycle counts invalid after convergence');
+          if (lc.flowPinsValid !== true || lc.marketingUnsubscribeValid !== true) throw new Error('lifecycle pin/unsubscribe contract invalid');
+          if (!Array.isArray(lc.flows) || lc.flows.some(x => x.status !== 'ACTIVE')) throw new Error('not all lifecycle flows are ACTIVE');
+          if (after.supportSender?.verificationStatus !== 'VERIFIED' || after.supportSender?.isWorkspaceDefault !== true || after.supportSender?.connectionStatus !== 'CONNECTED') throw new Error('support sender readiness invalid');
+          console.log(`LIFECYCLE_ACTIVATED_NOW=${first.activatedNow}`);
+          console.log(`LIFECYCLE_ALREADY_ACTIVE_BEFORE=${first.alreadyActive}`);
+          console.log('LIFECYCLE_ACTIVE_FLOWS=5');
+          console.log('LIFECYCLE_APPROVED_TEMPLATES=5');
+          console.log('LIFECYCLE_PINS_VALID=true');
+          console.log('LIFECYCLE_MARKETING_UNSUBSCRIBE_VALID=true');
+          console.log('LIFECYCLE_IDEMPOTENT_RECHECK=PASS');
+          NODE
+
+          test "$(git rev-parse HEAD)" = "$current_sha"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          login_http="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' https://whatsapp.sikhadenge.in/login || true)"
+          test "$login_http" = "200"
+          printf 'LOGIN_PUBLIC_HTTP=200\n'
+          printf 'RUNTIME_MODE=DRY_RUN\nEXTERNAL_WRITES=false\nEXTERNAL_REQUEST_SENT=false\n'
+          printf 'EMAIL_LIFECYCLE_CONVERGE=PASS\n'
+          REMOTE
+
+      - name: Assert lifecycle production evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          grep -Fxq 'PINNED_LIFECYCLE_RUNTIME=PASS' email-lifecycle-converge.log
+          grep -Fxq 'LIFECYCLE_ACTIVE_FLOWS=5' email-lifecycle-converge.log
+          grep -Fxq 'LIFECYCLE_APPROVED_TEMPLATES=5' email-lifecycle-converge.log
+          grep -Fxq 'LIFECYCLE_PINS_VALID=true' email-lifecycle-converge.log
+          grep -Fxq 'LIFECYCLE_MARKETING_UNSUBSCRIBE_VALID=true' email-lifecycle-converge.log
+          grep -Fxq 'LIFECYCLE_IDEMPOTENT_RECHECK=PASS' email-lifecycle-converge.log
+          grep -Fxq 'RUNTIME_MODE=DRY_RUN' email-lifecycle-converge.log
+          grep -Fxq 'EXTERNAL_WRITES=false' email-lifecycle-converge.log
+          grep -Fxq 'EXTERNAL_REQUEST_SENT=false' email-lifecycle-converge.log
+          grep -Fxq 'LOGIN_PUBLIC_HTTP=200' email-lifecycle-converge.log
+          grep -Fxq 'EMAIL_LIFECYCLE_CONVERGE=PASS' email-lifecycle-converge.log
+          echo 'EMAIL_LIFECYCLE_PRODUCTION_EVIDENCE=PASS'
+
+      - name: Upload lifecycle production evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: email-lifecycle-converge-${{ github.run_id }}-${{ github.run_attempt }}
+          path: email-lifecycle-converge.log
+          if-no-files-found: error
+          retention-days: 14
