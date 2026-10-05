@@ -2,13 +2,16 @@ import type { EmailRuntimeMode } from "../domain/contracts";
 
 export const EMAIL_DELIVERABILITY_HARD_BOUNCE_BLOCK_PCT = 5;
 export const EMAIL_DELIVERABILITY_COMPLAINT_BLOCK_PCT = 0.1;
+export const EMAIL_DELIVERABILITY_DEFAULT_MAX_AGE_MINUTES = 1_440;
 
 export type EmailDeliverabilitySnapshot = {
+  checkedAt: string | null;
   spfAligned: boolean | null;
   dkimAligned: boolean | null;
   dmarcAligned: boolean | null;
   hardBounceRatePct: number | null;
   complaintRatePct: number | null;
+  complaintTelemetryQualified: boolean | null;
 };
 
 export type EmailDeliverabilityDecision = {
@@ -18,44 +21,54 @@ export type EmailDeliverabilityDecision = {
   snapshot: EmailDeliverabilitySnapshot;
 };
 
-function booleanSignal(value: string | undefined): boolean | null {
-  const normalized = value?.trim().toLowerCase();
-  if (normalized === "true" || normalized === "pass" || normalized === "aligned" || normalized === "verified") return true;
-  if (normalized === "false" || normalized === "fail" || normalized === "misaligned" || normalized === "unverified") return false;
-  return null;
-}
-
-function percentage(value: string | undefined): number | null {
-  if (value == null || value.trim() === "") return null;
-  const parsed = Number(value.trim());
-  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? parsed : null;
-}
-
-export function emailDeliverabilitySnapshotFromEnv(
-  env: NodeJS.ProcessEnv = process.env,
-): EmailDeliverabilitySnapshot {
+function unknownSnapshot(): EmailDeliverabilitySnapshot {
   return {
-    spfAligned: booleanSignal(env.EMAIL_DELIVERABILITY_SPF_ALIGNED),
-    dkimAligned: booleanSignal(env.EMAIL_DELIVERABILITY_DKIM_ALIGNED),
-    dmarcAligned: booleanSignal(env.EMAIL_DELIVERABILITY_DMARC_ALIGNED),
-    hardBounceRatePct: percentage(env.EMAIL_DELIVERABILITY_HARD_BOUNCE_RATE_PCT),
-    complaintRatePct: percentage(env.EMAIL_DELIVERABILITY_COMPLAINT_RATE_PCT),
+    checkedAt: null,
+    spfAligned: null,
+    dkimAligned: null,
+    dmarcAligned: null,
+    hardBounceRatePct: null,
+    complaintRatePct: null,
+    complaintTelemetryQualified: null,
   };
+}
+
+function maxAgeMinutes(env: NodeJS.ProcessEnv): number {
+  const parsed = Number(env.EMAIL_DELIVERABILITY_EVIDENCE_MAX_AGE_MINUTES);
+  return Number.isFinite(parsed)
+    ? Math.min(10_080, Math.max(15, Math.floor(parsed)))
+    : EMAIL_DELIVERABILITY_DEFAULT_MAX_AGE_MINUTES;
+}
+
+function evidenceIsFresh(checkedAt: string | null, now: Date, maxAge: number): boolean {
+  if (!checkedAt) return false;
+  const checked = new Date(checkedAt);
+  if (Number.isNaN(checked.getTime()) || checked.getTime() > now.getTime()) return false;
+  return now.getTime() - checked.getTime() <= maxAge * 60_000;
 }
 
 export function evaluateEmailDeliverabilityGuardrails(input: {
   mode: EmailRuntimeMode;
-  snapshot?: EmailDeliverabilitySnapshot;
+  snapshot?: EmailDeliverabilitySnapshot | null;
   env?: NodeJS.ProcessEnv;
+  now?: Date;
 }): EmailDeliverabilityDecision {
-  const snapshot = input.snapshot ?? emailDeliverabilitySnapshotFromEnv(input.env);
+  const snapshot = input.snapshot ?? unknownSnapshot();
   const enforced = input.mode === "LIMITED_COHORT" || input.mode === "LIVE";
   if (!enforced) return { enforced: false, allowed: true, reasons: Object.freeze([]), snapshot };
 
   const reasons: string[] = [];
-  if (snapshot.spfAligned !== true) reasons.push("SPF alignment is not positively qualified.");
-  if (snapshot.dkimAligned !== true) reasons.push("DKIM alignment is not positively qualified.");
-  if (snapshot.dmarcAligned !== true) reasons.push("DMARC alignment is not positively qualified.");
+  const now = input.now ?? new Date();
+  const ageLimit = maxAgeMinutes(input.env ?? process.env);
+  if (!snapshot.checkedAt) {
+    reasons.push("Persisted deliverability evidence is missing.");
+  } else if (!evidenceIsFresh(snapshot.checkedAt, now, ageLimit)) {
+    reasons.push(`Persisted deliverability evidence is stale or invalid; maximum age is ${ageLimit} minutes.`);
+  }
+
+  if (snapshot.spfAligned !== true) reasons.push("SPF provider authorization is not positively qualified.");
+  if (snapshot.dkimAligned !== true) reasons.push("DKIM sender-domain authentication is not positively qualified.");
+  if (snapshot.dmarcAligned !== true) reasons.push("DMARC sender-domain policy is not positively qualified.");
 
   if (snapshot.hardBounceRatePct == null) {
     reasons.push("Hard-bounce rate telemetry is missing or invalid.");
@@ -63,6 +76,9 @@ export function evaluateEmailDeliverabilityGuardrails(input: {
     reasons.push(`Hard-bounce rate ${snapshot.hardBounceRatePct}% is at or above the ${EMAIL_DELIVERABILITY_HARD_BOUNCE_BLOCK_PCT}% safety ceiling.`);
   }
 
+  if (snapshot.complaintTelemetryQualified !== true) {
+    reasons.push("Authoritative complaint/spam telemetry source is not qualified.");
+  }
   if (snapshot.complaintRatePct == null) {
     reasons.push("Complaint/spam rate telemetry is missing or invalid.");
   } else if (snapshot.complaintRatePct >= EMAIL_DELIVERABILITY_COMPLAINT_BLOCK_PCT) {
@@ -79,8 +95,9 @@ export function evaluateEmailDeliverabilityGuardrails(input: {
 
 export function assertEmailDeliverabilityGuardrails(input: {
   mode: EmailRuntimeMode;
-  snapshot?: EmailDeliverabilitySnapshot;
+  snapshot?: EmailDeliverabilitySnapshot | null;
   env?: NodeJS.ProcessEnv;
+  now?: Date;
 }): EmailDeliverabilityDecision {
   const decision = evaluateEmailDeliverabilityGuardrails(input);
   if (!decision.allowed) {

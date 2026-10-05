@@ -1,9 +1,11 @@
 /* EngageOS Font Hard Lock V15
  * Canonical product typeface: Manrope.
  * Imported last so legacy module CSS cannot switch the UI back to Inter/system fonts.
+ * Runtime stylesheet loading keeps production builds independent of fonts.googleapis.com.
  */
 
 :root {
+  --font-manrope: "Manrope";
   --engageos-font: var(--font-manrope), "Manrope", sans-serif;
 }
 
