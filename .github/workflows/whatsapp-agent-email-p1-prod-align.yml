@@ -28,8 +28,8 @@ jobs:
       SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
       SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
       EXPECTED_OLD_SHA: c982931f3e306771144565ab586b901d383fcb1c
-      TARGET_REF: prod/email-p1-deliverability-current-live-v4-20261005
-      TARGET_SHA: 0b093182058adfe506f69c456b942d7c0fdc6ec2
+      TARGET_REF: prod/email-p1-deliverability-current-live-v5-20261005
+      TARGET_SHA: c7a8b67d1ff1855e1b25f856a52395f9536f4b03
       ALIGN_RUN_ID: email-p1-prod-align-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
