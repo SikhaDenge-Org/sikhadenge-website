@@ -66,8 +66,6 @@ git fetch --no-tags origin "$TARGET_REF"
 expected_diff="$(cat <<'LIST' | sort
 apps/whatsapp-agent-dashboard/.env.example
 apps/whatsapp-agent-dashboard/app/api/email/deliverability/route.ts
-apps/whatsapp-agent-dashboard/app/font-hard-lock-v15.css
-apps/whatsapp-agent-dashboard/app/layout.tsx
 apps/whatsapp-agent-dashboard/modules/email-automation/application/automation-send-policy.ts
 apps/whatsapp-agent-dashboard/modules/email-automation/application/deliverability-evidence-service.ts
 apps/whatsapp-agent-dashboard/modules/email-automation/application/deliverability-guardrails.ts
@@ -83,7 +81,6 @@ apps/whatsapp-agent-dashboard/scripts/email-automation-production-preflight.sh
 apps/whatsapp-agent-dashboard/scripts/email-deliverability-refresh.ts
 apps/whatsapp-agent-dashboard/tests/email-automation-deliverability-preflight-policy.test.sh
 apps/whatsapp-agent-dashboard/tests/email-automation-production-preflight-policy.test.sh
-apps/whatsapp-agent-dashboard/tests/production-local-reconciliation-policy.test.ts
 LIST
 )"
 actual_diff="$(git diff --name-only "$EXPECTED_OLD_SHA" "$TARGET_SHA" | sort)"
