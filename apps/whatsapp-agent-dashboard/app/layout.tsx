@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Manrope } from "next/font/google";
 import SidebarNavigationBridge from "../components/navigation/SidebarNavigationBridge";
 import InboxTemplatePickerBridge from "../components/templates/InboxTemplatePickerBridge";
 import InboxComposerDockBridge from "../components/inbox/InboxComposerDockBridge";
@@ -56,15 +55,8 @@ import "./login-right-panel-v16.css";
 import "./sidebar-standard-v18.css";
 import "./sidebar-standard-v19.css";
 
-const manrope = Manrope({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
-  style: ["normal"],
-  display: "swap",
-  variable: "--font-manrope",
-});
-
 const DASHBOARD_FAVICON = "/sikhadenge-live-favicon-aa30502f5ec9.png";
+const MANROPE_STYLESHEET = "https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap";
 
 export const metadata: Metadata = {
   title: "SikhaDenge WhatsApp Agent",
@@ -84,11 +76,13 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={manrope.variable}>
-      <body
-        className={manrope.className}
-        data-ui-foundation="manrope-v15-hard-lock"
-      >
+    <html lang="en">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link rel="stylesheet" href={MANROPE_STYLESHEET} />
+      </head>
+      <body data-ui-foundation="manrope-v15-hard-lock">
         <ServiceWorkerRegistration />
         <SidebarNavigationBridge />
         <InboxTemplatePickerBridge />

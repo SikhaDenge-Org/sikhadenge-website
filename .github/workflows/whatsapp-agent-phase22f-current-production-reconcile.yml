@@ -1,0 +1,186 @@
+name: WhatsApp Phase22F Current Production Reconcile
+
+on:
+  push:
+    branches:
+      - production/whatsapp-phase22f-reconcile-20260923
+    paths:
+      - .github/workflows/whatsapp-agent-phase22f-current-production-reconcile.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_OLD_SHA: 60cd180e7a728b4ac546777605b4257504df483a
+      TARGET_REF: production/whatsapp-phase22f-reconcile-20260923
+
+    steps:
+      - name: Configure pinned production SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for value in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            test -n "${!value:-}"
+          done
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            SSH_PORT=22
+            echo 'SSH_PORT=22' >> "$GITHUB_ENV"
+          fi
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          ssh-keygen -y -f "$key" >/dev/null
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Reconcile causal scheduler safety onto exact current production lineage
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          target_sha="$GITHUB_SHA"
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 -o ConnectionAttempts=3 -o ServerAliveInterval=10 -o ServerAliveCountMax=2 \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_OLD_SHA='$EXPECTED_OLD_SHA' TARGET_REF='$TARGET_REF' TARGET_SHA='$target_sha' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          APP="$ROOT/apps/whatsapp-agent-dashboard"
+          SCHEDULER=sikhadenge-whatsapp-automation-scheduler
+          cd "$ROOT"
+
+          deployed=false
+          rollback() {
+            rc=$?
+            set +e
+            if [[ "$deployed" = "true" ]]; then
+              git reset --keep "$EXPECTED_OLD_SHA"
+              pm2 restart "$SCHEDULER" >/dev/null 2>&1 || true
+              sleep 2
+            fi
+            printf 'PHASE22F_RECONCILE_ROLLBACK_ATTEMPTED=%s\n' "$deployed"
+            exit "$rc"
+          }
+          trap rollback ERR
+
+          current_sha="$(git rev-parse HEAD)"
+          printf 'PHASE22F_RECONCILE_PRE_SHA=%s\n' "$current_sha"
+          test "$current_sha" = "$EXPECTED_OLD_SHA"
+
+          pre_dirty="$(git status --porcelain --untracked-files=no | sort)"
+          printf 'PHASE22F_RECONCILE_PRE_DIRTY_COUNT=%s\n' "$(printf '%s\n' "$pre_dirty" | sed '/^$/d' | wc -l | tr -d ' ')"
+
+          pm2_json="$(pm2 jlist 2>/dev/null)"
+          pm2v() {
+            printf '%s' "$pm2_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const [name,key]=process.argv.slice(1);const p=JSON.parse(s||"[]").find(x=>x.name===name);process.stdout.write(String(p?.pm2_env?.[key]??""))})' "$1" "$2"
+          }
+          pm2off() {
+            case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+              ""|0|false|no|off|disabled) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          test "$(pm2v sikhadenge-whatsapp-agent status)" = "online"
+          test "$(pm2v "$SCHEDULER" status)" = "online"
+          pre_runtime="$(pm2v "$SCHEDULER" AUTOMATION_RUNTIME_ENABLED)"
+          pre_actions="$(pm2v "$SCHEDULER" AUTOMATION_ACTIONS_ENABLED)"
+          pre_dispatch="$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)"
+          pre_mode="$(pm2v "$SCHEDULER" WHATSAPP_OUTBOUND_MODE)"
+          pre_kill="$(pm2v "$SCHEDULER" WHATSAPP_OUTBOUND_KILL_SWITCH)"
+          pre_prefix="$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX)"
+          test "$pre_actions" = "false"
+          test "$pre_dispatch" = "false"
+          test "$pre_mode" = "disabled"
+          test "$pre_kill" = "on"
+          pm2off "$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_ALLOW_GLOBAL_QUEUED_DISPATCH)"
+          printf 'PHASE22F_RECONCILE_PRE_FAIL_CLOSED=true\n'
+
+          set -a
+          source "$APP/.env"
+          set +a
+          test "${WHATSAPP_OUTBOUND_MODE:-disabled}" != "live"
+          test "${WHATSAPP_CUTOVER_APPROVED:-false}" != "true"
+          test -z "${WHATSAPP_OUTBOUND_LIVE_ACK:-}"
+          test "${WHATSAPP_OUTBOUND_KILL_SWITCH:-on}" = "on"
+
+          DB="$(node "$APP/scripts/prisma-postgres-cli-url.mjs" "$DATABASE_URL")"
+          state="$(PGOPTIONS='-c default_transaction_read_only=on' psql "$DB" -X -v ON_ERROR_STOP=1 -A -F '|' -t -c "SELECT \"mode\",\"writePolicy\",CASE WHEN \"externalWritesAllowed\" THEN 'true' ELSE 'false' END,COALESCE((\"scope\"->>'externalWritesRequested'),'false') FROM \"EngageControlledLaunchState\" WHERE \"workspaceId\"='engagews_default';")"
+          printf 'PHASE22F_RECONCILE_CONTROLLED_STATE=%s\n' "$state"
+          IFS='|' read -r mode policy external requested <<< "$state"
+          test "$mode" = "SHADOW"
+          test "$policy" = "NO_EXTERNAL_WRITES"
+          test "$external" = "false"
+          test "$requested" = "false"
+          approvals="$(PGOPTIONS='-c default_transaction_read_only=on' psql "$DB" -X -v ON_ERROR_STOP=1 -Atqc "SELECT COUNT(*) FROM \"EngageControlledLaunchOutboundApproval\" WHERE \"workspaceId\"='engagews_default' AND \"consumedAt\" IS NULL AND \"revokedAt\" IS NULL AND \"expiresAt\">NOW();")"
+          test "$approvals" = "0"
+          printf 'PHASE22F_RECONCILE_ACTIVE_APPROVALS=0\n'
+
+          git fetch --no-tags origin "$TARGET_REF"
+          fetched_sha="$(git rev-parse FETCH_HEAD)"
+          printf 'PHASE22F_RECONCILE_TARGET_SHA=%s\n' "$fetched_sha"
+          test "$fetched_sha" = "$TARGET_SHA"
+
+          actual_diff="$(git diff --name-only "$EXPECTED_OLD_SHA" "$TARGET_SHA" | sort)"
+          expected_diff="$(printf '%s\n%s\n%s\n%s\n%s\n' \
+            '.github/workflows/whatsapp-agent-phase22f-current-production-reconcile.yml' \
+            'apps/whatsapp-agent-dashboard/ecosystem.automation-scheduler.cjs' \
+            'apps/whatsapp-agent-dashboard/lib/outbound/outbound-service.ts' \
+            'apps/whatsapp-agent-dashboard/modules/automations/application/whatsapp-automation-scheduler.ts' \
+            'apps/whatsapp-agent-dashboard/tests/whatsapp-automation-scheduler-certification.test.ts' | sort)"
+          printf 'PHASE22F_RECONCILE_DIFF_BEGIN\n%s\nPHASE22F_RECONCILE_DIFF_END\n' "$actual_diff"
+          test "$actual_diff" = "$expected_diff"
+
+          git merge --ff-only "$TARGET_SHA"
+          deployed=true
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+
+          cd "$APP"
+          npm exec -- tsx tests/whatsapp-automation-scheduler-certification.test.ts
+
+          pm2 restart "$SCHEDULER" >/dev/null
+          sleep 5
+          pm2_json="$(pm2 jlist 2>/dev/null)"
+          test "$(pm2v "$SCHEDULER" status)" = "online"
+          test "$(pm2v sikhadenge-whatsapp-agent status)" = "online"
+          test "$(pm2v "$SCHEDULER" AUTOMATION_RUNTIME_ENABLED)" = "$pre_runtime"
+          test "$(pm2v "$SCHEDULER" AUTOMATION_ACTIONS_ENABLED)" = "$pre_actions"
+          test "$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_OUTBOUND_DISPATCH_ENABLED)" = "$pre_dispatch"
+          test "$(pm2v "$SCHEDULER" WHATSAPP_OUTBOUND_MODE)" = "$pre_mode"
+          test "$(pm2v "$SCHEDULER" WHATSAPP_OUTBOUND_KILL_SWITCH)" = "$pre_kill"
+          test "$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX)" = "$pre_prefix"
+          pm2off "$(pm2v "$SCHEDULER" WHATSAPP_AUTOMATION_ALLOW_GLOBAL_QUEUED_DISPATCH)"
+          printf 'PHASE22F_RECONCILE_POST_FAIL_CLOSED=true\n'
+
+          cd "$ROOT"
+          post_dirty="$(git status --porcelain --untracked-files=no | sort)"
+          test "$post_dirty" = "$pre_dirty"
+          login_http="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://whatsapp.sikhadenge.in/login || true)"
+          test "$login_http" = "200"
+          printf 'PHASE22F_RECONCILE_LOGIN_HTTP=200\n'
+          printf 'PHASE22F_RECONCILE_PROVIDER_WRITE_REQUESTED=false\n'
+          printf 'PHASE22F_RECONCILE_EXTERNAL_WHATSAPP_WRITE_SENT=false\n'
+          printf 'WHATSAPP_PHASE22F_CURRENT_PRODUCTION_RECONCILE=PASS\n'
+          REMOTE
