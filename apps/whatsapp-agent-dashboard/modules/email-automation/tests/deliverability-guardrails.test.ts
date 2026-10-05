@@ -12,6 +12,7 @@ import type { EmailRuntimePolicy } from "../application/runtime-policy";
 import type { EmailRuntimeMode } from "../domain/contracts";
 
 const now = new Date("2026-09-24T12:00:00.000Z");
+const testEnv = { NODE_ENV: "test", EMAIL_DELIVERABILITY_EVIDENCE_MAX_AGE_MINUTES: "1440" } as NodeJS.ProcessEnv;
 const healthy: EmailDeliverabilitySnapshot = {
   checkedAt: "2026-09-24T11:30:00.000Z",
   spfAligned: true,
@@ -57,7 +58,7 @@ function testStaleEvidenceFailsClosed() {
   const decision = evaluateEmailDeliverabilityGuardrails({
     mode: "LIMITED_COHORT",
     snapshot: { ...healthy, checkedAt: "2026-09-22T10:00:00.000Z" },
-    env: { NODE_ENV: "test", EMAIL_DELIVERABILITY_EVIDENCE_MAX_AGE_MINUTES: "1440" },
+    env: testEnv,
     now,
   });
   assert.equal(decision.allowed, false);
@@ -68,6 +69,7 @@ function testUnqualifiedComplaintSourceFailsClosed() {
   const decision = evaluateEmailDeliverabilityGuardrails({
     mode: "LIMITED_COHORT",
     snapshot: { ...healthy, complaintTelemetryQualified: false, complaintRatePct: 0 },
+    env: testEnv,
     now,
   });
   assert.equal(decision.allowed, false);
@@ -78,6 +80,7 @@ function testBoundaryRatesFailClosed() {
   const bounce = evaluateEmailDeliverabilityGuardrails({
     mode: "LIMITED_COHORT",
     snapshot: { ...healthy, hardBounceRatePct: EMAIL_DELIVERABILITY_HARD_BOUNCE_BLOCK_PCT },
+    env: testEnv,
     now,
   });
   assert.equal(bounce.allowed, false);
@@ -86,6 +89,7 @@ function testBoundaryRatesFailClosed() {
   const complaint = evaluateEmailDeliverabilityGuardrails({
     mode: "LIVE",
     snapshot: { ...healthy, complaintRatePct: EMAIL_DELIVERABILITY_COMPLAINT_BLOCK_PCT },
+    env: testEnv,
     now,
   });
   assert.equal(complaint.allowed, false);
@@ -94,7 +98,7 @@ function testBoundaryRatesFailClosed() {
 
 function testHealthyScaledSnapshotPasses() {
   for (const mode of ["LIMITED_COHORT", "LIVE"] as const) {
-    const decision = evaluateEmailDeliverabilityGuardrails({ mode, snapshot: healthy, now });
+    const decision = evaluateEmailDeliverabilityGuardrails({ mode, snapshot: healthy, env: testEnv, now });
     assert.equal(decision.enforced, true);
     assert.equal(decision.allowed, true);
     assert.deepEqual(decision.reasons, []);
