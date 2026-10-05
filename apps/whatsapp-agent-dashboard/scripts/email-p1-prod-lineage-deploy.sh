@@ -64,23 +64,10 @@ git fetch --no-tags origin "$TARGET_REF"
 [[ "$(git rev-parse "${TARGET_SHA}^")" == "$EXPECTED_OLD_SHA" ]] || fail "target is not a single direct child of the live SHA"
 
 expected_diff="$(cat <<'LIST' | sort
-apps/whatsapp-agent-dashboard/.env.example
-apps/whatsapp-agent-dashboard/app/api/email/deliverability/route.ts
-apps/whatsapp-agent-dashboard/modules/email-automation/application/automation-send-policy.ts
-apps/whatsapp-agent-dashboard/modules/email-automation/application/deliverability-evidence-service.ts
-apps/whatsapp-agent-dashboard/modules/email-automation/application/deliverability-guardrails.ts
-apps/whatsapp-agent-dashboard/modules/email-automation/application/manual-send-service.ts
-apps/whatsapp-agent-dashboard/modules/email-automation/automation/scheduler.ts
-apps/whatsapp-agent-dashboard/modules/email-automation/docs/P1_AUTOMATED_DELIVERABILITY_EVIDENCE.md
-apps/whatsapp-agent-dashboard/modules/email-automation/docs/phase-d-deliverability-guardrails.md
-apps/whatsapp-agent-dashboard/modules/email-automation/tests/automation-dispatcher.test.ts
-apps/whatsapp-agent-dashboard/modules/email-automation/tests/deliverability-evidence.test.ts
+apps/whatsapp-agent-dashboard/app/font-hard-lock-v15.css
+apps/whatsapp-agent-dashboard/app/layout.tsx
 apps/whatsapp-agent-dashboard/modules/email-automation/tests/deliverability-guardrails.test.ts
-apps/whatsapp-agent-dashboard/scripts/email-automation-deliverability-preflight.ts
-apps/whatsapp-agent-dashboard/scripts/email-automation-production-preflight.sh
-apps/whatsapp-agent-dashboard/scripts/email-deliverability-refresh.ts
-apps/whatsapp-agent-dashboard/tests/email-automation-deliverability-preflight-policy.test.sh
-apps/whatsapp-agent-dashboard/tests/email-automation-production-preflight-policy.test.sh
+apps/whatsapp-agent-dashboard/tests/production-local-reconciliation-policy.test.ts
 LIST
 )"
 actual_diff="$(git diff --name-only "$EXPECTED_OLD_SHA" "$TARGET_SHA" | sort)"
@@ -198,9 +185,9 @@ login_public="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' https://wh
 [[ "$(git hash-object "$APP/modules/email-automation/application/deliverability-evidence-service.ts")" == "ac89d8c15d0bdf0bd377c7ff0ae1dd64f1b9aa54" ]]
 [[ "$(git hash-object "$APP/modules/email-automation/application/deliverability-guardrails.ts")" == "2bc9903bada58bb28ccce3daa174e21ea72b813a" ]]
 [[ "$(git hash-object "$APP/scripts/email-deliverability-refresh.ts")" == "f5a0ac5b5efd870b7010e7dff82d7a5cceb99a0f" ]]
-[[ "$(git hash-object "$APP/app/layout.tsx")" == "df9faa0fb4fdfd161be060b0d5607c99ce644a4c" ]]
-[[ "$(git hash-object "$APP/app/font-hard-lock-v15.css")" == "3c591fb3885490410dec25a3cd38df6448fdfb66" ]]
-[[ "$(git hash-object "$APP/tests/production-local-reconciliation-policy.test.ts")" == "23a16032c38b4955fa6b24a5a10952884d4b8f33" ]]
+[[ "$(git hash-object "$APP/app/layout.tsx")" == "fc0fda1c0e3c40f78831e65267a3bdfd9bfed913" ]]
+[[ "$(git hash-object "$APP/app/font-hard-lock-v15.css")" == "a416bc182ef42ba51225c02d10d2c0433aa48e7d" ]]
+[[ "$(git hash-object "$APP/tests/production-local-reconciliation-policy.test.ts")" == "e346d4109db2525811367ce2dd4330131e85d80b" ]]
 
 printf 'STATUS=PASS\nOLD_SHA=%s\nTARGET_SHA=%s\nPRE_BUILD_ID=%s\nPOST_BUILD_ID=%s\nPM2_STATUS=online\nPM2_PID=%s\nPM2_CWD=%s\nRUNTIME_MODE=DRY_RUN\nEXTERNAL_WRITES=false\nSCHEDULER_ACTIVE=true\nTRACKED_DIRTY_AFTER=0\nLOGIN_LOCAL_HTTP=%s\nLOGIN_PUBLIC_HTTP=%s\nDELIVERABILITY_CONNECTIONS_SCANNED=%s\nDELIVERABILITY_DOMAINS=%s\nDELIVERABILITY_REFRESHED=%s\nCOMPLAINT_SOURCE_UNAVAILABLE=true\nSCALED_DELIVERY_ENABLED=false\nCOMPLETED_UTC=%s\n' \
   "$EXPECTED_OLD_SHA" "$TARGET_SHA" "$PRE_APP_BUILD_ID" "$STAGED_BUILD_ID" "$POST_PM2_PID" "$POST_PM2_CWD" "$login_local" "$login_public" "$connections_scanned" "$domains" "$refreshed" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$BACKUP/align-result.txt"
