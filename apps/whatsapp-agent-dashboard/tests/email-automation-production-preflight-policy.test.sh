@@ -22,13 +22,18 @@ grep -Fq 'scheduler token missing or shorter than 32 characters' "$script"
 grep -Fq 'protected scheduler health agrees with required $EXPECTED_MODE state' "$script"
 grep -Fq 'no duplicate scheduler wiring detected' "$script"
 grep -Fq 'scripts/email-automation-deliverability-preflight.ts' "$script"
-grep -Fq 'EMAIL_DELIVERABILITY_SPF_ALIGNED' "$script"
-grep -Fq 'EMAIL_DELIVERABILITY_DKIM_ALIGNED' "$script"
-grep -Fq 'EMAIL_DELIVERABILITY_DMARC_ALIGNED' "$script"
-grep -Fq 'EMAIL_DELIVERABILITY_HARD_BOUNCE_RATE_PCT' "$script"
-grep -Fq 'EMAIL_DELIVERABILITY_COMPLAINT_RATE_PCT' "$script"
-grep -Fq 'scaled-delivery deliverability guardrails qualified' "$script"
-grep -Fq 'scaled-delivery deliverability guardrails are not qualified' "$script"
+grep -Fq 'EMAIL_DELIVERABILITY_PREFLIGHT_WORKSPACE_ID' "$script"
+grep -Fq 'EMAIL_DELIVERABILITY_PREFLIGHT_SENDER_EMAIL' "$script"
+grep -Fq 'scaled-delivery persisted deliverability evidence qualified' "$script"
+grep -Fq 'scaled-delivery persisted deliverability evidence is not qualified' "$script"
+if grep -Fq 'EMAIL_DELIVERABILITY_SPF_ALIGNED' "$script" || \
+  grep -Fq 'EMAIL_DELIVERABILITY_DKIM_ALIGNED' "$script" || \
+  grep -Fq 'EMAIL_DELIVERABILITY_DMARC_ALIGNED' "$script" || \
+  grep -Fq 'EMAIL_DELIVERABILITY_HARD_BOUNCE_RATE_PCT="$(value_for' "$script" || \
+  grep -Fq 'EMAIL_DELIVERABILITY_COMPLAINT_RATE_PCT="$(value_for' "$script"; then
+  printf 'Scaled preflight must not trust manual deliverability evidence env values.\n' >&2
+  exit 1
+fi
 grep -Fq 'EMAIL_AUTOMATION_PRODUCTION_PREFLIGHT=PASS' "$script"
 grep -Fq 'EMAIL_PREFLIGHT_EXPECTED_MODE="$PREFLIGHT_EXPECTED_MODE"' "$activate"
 grep -Fq 'EMAIL_PREFLIGHT_EXPECTED_MODE=LIMITED_COHORT' "$cohort"

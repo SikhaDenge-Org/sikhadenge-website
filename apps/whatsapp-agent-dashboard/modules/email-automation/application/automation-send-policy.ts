@@ -1,6 +1,9 @@
 import type { EmailAddress, EmailRuntimeMode } from "../domain/contracts";
 import type { EmailRuntimePolicy } from "./runtime-policy";
-import { assertEmailDeliverabilityGuardrails } from "./deliverability-guardrails";
+import {
+  assertEmailDeliverabilityGuardrails,
+  type EmailDeliverabilitySnapshot,
+} from "./deliverability-guardrails";
 
 function email(value: string): string {
   const normalized = value.trim().toLowerCase();
@@ -26,6 +29,7 @@ export function assertAutomationEmailDispatchPolicy(input: {
   recipients: readonly EmailAddress[];
   internalAllowlist: ReadonlySet<string>;
   cohortAllowlist: ReadonlySet<string>;
+  deliverabilitySnapshot?: EmailDeliverabilitySnapshot | null;
 }): { mode: EmailRuntimeMode; externalRequestAllowed: boolean } {
   if (!input.policy.runtimeEnabled) throw new Error("Email runtime is disabled.");
   if (!input.policy.automationEnabled) throw new Error("Email automation is disabled.");
@@ -37,7 +41,10 @@ export function assertAutomationEmailDispatchPolicy(input: {
   }
   if (!input.policy.externalWritesEnabled) throw new Error("Email external writes are disabled.");
 
-  assertEmailDeliverabilityGuardrails({ mode: input.policy.mode });
+  assertEmailDeliverabilityGuardrails({
+    mode: input.policy.mode,
+    snapshot: input.deliverabilitySnapshot,
+  });
 
   if (input.policy.mode === "LIVE") {
     return { mode: "LIVE", externalRequestAllowed: true };

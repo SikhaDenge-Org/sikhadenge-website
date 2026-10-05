@@ -10,6 +10,7 @@ import {
   assertAutomationEmailDispatchPolicy,
   automationRecipientCohortAllowlist,
 } from "./automation-send-policy";
+import { loadPersistedEmailDeliverabilitySnapshot } from "./deliverability-evidence-service";
 import { getEmailRuntimePolicy } from "./runtime-policy";
 import { assertManualEmailDispatchPolicy, assertManualEmailRetryAllowed, internalRecipientAllowlist } from "./manual-send-policy";
 import { instrumentEmailHtml } from "../analytics/tracking";
@@ -113,12 +114,22 @@ export class ManualEmailSendService {
     const sender = route.sender;
 
     const policy = getEmailRuntimePolicy();
+    const deliverabilitySnapshot =
+      input.deliveryContext === "AUTOMATION" && (policy.mode === "LIMITED_COHORT" || policy.mode === "LIVE")
+        ? await loadPersistedEmailDeliverabilitySnapshot({
+            workspaceId: input.workspaceId,
+            connectionId: connection.id,
+            senderEmail: sender.fromEmail,
+            provider: connection.provider,
+          })
+        : null;
     const decision = input.deliveryContext === "AUTOMATION"
       ? assertAutomationEmailDispatchPolicy({
           policy,
           recipients: allRecipients,
           internalAllowlist: internalRecipientAllowlist(),
           cohortAllowlist: automationRecipientCohortAllowlist(),
+          deliverabilitySnapshot,
         })
       : assertManualEmailDispatchPolicy({ policy, recipients: allRecipients, allowlist: internalRecipientAllowlist() });
     const rendered = applyContentOverrides(renderEmailTemplate({ document: version.document, values: input.variables ?? {} }), input);
