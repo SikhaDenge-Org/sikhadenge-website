@@ -316,7 +316,7 @@ export async function processInboundAgentLifecycle(input: {
 
     const livePolicy = getLiveAgentPolicy();
     const groundedDecision = evaluateAgentDecisionForExternalSend(decision);
-    if (groundedDecision.route !== "AUTO_SEND") {
+    if (!groundedDecision.allowedToAutoSend) {
       await markReviewRequired({
         messageId: message.id,
         conversationId: message.conversationId,
