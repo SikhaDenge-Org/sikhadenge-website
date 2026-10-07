@@ -8,3 +8,4 @@ export * from "./sa6-counsellor-routing";
 export * from "./sa7-enrollment-automation";
 export * from "./sa8-ctwa-attribution";
 export * from "./sa9-observability";
+export * from "./sa10-cutover-verifier";
