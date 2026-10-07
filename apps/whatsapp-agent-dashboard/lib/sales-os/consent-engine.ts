@@ -58,3 +58,26 @@ export async function handleInboundOptOut(phone: string, text: string): Promise<
 
   return true;
 }
+
+
+/**
+ * Records inbound opt-out consent and marks contact as suppressed
+ */
+export async function recordInboundConsent(params: {
+  phone: string;
+  keywordMatched?: string;
+  source?: string;
+}) {
+  const cleanPhone = params.phone.replace(/\D/g, "");
+  const last10 = cleanPhone.slice(-10);
+
+  return await prisma.whatsAppContact.updateMany({
+    where: {
+      phone: { contains: last10 }
+    },
+    data: {
+      optedOutAt: new Date(),
+      consentStatus: "OPTED_OUT"
+    }
+  });
+}
