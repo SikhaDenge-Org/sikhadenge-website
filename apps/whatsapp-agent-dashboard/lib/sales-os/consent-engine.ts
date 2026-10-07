@@ -26,7 +26,7 @@ export async function checkSuppression(phone: string): Promise<SuppressionCheckR
     return { isSuppressed: false };
   }
 
-  if (contact.optedOutAt || contact.consentStatus === "REVOKED") {
+  if (contact.optedOutAt || contact.consentStatus === "OPTED_OUT") {
     return {
       isSuppressed: true,
       reason: "USER_OPTED_OUT"
@@ -52,7 +52,7 @@ export async function handleInboundOptOut(phone: string, text: string): Promise<
     },
     data: {
       optedOutAt: new Date(),
-      consentStatus: "REVOKED"
+      consentStatus: "OPTED_OUT"
     }
   });
 
