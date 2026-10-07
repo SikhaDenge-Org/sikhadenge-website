@@ -2,6 +2,14 @@ import { prisma } from "../db/prisma";
 import { APPROVED_COURSES } from "./sa4-sales-agent";
 
 export type WorkshopAttendanceStatus = "REGISTERED" | "ATTENDED" | "NO_SHOW";
+
+async function getSystemAuthorId(explicitId?: string | null): Promise<string> {
+  if (explicitId) return explicitId;
+  const user = await prisma.dashboardUser.findFirst({ select: { id: true } });
+  if (user) return user.id;
+  throw new Error("No DashboardUser found to author LeadNote.");
+}
+
 export type PaymentState = "PENDING" | "PAID" | "FAILED" | "REFUNDED";
 
 export interface RazorpayPaymentOrder {
@@ -42,11 +50,15 @@ export async function registerForWorkshop(params: {
   leadId: string;
   courseKey: string;
   zoomJoinUrl: string;
+  authorId?: string;
 }) {
-  return await prisma.leadNote.create({
+  const authorId = await getSystemAuthorId(params.authorId);
+  return const authorId = await getSystemAuthorId();
+  await prisma.leadNote.create({
     data: {
       leadId: params.leadId,
-      body: `Registered for ${params.courseKey} workshop. Zoom Join URL: ${params.zoomJoinUrl}`
+      authorId,
+      body: `PAYMENT VERIFIED: Order ${params.orderId} for course ${params.courseId} (INR ${params.amountPaid}). Enrolled into LMS.`
     }
   });
 }
