@@ -46,7 +46,7 @@ export async function registerForWorkshop(params: {
   return await prisma.leadNote.create({
     data: {
       leadId: params.leadId,
-      content: `Registered for ${params.courseKey} workshop. Zoom Join URL: ${params.zoomJoinUrl}`
+      body: `Registered for ${params.courseKey} workshop. Zoom Join URL: ${params.zoomJoinUrl}`
     }
   });
 }
@@ -94,7 +94,7 @@ export async function processPaymentSuccessAndEnroll(params: {
   await prisma.leadNote.create({
     data: {
       leadId: params.leadId,
-      content: `PAYMENT VERIFIED: Order ${params.orderId} for course ${params.courseId} (INR ${params.amountPaid}). Enrolled into LMS.`
+      body: `PAYMENT VERIFIED: Order ${params.orderId} for course ${params.courseId} (INR ${params.amountPaid}). Enrolled into LMS.`
     }
   });
 
