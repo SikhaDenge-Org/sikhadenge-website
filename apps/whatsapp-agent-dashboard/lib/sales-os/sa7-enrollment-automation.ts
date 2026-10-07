@@ -2,14 +2,6 @@ import { prisma } from "../db/prisma";
 import { APPROVED_COURSES } from "./sa4-sales-agent";
 
 export type WorkshopAttendanceStatus = "REGISTERED" | "ATTENDED" | "NO_SHOW";
-
-async function getSystemAuthorId(explicitId?: string | null): Promise<string> {
-  if (explicitId) return explicitId;
-  const user = await prisma.dashboardUser.findFirst({ select: { id: true } });
-  if (user) return user.id;
-  throw new Error("No DashboardUser found to author LeadNote.");
-}
-
 export type PaymentState = "PENDING" | "PAID" | "FAILED" | "REFUNDED";
 
 export interface RazorpayPaymentOrder {
@@ -18,6 +10,13 @@ export interface RazorpayPaymentOrder {
   amount: number;
   currency: string;
   paymentLink: string;
+}
+
+async function getSystemAuthorId(explicitId?: string | null): Promise<string> {
+  if (explicitId) return explicitId;
+  const user = await prisma.dashboardUser.findFirst({ select: { id: true } });
+  if (user) return user.id;
+  throw new Error("No DashboardUser found to author LeadNote.");
 }
 
 /**
@@ -53,12 +52,11 @@ export async function registerForWorkshop(params: {
   authorId?: string;
 }) {
   const authorId = await getSystemAuthorId(params.authorId);
-  return const authorId = await getSystemAuthorId();
-  await prisma.leadNote.create({
+  return await prisma.leadNote.create({
     data: {
       leadId: params.leadId,
       authorId,
-      body: `PAYMENT VERIFIED: Order ${params.orderId} for course ${params.courseId} (INR ${params.amountPaid}). Enrolled into LMS.`
+      body: `Registered for ${params.courseKey} workshop. Zoom Join URL: ${params.zoomJoinUrl}`
     }
   });
 }
@@ -90,8 +88,8 @@ export async function processPaymentSuccessAndEnroll(params: {
   orderId: string;
   courseId: string;
   amountPaid: number;
+  authorId?: string;
 }) {
-  // 1. Audit payment confirmation on Lead
   const updatedLead = await prisma.lead.update({
     where: { id: params.leadId },
     data: {
@@ -102,10 +100,11 @@ export async function processPaymentSuccessAndEnroll(params: {
     }
   });
 
-  // 2. Create durable audit entry
+  const authorId = await getSystemAuthorId(params.authorId);
   await prisma.leadNote.create({
     data: {
       leadId: params.leadId,
+      authorId,
       body: `PAYMENT VERIFIED: Order ${params.orderId} for course ${params.courseId} (INR ${params.amountPaid}). Enrolled into LMS.`
     }
   });
