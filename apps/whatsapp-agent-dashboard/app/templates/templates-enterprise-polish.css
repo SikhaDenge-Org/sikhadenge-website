@@ -1,0 +1,492 @@
+/* Templates route enterprise hardening.
+   Intentionally scoped to .template-studio so this route cannot restyle other modules. */
+
+.sx-module .template-studio {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  display: grid;
+  gap: 16px;
+}
+
+.sx-module .template-studio :where(button, input, select, textarea) {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sx-module .template-studio :where(button, input, select, textarea):focus-visible {
+  outline: 3px solid rgba(97, 114, 243, 0.2);
+  outline-offset: 2px;
+}
+
+.sx-module .template-studio .template-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px !important;
+}
+
+.sx-module .template-studio .template-metrics > article {
+  position: relative;
+  min-width: 0;
+  min-height: 76px !important;
+  padding: 14px 16px !important;
+  overflow: hidden;
+  border: 1px solid #e4e7ec;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04) !important;
+  transform: none !important;
+}
+
+.sx-module .template-studio .template-metrics > article::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: #4f67ff;
+}
+
+.sx-module .template-studio .template-metrics > article:nth-child(2)::before { background: #12b76a; }
+.sx-module .template-studio .template-metrics > article:nth-child(3)::before { background: #f79009; }
+.sx-module .template-studio .template-metrics > article:nth-child(4)::before { background: #f04438; }
+
+.sx-module .template-studio .template-metrics span {
+  color: #667085;
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.sx-module .template-studio .template-metrics strong {
+  margin-top: 6px;
+  min-width: 0;
+  color: #101828;
+  font-size: 24px;
+  line-height: 1;
+  overflow-wrap: anywhere;
+}
+
+.sx-module .template-studio .template-alert {
+  margin: 0;
+}
+
+.sx-module .template-studio .template-studio-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 320px);
+  gap: 18px;
+  min-width: 0;
+  align-items: start;
+}
+
+.sx-module .template-studio .template-editor,
+.sx-module .template-studio .template-preview-card,
+.sx-module .template-studio .template-library {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #e4e7ec;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.05);
+}
+
+.sx-module .template-studio .template-section-heading {
+  min-height: 68px;
+  padding: 16px 20px;
+  align-items: center;
+  border-bottom: 1px solid #eaecf0;
+  background: #fff;
+}
+
+.sx-module .template-studio .template-section-heading > div > span,
+.sx-module .template-studio .template-library-toolbar > div:first-child > span {
+  color: #6172f3;
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+}
+
+.sx-module .template-studio .template-section-heading h3,
+.sx-module .template-studio .template-library-toolbar h3 {
+  margin-top: 3px;
+  color: #101828;
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.sx-module .template-studio .template-section-heading small {
+  padding: 5px 9px;
+  border: 1px solid #e4e7ec;
+  border-radius: 999px;
+  background: #f9fafb;
+  color: #667085;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.sx-module .template-studio .template-form-grid,
+.sx-module .template-studio .template-inline-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+  padding: 18px 20px;
+}
+
+.sx-module .template-studio .template-inline-fields {
+  padding-top: 0;
+}
+
+.sx-module .template-studio .template-editor label {
+  min-width: 0;
+  gap: 6px;
+}
+
+.sx-module .template-studio .template-editor label > span {
+  color: #344054;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.sx-module .template-studio .template-editor label > small {
+  color: #98a2b3;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.sx-module .template-studio .template-editor :where(input, select, textarea),
+.sx-module .template-studio .template-library-actions :where(input, select),
+.sx-module .template-studio .template-button-row :where(input, select) {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  border: 1px solid #d0d5dd;
+  border-radius: 9px;
+  background: #fff;
+  color: #101828;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
+}
+
+.sx-module .template-studio .template-editor :where(input, select),
+.sx-module .template-studio .template-library-actions :where(input, select),
+.sx-module .template-studio .template-button-row :where(input, select) {
+  min-height: 42px;
+  padding: 9px 11px;
+}
+
+.sx-module .template-studio .template-editor textarea {
+  min-height: 210px;
+  padding: 12px 13px;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.sx-module .template-studio .template-media-uploader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.7fr) auto;
+  gap: 12px;
+  align-items: center;
+  margin: 0;
+  padding: 16px 20px;
+  border: 0;
+  border-top: 1px solid #eaecf0;
+  border-bottom: 1px solid #eaecf0;
+  border-radius: 0;
+  background: #f8f9fc;
+}
+
+.sx-module .template-studio .template-file-picker span {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  border-color: #d0d5dd;
+}
+
+.sx-module .template-studio .template-wide-field {
+  padding: 18px 20px 0;
+}
+
+.sx-module .template-studio .template-variable-panel,
+.sx-module .template-studio .template-button-builder {
+  margin: 16px 20px 0;
+  padding: 14px;
+  border-color: #e4e7ec;
+  border-radius: 11px;
+  background: #f9fafb;
+}
+
+.sx-module .template-studio .template-variable-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.sx-module .template-studio .template-button-row {
+  min-width: 0;
+  grid-template-columns: 28px minmax(124px, 0.55fr) minmax(130px, 0.65fr) minmax(180px, 1fr) 40px;
+  gap: 8px;
+}
+
+.sx-module .template-studio .template-button-row > :where(input, select, .template-button-helper) {
+  min-width: 0;
+}
+
+.sx-module .template-studio .template-remove-button {
+  width: 40px !important;
+  min-width: 40px !important;
+  height: 40px !important;
+}
+
+.sx-module .template-studio .template-form-actions {
+  margin-top: 18px;
+  padding: 14px 20px;
+  align-items: center;
+  border-top-color: #eaecf0;
+  background: #f9fafb;
+}
+
+.sx-module .template-studio .template-form-buttons {
+  gap: 8px;
+}
+
+.sx-module .template-studio :where(
+  .template-media-uploader button,
+  .template-form-buttons button,
+  .template-library-actions button,
+  .template-submit-button
+) {
+  min-height: 42px;
+  padding: 9px 14px;
+  border-radius: 9px;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.sx-module .template-studio .template-preview-card {
+  position: sticky;
+  top: 88px;
+  width: auto;
+  min-width: 0;
+}
+
+.sx-module .template-studio .template-preview-card .template-section-heading {
+  min-height: 62px;
+  padding: 14px 16px;
+}
+
+.sx-module .template-studio .template-phone-shell {
+  width: min(270px, calc(100% - 28px));
+  margin: 16px auto;
+  border-color: #1f2937;
+  box-shadow: 0 14px 28px rgba(16, 24, 40, 0.16);
+}
+
+.sx-module .template-studio .template-phone-canvas {
+  min-height: 430px;
+  padding: 18px 10px;
+}
+
+.sx-module .template-studio .template-message-bubble {
+  width: 100%;
+  max-width: none;
+}
+
+.sx-module .template-studio .template-preview-media {
+  width: 100%;
+  max-height: 285px;
+  object-fit: contain;
+  background: #f2f4f7;
+}
+
+.sx-module .template-studio .template-approval-guide {
+  margin: 0 16px 16px;
+  padding: 12px 13px;
+  border-radius: 10px;
+}
+
+.sx-module .template-studio .template-library {
+  margin-top: 0;
+}
+
+.sx-module .template-studio .template-library-toolbar {
+  min-width: 0;
+  min-height: 72px;
+  padding: 15px 18px;
+  display: flex;
+  align-items: center;
+}
+
+.sx-module .template-studio .template-library-actions {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) 150px auto;
+  gap: 8px;
+  min-width: 0;
+  align-items: center;
+}
+
+.sx-module .template-studio .template-library-actions > * {
+  min-width: 0;
+}
+
+.sx-module .template-studio .template-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.sx-module .template-studio .template-table {
+  min-width: 820px;
+}
+
+.sx-module .template-studio .template-table td:first-child {
+  min-width: 260px;
+}
+
+.sx-module .template-studio .template-table td:last-child {
+  min-width: 138px;
+}
+
+@media (max-width: 1180px) {
+  .sx-module .template-studio .template-studio-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sx-module .template-studio .template-preview-card {
+    position: static;
+    width: 100%;
+  }
+
+  .sx-module .template-studio .template-phone-shell {
+    width: min(300px, calc(100% - 28px));
+  }
+}
+
+@media (max-width: 820px) {
+  .sx-module .template-studio .template-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .sx-module .template-studio .template-form-grid,
+  .sx-module .template-studio .template-inline-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sx-module .template-studio .template-media-uploader {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sx-module .template-studio .template-library-toolbar,
+  .sx-module .template-studio .template-form-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .sx-module .template-studio .template-library-actions {
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+  }
+
+  .sx-module .template-studio .template-library-actions > :where(input, select, button) {
+    width: 100%;
+  }
+
+  .sx-module .template-studio .template-button-row {
+    grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr) 40px;
+  }
+
+  .sx-module .template-studio .template-button-row > input:nth-of-type(2),
+  .sx-module .template-studio .template-button-helper {
+    grid-column: 2 / -1;
+  }
+}
+
+@media (max-width: 560px) {
+  .sx-module .template-studio .template-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+
+  .sx-module .template-studio .template-metrics > article {
+    min-height: 70px !important;
+    padding: 11px 12px !important;
+  }
+
+  .sx-module .template-studio .template-metrics span {
+    font-size: 10.5px;
+    line-height: 1.25;
+  }
+
+  .sx-module .template-studio .template-metrics strong {
+    font-size: 21px;
+  }
+
+  .sx-module .template-studio .template-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .sx-module .template-studio .template-section-heading small {
+    text-align: left;
+  }
+
+  .sx-module .template-studio .template-editor :where(input, select, textarea),
+  .sx-module .template-studio .template-library-actions :where(input, select),
+  .sx-module .template-studio .template-button-row :where(input, select) {
+    font-size: 16px !important;
+  }
+
+  .sx-module .template-studio :where(
+    .template-media-uploader button,
+    .template-form-buttons button,
+    .template-library-actions button,
+    .template-submit-button,
+    .template-secondary-button,
+    .template-remove-button
+  ) {
+    min-height: 44px !important;
+  }
+
+  .sx-module .template-studio .template-file-picker span {
+    min-height: 44px;
+  }
+
+  .sx-module .template-studio .template-button-row {
+    grid-template-columns: 28px minmax(0, 1fr) 44px;
+    align-items: start;
+  }
+
+  .sx-module .template-studio .template-button-row :where(select, input, .template-button-helper) {
+    grid-column: 2 / 3;
+  }
+
+  .sx-module .template-studio .template-button-row .template-remove-button {
+    grid-column: 3;
+    grid-row: 1;
+    width: 44px !important;
+    min-width: 44px !important;
+    height: 44px !important;
+  }
+
+  .sx-module .template-studio .template-form-buttons {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .sx-module .template-studio .template-form-buttons button {
+    width: 100%;
+  }
+
+  .sx-module .template-studio .template-phone-shell {
+    width: min(280px, calc(100% - 28px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sx-module .template-studio *,
+  .sx-module .template-studio *::before,
+  .sx-module .template-studio *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

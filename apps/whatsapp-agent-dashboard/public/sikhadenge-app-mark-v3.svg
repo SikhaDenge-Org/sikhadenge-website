@@ -1,0 +1,35 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="purple" x1="10" y1="15" x2="34" y2="55" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#A855F7"/>
+      <stop offset="0.48" stop-color="#6D28D9"/>
+      <stop offset="1" stop-color="#4338CA"/>
+    </linearGradient>
+    <linearGradient id="cyan" x1="30" y1="12" x2="55" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38BDF8"/>
+      <stop offset="0.45" stop-color="#06B6D4"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="bridge" x1="23" y1="18" x2="43" y2="47" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#14B8A6"/>
+    </linearGradient>
+    <radialGradient id="shine" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(23 19) rotate(50) scale(24 22)">
+      <stop stop-color="white" stop-opacity="0.62"/>
+      <stop offset="1" stop-color="white" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="3" y="6" width="58" height="55" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#071126" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <path d="M9 27.5 25.3 14v11.1L18.7 31v20.4L9 45V27.5Z" fill="url(#purple)"/>
+    <path d="m25.3 14 13.4 8.2-7 6.3-6.4-3.4V14Z" fill="#8B5CF6"/>
+    <path d="M31.7 28.5 45.3 16 55 22.6v22.8L45.3 52V29.4l-6.8 6.2-6.8-7.1Z" fill="url(#cyan)"/>
+    <path d="m18.7 31 6.6-5.9 6.4 3.4 6.8 7.1-7 6.4-6.2-6.3-6.6 5.8V31Z" fill="url(#bridge)"/>
+    <path d="M9 27.5 25.3 14v11.1L18.7 31v20.4L9 45V27.5Z" fill="url(#shine)" opacity="0.72"/>
+    <path d="M31.7 28.5 45.3 16 55 22.6v22.8L45.3 52V29.4l-6.8 6.2-6.8-7.1Z" fill="url(#shine)" opacity="0.46"/>
+    <circle cx="46.8" cy="11.6" r="4.2" fill="#F59E0B"/>
+    <circle cx="45.5" cy="10.2" r="1.25" fill="#FFF7D6"/>
+  </g>
+</svg>

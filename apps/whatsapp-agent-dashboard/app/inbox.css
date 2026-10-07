@@ -1,0 +1,68 @@
+.panel-empty-state {
+  padding: 28px 20px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.panel-empty-state strong {
+  display: block;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.panel-empty-state p {
+  margin: 7px 0 0;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.center-state {
+  min-height: 220px;
+  display: grid;
+  place-content: center;
+  gap: 7px;
+  padding: 28px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.center-state strong {
+  color: var(--text);
+  font-size: 15px;
+}
+
+.center-state p {
+  max-width: 360px;
+  margin: 0;
+  line-height: 1.6;
+}
+
+.error-state {
+  color: var(--red);
+  background: #fff7f7;
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+}
+
+.secondary-button:disabled,
+.icon-button:disabled,
+.ai-switch input:disabled + i {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.composer textarea:disabled {
+  cursor: not-allowed;
+  background: #f8fafc;
+}
+
+.message-bubble time {
+  text-transform: capitalize;
+}
+
+@media (max-width: 850px) {
+  .center-state {
+    min-height: 300px;
+  }
+}

@@ -1,0 +1,344 @@
+name: WhatsApp Agent CI
+
+on:
+  pull_request:
+    paths:
+      - "apps/whatsapp-agent-dashboard/**"
+      - "modules/whatsapp-agent/**"
+      - ".github/workflows/whatsapp-agent-ci.yml"
+      - ".github/workflows/whatsapp-agent-production-batch1.yml"
+      - ".github/workflows/whatsapp-agent-automation-scheduler-activation.yml"
+      - ".github/workflows/whatsapp-agent-nonruntime-source-alignment.yml"
+      - ".github/workflows/whatsapp-agent-email-inbound-readiness.yml"
+      - ".github/workflows/whatsapp-agent-email-inbound-activate.yml"
+      - ".github/workflows/whatsapp-agent-phase17-*.yml"
+      - ".github/workflows/whatsapp-agent-phase21*.yml"
+      - ".github/workflows/whatsapp-agent-provider-parity-monitor.yml"
+      - ".github/workflows/whatsapp-agent-dr-readiness.yml"
+  push:
+    branches:
+      - feature/whatsapp-ai-agent-roadmap
+      - phase16-saas-enterprise-20260911
+    paths:
+      - "apps/whatsapp-agent-dashboard/**"
+      - "modules/whatsapp-agent/**"
+      - ".github/workflows/whatsapp-agent-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/whatsapp-agent-dashboard
+    env:
+      DATABASE_URL: postgresql://ci_user:ci_password@localhost:5432/sikhadenge_whatsapp_ci?schema=public
+      SHADOW_DATABASE_URL: postgresql://ci_user:ci_password@localhost:5432/sikhadenge_whatsapp_ci_shadow?schema=public
+      SESSION_SECRET: ci-only-session-secret-please-replace-in-production-1234567890
+      APP_URL: http://localhost:3100
+      INITIAL_ADMIN_EMAIL: admin@example.invalid
+      INITIAL_ADMIN_PASSWORD: CI-only-password-12345
+      INITIAL_ADMIN_NAME: CI Admin
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Test human conversation and learning flow
+        run: npm run test:agent
+
+      - name: Test WhatsApp business trigger outbox wiring
+        run: npm run test:whatsapp-business-trigger-outbox
+
+      - name: Test WhatsApp read-only shadow runtime
+        run: npm exec -- tsx tests/whatsapp-automation-shadow-certification.test.ts
+
+      - name: Test WhatsApp automation flow coverage audit
+        run: npm exec -- tsx tests/whatsapp-automation-flow-coverage-certification.test.ts
+
+      - name: Test WhatsApp no-send canary provisioning
+        run: npm exec -- tsx tests/whatsapp-phase21e-nosend-canary-certification.test.ts
+
+      - name: Test WhatsApp no-send runtime qualification
+        run: npm exec -- tsx tests/whatsapp-phase21f-nosend-runtime-qualification-certification.test.ts
+
+      - name: Test explicit WhatsApp canary designation
+        run: npm exec -- tsx tests/whatsapp-phase21g-explicit-canary-designation-certification.test.ts
+
+      - name: Test targeted designated scheduler canary
+        run: npm exec -- tsx tests/whatsapp-phase21g-targeted-scheduler-certification.test.ts
+
+      - name: Capture TypeScript diagnostics
+        run: |
+          set +e
+          npm run typecheck > typecheck.log 2>&1
+          code=$?
+          echo "$code" > typecheck.exit
+          exit 0
+
+      - name: Upload TypeScript diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatsapp-agent-typecheck
+          path: |
+            apps/whatsapp-agent-dashboard/typecheck.log
+            apps/whatsapp-agent-dashboard/typecheck.exit
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Enforce TypeScript result
+        run: |
+          cat typecheck.log
+          test "$(cat typecheck.exit)" = "0"
+
+      - name: Capture production build diagnostics
+        run: |
+          set +e
+          npm run build > build.log 2>&1
+          code=$?
+          echo "$code" > build.exit
+          exit 0
+
+      - name: Upload production build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatsapp-agent-build
+          path: |
+            apps/whatsapp-agent-dashboard/build.log
+            apps/whatsapp-agent-dashboard/build.exit
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Enforce production build result
+        run: |
+          cat build.log
+          test "$(cat build.exit)" = "0"
+
+  migration-regression:
+    if: github.event_name == 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci_user
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: sikhadenge_whatsapp_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U ci_user -d sikhadenge_whatsapp_ci"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    defaults:
+      run:
+        working-directory: apps/whatsapp-agent-dashboard
+    env:
+      DATABASE_URL: postgresql://ci_user:ci_password@localhost:5432/sikhadenge_whatsapp_ci?schema=public
+      SHADOW_DATABASE_URL: postgresql://ci_user:ci_password@localhost:5432/sikhadenge_whatsapp_ci_shadow?schema=public
+      SESSION_SECRET: ci-only-session-secret-please-replace-in-production-1234567890
+      APP_URL: http://127.0.0.1:3100
+      INITIAL_ADMIN_EMAIL: admin@example.invalid
+      INITIAL_ADMIN_PASSWORD: CI-only-password-12345
+      INITIAL_ADMIN_NAME: CI Admin
+      DASHBOARD_ADMIN_NAME: CI Admin
+      DASHBOARD_ADMIN_EMAIL: admin@example.invalid
+      DASHBOARD_ADMIN_PASSWORD: CI-only-password-12345
+      ENGAGEOS_SECURITY_PERSISTENCE_ENABLED: "true"
+
+    steps:
+      - name: Checkout repository and base history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --include=dev --no-audit --no-fund
+
+      - name: Materialize pull request base schema and migration list
+        run: |
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          git show "${base_sha}:apps/whatsapp-agent-dashboard/prisma/schema.prisma" > prisma/phase-base.prisma
+          test -s prisma/phase-base.prisma
+
+          : > prisma/phase-base-migrations.txt
+          for migration_dir in prisma/migrations/*; do
+            [[ -d "$migration_dir" ]] || continue
+            migration_name="$(basename "$migration_dir")"
+            if git show "${base_sha}:apps/whatsapp-agent-dashboard/prisma/migrations/${migration_name}/migration.sql" >/dev/null 2>&1; then
+              printf '%s\n' "$migration_name" >> prisma/phase-base-migrations.txt
+            fi
+          done
+          sort -u -o prisma/phase-base-migrations.txt prisma/phase-base-migrations.txt
+
+          printf 'Pull request base migrations:\n'
+          cat prisma/phase-base-migrations.txt
+
+      - name: Create database from pull request base and seed data
+        run: |
+          npx prisma db push --schema prisma/phase-base.prisma --skip-generate
+          npm run db:seed
+
+      - name: Reconstruct pull request base migration data
+        run: |
+          if grep -Fxq "20260802174500_add_engageos_security_persistence" prisma/phase-base-migrations.txt; then
+            npx tsx tests/fixtures/materialize-engageos-base-state.ts
+          fi
+
+          if grep -Fxq "20260912194000_add_phase16e_enterprise_webhooks" prisma/phase-base-migrations.txt \
+            && ! grep -q "model EngageOutboundWebhookEndpoint" prisma/phase-base.prisma; then
+            npx prisma db execute \
+              --schema prisma/phase-base.prisma \
+              --file prisma/migrations/20260912194000_add_phase16e_enterprise_webhooks/migration.sql
+          fi
+
+      - name: Record pull request base migration history
+        run: |
+          if [[ -s prisma/phase-base-migrations.txt ]]; then
+            while IFS= read -r migration_name; do
+              test -n "$migration_name"
+              npx prisma migrate resolve --applied "$migration_name"
+            done < prisma/phase-base-migrations.txt
+          elif [[ -d prisma/migrations/20260802000000_baseline_existing_schema ]]; then
+            npx prisma migrate resolve --applied 20260802000000_baseline_existing_schema
+          fi
+
+      - name: Apply head-only committed Prisma migrations
+        run: npx prisma migrate deploy
+
+      - name: Verify migration status
+        run: npx prisma migrate status
+
+      - name: Test Phase 16 schema and migration parity
+        run: npm run test:phase16-schema-parity:integration
+
+      - name: Test persisted security behavior
+        run: npm run test:security-persistence:integration
+
+      - name: Test production-like legacy migration lineage
+        run: npm run test:production-migration-lineage:integration
+
+  browser-regression:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci_user
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: sikhadenge_whatsapp_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U ci_user -d sikhadenge_whatsapp_ci"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    defaults:
+      run:
+        working-directory: apps/whatsapp-agent-dashboard
+    env:
+      DATABASE_URL: postgresql://ci_user:ci_password@localhost:5432/sikhadenge_whatsapp_ci?schema=public
+      SHADOW_DATABASE_URL: postgresql://ci_user:ci_password@localhost:5432/sikhadenge_whatsapp_ci_shadow?schema=public
+      SESSION_SECRET: ci-only-session-secret-please-replace-in-production-1234567890
+      APP_URL: http://127.0.0.1:3100
+      DASHBOARD_ADMIN_NAME: CI Admin
+      DASHBOARD_ADMIN_EMAIL: admin@example.invalid
+      DASHBOARD_ADMIN_PASSWORD: CI-only-password-12345
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install application dependencies
+        run: npm install --include=dev --no-audit --no-fund
+
+      - name: Install browser regression tooling
+        run: |
+          npm install --no-save --no-audit --no-fund @playwright/test@1.54.2
+          npx playwright install --with-deps chromium
+
+      - name: Prepare isolated browser database
+        run: |
+          npx prisma db push --skip-generate
+          npm run db:seed
+          npx tsx tests/fixtures/seed-inbox-browser.ts
+
+      - name: Build production application
+        run: NODE_ENV=production npm run build
+
+      - name: Start production application
+        run: |
+          NODE_ENV=test nohup npm run start > browser-server.log 2>&1 &
+          echo $! > browser-server.pid
+
+      - name: Wait for login route
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:3100/login > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat browser-server.log
+          exit 1
+
+      - name: Run authenticated Inbox browser regression
+        run: npx playwright test --config=playwright.config.mjs
+
+      - name: Upload browser regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatsapp-agent-browser-regression
+          path: |
+            apps/whatsapp-agent-dashboard/playwright-report
+            apps/whatsapp-agent-dashboard/test-results
+            apps/whatsapp-agent-dashboard/browser-server.log
+          if-no-files-found: warn
+          retention-days: 5
+
+      - name: Stop production application
+        if: always()
+        run: |
+          if [ -f browser-server.pid ]; then
+            kill "$(cat browser-server.pid)" || true
+          fi

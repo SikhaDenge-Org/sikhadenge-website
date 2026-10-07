@@ -1,0 +1,45 @@
+/* Team route cascade gate.
+   Later global responsive layers still reverse the Team workspace at <=1280px
+   and force phone metrics back to a single column. Keep conversation ownership
+   first and preserve the route-specific operational density without changing
+   Team behavior. */
+
+@media (min-width: 1181px) {
+  .sx-module .sx-workspace-body .team-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(310px, 360px) !important;
+  }
+}
+
+.sx-module .sx-workspace-body .team-queue-card,
+.sx-module .sx-workspace-body .team-agents-card {
+  order: 0 !important;
+}
+
+@media (max-width: 1180px) {
+  .sx-module .sx-workspace-body .team-layout {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .sx-module .sx-workspace-body .team-queue-card {
+    order: 0 !important;
+  }
+
+  .sx-module .sx-workspace-body .team-agents-card {
+    order: 1 !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .sx-module .sx-workspace-body .team-metrics {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    overflow: visible !important;
+    padding-bottom: 0 !important;
+    scroll-snap-type: none !important;
+  }
+
+  .sx-module .sx-workspace-body .team-metrics > article {
+    min-width: 0 !important;
+    flex: initial !important;
+  }
+}

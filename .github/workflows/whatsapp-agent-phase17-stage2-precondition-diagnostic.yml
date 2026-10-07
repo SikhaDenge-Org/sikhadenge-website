@@ -1,0 +1,79 @@
+name: WhatsApp Agent Phase17 Stage2 Precondition Diagnostic
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-phase17-stage2-precondition-diagnostic.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose-stage2-preconditions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_LIVE_SHA: 2b3efe35b8920082cc94dce989d1847842fb8825
+
+    steps:
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$SSH_HOST"
+          test -n "$SSH_USER"
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$SSH_HOST_KEY"
+          if [[ -z "${SSH_PORT:-}" ]]; then printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "${SSH_PORT:-22}" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Diagnose production preconditions read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' bash -s" <<'REMOTE'
+          set -u
+          LIVE_APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          ENV_FILE="$LIVE_APP/.env"
+          rc=0
+          uid_value="$(id -u 2>/dev/null || true)"
+          printf 'DIAG_ROOT_USER=%s\n' "$([[ "$uid_value" == "0" ]] && echo true || echo false)"
+          [[ "$uid_value" == "0" ]] || rc=1
+          printf 'DIAG_LIVE_APP_EXISTS=%s\n' "$([[ -d "$LIVE_APP" ]] && echo true || echo false)"
+          [[ -d "$LIVE_APP" ]] || rc=1
+          printf 'DIAG_ENV_FILE_EXISTS=%s\n' "$([[ -f "$ENV_FILE" ]] && echo true || echo false)"
+          [[ -f "$ENV_FILE" ]] || rc=1
+          if [[ -d "$LIVE_APP" ]]; then
+            live_sha="$(git -C "$LIVE_APP" rev-parse HEAD 2>/dev/null || true)"
+            tracked_count="$(git -C "$LIVE_APP" status --porcelain --untracked-files=no 2>/dev/null | sed '/^$/d' | wc -l | tr -d ' ')"
+            printf 'DIAG_LIVE_SHA=%s\n' "$live_sha"
+            printf 'DIAG_EXPECTED_LIVE_SHA=%s\n' "$EXPECTED_LIVE_SHA"
+            printf 'DIAG_LIVE_SHA_MATCH=%s\n' "$([[ "$live_sha" == "$EXPECTED_LIVE_SHA" ]] && echo true || echo false)"
+            printf 'DIAG_TRACKED_DIRTY_COUNT=%s\n' "$tracked_count"
+            [[ "$live_sha" == "$EXPECTED_LIVE_SHA" ]] || rc=1
+            [[ "$tracked_count" == "0" ]] || rc=1
+          fi
+          printf 'DIAG_NODE_MODULES_EXISTS=%s\n' "$([[ -d "$LIVE_APP/node_modules" ]] && echo true || echo false)"
+          [[ -d "$LIVE_APP/node_modules" ]] || rc=1
+          if [[ -f "$ENV_FILE" ]]; then
+            if grep -Eq '^[[:space:]]*(export[[:space:]]+)?DATABASE_URL=' "$ENV_FILE"; then printf 'DIAG_DATABASE_URL_DECLARED=true\n'; else printf 'DIAG_DATABASE_URL_DECLARED=false\n'; rc=1; fi
+          fi
+          if [[ "$rc" == "0" ]]; then printf 'PASS: PHASE17_STAGE2_PRECONDITIONS\n'; else printf 'FAIL: PHASE17_STAGE2_PRECONDITIONS\n' >&2; fi
+          exit "$rc"
+          REMOTE

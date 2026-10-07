@@ -1,0 +1,223 @@
+/*
+ * SikhaDenge WhatsApp Agent — image-icon removal + code-icon layer.
+ *
+ * Scope:
+ * - removes PNG/JPG/WebP dashboard icons from legacy module pages
+ * - uses lightweight inline SVG masks for every sidebar menu
+ * - keeps the approved SikhaDenge brand logo
+ * - keeps customer/media images and the inbox's inline SVG icon system
+ * - loaded last so old image-icon styles cannot reappear
+ */
+
+/* Remove the legacy divider/blank white line above the Inbox menu. */
+.dashboard-shell:not(.sx-inbox) .rail nav::before,
+.dashboard-shell:not(.sx-inbox) .rail nav::after {
+  content: none !important;
+  display: none !important;
+  border: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+
+.dashboard-shell:not(.sx-inbox) .rail nav,
+.dashboard-shell:not(.sx-inbox) .rail nav:first-of-type,
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button[title="Inbox"] {
+  border-top: 0 !important;
+}
+
+/* Code-based sidebar icons. No PNG/JPG/WebP assets are used here. */
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button,
+.dashboard-shell:not(.sx-inbox) .rail .rail-bottom {
+  position: relative !important;
+  padding-left: 42px !important;
+}
+
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button::before,
+.dashboard-shell:not(.sx-inbox) .rail .rail-bottom::before {
+  content: "" !important;
+  position: absolute !important;
+  display: block !important;
+  left: 12px !important;
+  top: 50% !important;
+  width: 18px !important;
+  height: 18px !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: currentColor !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+  opacity: 0.9 !important;
+  transform: translateY(-50%) !important;
+  -webkit-mask-image: var(--sd-code-icon) !important;
+  mask-image: var(--sd-code-icon) !important;
+  -webkit-mask-position: center !important;
+  mask-position: center !important;
+  -webkit-mask-repeat: no-repeat !important;
+  mask-repeat: no-repeat !important;
+  -webkit-mask-size: contain !important;
+  mask-size: contain !important;
+}
+
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button:hover::before,
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button.active::before,
+.dashboard-shell:not(.sx-inbox) .rail .rail-bottom:hover::before {
+  opacity: 1 !important;
+}
+
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button[title="Inbox"] {
+  --sd-code-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z'/%3E%3Cpath d='M8 9h8M8 13h5'/%3E%3C/svg%3E");
+}
+
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button[title="Contacts"] {
+  --sd-code-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='9' cy='7' r='4'/%3E%3Cpath d='M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75'/%3E%3C/svg%3E");
+}
+
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button[title="Leads"] {
+  --sd-code-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Ccircle cx='12' cy='12' r='5'/%3E%3Ccircle cx='12' cy='12' r='1'/%3E%3C/svg%3E");
+}
+
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button[title="Team"] {
+  --sd-code-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='8' cy='7' r='4'/%3E%3Cpath d='M19 8v6M22 11h-6'/%3E%3C/svg%3E");
+}
+
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button[title="Engagement"] {
+  --sd-code-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z'/%3E%3C/svg%3E");
+}
+
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button[title="Analytics"] {
+  --sd-code-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 3v18h18'/%3E%3Cpath d='M7 16v-5M12 16V7M17 16v-3'/%3E%3C/svg%3E");
+}
+
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button[title="Knowledge"] {
+  --sd-code-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 19.5A2.5 2.5 0 0 1 6.5 17H20'/%3E%3Cpath d='M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z'/%3E%3C/svg%3E");
+}
+
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button[title="Training"],
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button[title="Agent Training"] {
+  --sd-code-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 10l10-5 10 5-10 5z'/%3E%3Cpath d='M6 12v5c3 2 9 2 12 0v-5M22 10v6'/%3E%3C/svg%3E");
+}
+
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button[title="Campaigns"] {
+  --sd-code-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 11v2a2 2 0 0 0 2 2h2l4 4V5L7 9H5a2 2 0 0 0-2 2z'/%3E%3Cpath d='M15 9a4 4 0 0 1 0 6M18 6a8 8 0 0 1 0 12'/%3E%3C/svg%3E");
+}
+
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button[title="Automation"] {
+  --sd-code-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='5' cy='6' r='2'/%3E%3Ccircle cx='19' cy='6' r='2'/%3E%3Ccircle cx='12' cy='18' r='2'/%3E%3Cpath d='M7 6h10M6.5 7.5l4.5 8M17.5 7.5l-4.5 8'/%3E%3C/svg%3E");
+}
+
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button[title="Templates"] {
+  --sd-code-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/%3E%3Cpath d='M14 2v6h6M8 13h8M8 17h8M8 9h2'/%3E%3C/svg%3E");
+}
+
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button[title="Integrations"] {
+  --sd-code-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 22v-5M9 8V2M15 8V2M6 8h12v4a6 6 0 0 1-12 0z'/%3E%3C/svg%3E");
+}
+
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button[title="Admin"] {
+  --sd-code-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/%3E%3Cpath d='M9 12l2 2 4-4'/%3E%3C/svg%3E");
+}
+
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button[title="Cutover"] {
+  --sd-code-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 7h11l-3-3M19 17H8l3 3M16 7l3 3-3 3M8 17l-3-3 3-3'/%3E%3C/svg%3E");
+}
+
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button[title="Settings"],
+.dashboard-shell:not(.sx-inbox) .rail .rail-bottom {
+  --sd-code-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3Cpath d='M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.6v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3V9.6h.1A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.2.4.6.8 1 1 .3.2.7.3 1.1.3h.1v4h-.1c-.4 0-.8.1-1.1.3-.4.2-.8.6-1 1z'/%3E%3C/svg%3E");
+}
+
+/* Remove the image icon injected beside legacy topbar headings. */
+.dashboard-shell:not(.sx-inbox) .topbar > div:first-child {
+  min-height: 0 !important;
+  padding-left: 0 !important;
+}
+
+.dashboard-shell:not(.sx-inbox) .topbar > div:first-child::before {
+  content: none !important;
+  display: none !important;
+  background: none !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+/* KPI cards remain clean text-first cards. */
+.dashboard-shell:not(.sx-inbox) .metric-card,
+.dashboard-shell:not(.sx-inbox) .metric-card:nth-child(n) {
+  padding-left: 12px !important;
+}
+
+.dashboard-shell:not(.sx-inbox) .metric-card::before,
+.dashboard-shell:not(.sx-inbox) .metric-card::after,
+.dashboard-shell:not(.sx-inbox) .metric-card:nth-child(n)::before,
+.dashboard-shell:not(.sx-inbox) .metric-card:nth-child(n)::after {
+  content: none !important;
+  display: none !important;
+  background: none !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+}
+
+/* Module page header and information-card image icons remain removed. */
+.dashboard-shell:not(.sx-inbox) .module-page-card {
+  --module-icon: none !important;
+}
+
+.dashboard-shell:not(.sx-inbox) .module-page-icon {
+  display: none !important;
+}
+
+.dashboard-shell:not(.sx-inbox) .module-page-heading {
+  gap: 0 !important;
+}
+
+.dashboard-shell:not(.sx-inbox) .module-info-card {
+  padding-left: 20px !important;
+}
+
+.dashboard-shell:not(.sx-inbox) .module-info-card::before {
+  content: none !important;
+  display: none !important;
+  background: none !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+/* Catch remaining dashboard icon image elements without touching brand/media. */
+.dashboard-shell img[src^="/dashboard-icons/"] {
+  display: none !important;
+}
+
+.dashboard-shell [class*="icon"] img[src^="/dashboard-icons/"],
+.dashboard-shell [class*="Icon"] img[src^="/dashboard-icons/"] {
+  display: none !important;
+}
+
+/* Prevent legacy image backgrounds from surviving on icon wrappers. */
+.dashboard-shell:not(.sx-inbox) [class*="module-icon"]::before,
+.dashboard-shell:not(.sx-inbox) [class*="metric-icon"]::before,
+.dashboard-shell:not(.sx-inbox) [class*="stat-icon"]::before,
+.dashboard-shell:not(.sx-inbox) [class*="card-icon"]::before {
+  background-image: none !important;
+}
+
+@media (max-width: 767px) {
+  .dashboard-shell:not(.sx-inbox) .rail nav .rail-button,
+  .dashboard-shell:not(.sx-inbox) .rail .rail-bottom {
+    min-height: 44px !important;
+    height: 44px !important;
+    padding: 0 10px 0 34px !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    font-size: 9px !important;
+  }
+
+  .dashboard-shell:not(.sx-inbox) .rail nav .rail-button::before,
+  .dashboard-shell:not(.sx-inbox) .rail .rail-bottom::before {
+    left: 10px !important;
+    width: 16px !important;
+    height: 16px !important;
+  }
+}

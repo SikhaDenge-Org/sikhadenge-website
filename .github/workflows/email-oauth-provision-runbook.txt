@@ -1,0 +1,1 @@
+Runbook: 1) add GOOGLE_GMAIL_CLIENT_ID and GOOGLE_GMAIL_CLIENT_SECRET as secrets in the whatsapp-agent-production GitHub Environment; 2) create a fresh release-branch commit with [email-oauth-provision] in its message; 3) confirm workflow green; 4) connect support@sikhadenge.in in the app; 5) keep DRY_RUN until internal-recipient test passes.

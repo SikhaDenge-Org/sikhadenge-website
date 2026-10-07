@@ -1,0 +1,6 @@
+.module-page-card[data-module="templates"] {
+  --module-accent: #5b21b6;
+  --module-accent-soft: #f5f3ff;
+  --module-accent-border: #ddd6fe;
+  --module-icon: url("/dashboard-icons/04-ai-managed.png");
+}

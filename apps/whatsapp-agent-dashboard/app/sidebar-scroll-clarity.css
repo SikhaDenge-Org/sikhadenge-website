@@ -1,0 +1,60 @@
+/* Inbox sidebar completeness and scroll clarity.
+ * Keeps every module reachable in the single sidebar scroll region and makes
+ * continuation below the fold visually obvious on shorter viewports.
+ */
+
+.sx-inbox .sx-side-scroll {
+  padding-right: 6px !important;
+  padding-bottom: 18px !important;
+  scrollbar-width: auto !important;
+  scrollbar-color: #b7c2d1 transparent !important;
+  overscroll-behavior: contain;
+}
+
+.sx-inbox .sx-side-scroll::-webkit-scrollbar {
+  width: 8px !important;
+}
+
+.sx-inbox .sx-side-scroll::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+.sx-inbox .sx-side-scroll::-webkit-scrollbar-thumb {
+  min-height: 42px;
+  border: 2px solid transparent !important;
+  border-radius: 999px !important;
+  background: #b7c2d1 !important;
+  background-clip: padding-box !important;
+}
+
+.sx-inbox .sx-side-foot {
+  position: relative;
+  z-index: 2;
+  background: #fff;
+  box-shadow: 0 -8px 18px rgba(17, 24, 39, 0.035);
+}
+
+.sx-inbox .sx-side .sx-training-injected {
+  display: flex !important;
+}
+
+@media (max-height: 820px) {
+  .sx-inbox .sx-side {
+    padding-top: 10px !important;
+  }
+
+  .sx-inbox .sx-side .brand-mark {
+    margin-bottom: 7px !important;
+  }
+
+  .sx-inbox .sx-side .rail-button,
+  .sx-inbox .sx-side .sx-chan {
+    padding-top: 7px !important;
+    padding-bottom: 7px !important;
+  }
+
+  .sx-inbox .sx-side-label {
+    margin-top: 10px !important;
+    margin-bottom: 4px !important;
+  }
+}

@@ -1,0 +1,594 @@
+/*
+ * SikhaDenge WhatsApp Agent
+ * Ultra-compact desktop inbox layout.
+ * Sidebar icons and composer functionality remain unchanged.
+ */
+
+@media (min-width: 1200px) {
+
+  /* Remove outer blank spacing */
+  html body .dashboard-shell .workspace {
+    padding: 0 10px 8px !important;
+    margin: 0 !important;
+    gap: 0 !important;
+  }
+
+  /* Ultra-compact top header */
+  html body .dashboard-shell .workspace > .topbar {
+    position: relative !important;
+
+    min-height: 54px !important;
+    height: 54px !important;
+
+    margin: 0 0 5px !important;
+    padding: 4px 270px 4px 10px !important;
+
+    align-items: center !important;
+    border-radius: 0 0 12px 12px !important;
+  }
+
+  html body .topbar > div:first-child {
+    min-width: 0 !important;
+  }
+
+  html body .topbar h1 {
+    margin: 0 !important;
+    font-size: 20px !important;
+    line-height: 1.05 !important;
+    letter-spacing: -0.35px !important;
+  }
+
+  html body .topbar .eyebrow {
+    margin: 0 0 2px !important;
+    font-size: 8px !important;
+    line-height: 1 !important;
+    letter-spacing: 0.12em !important;
+  }
+
+  /* Align system status in one compact row */
+  html body .topbar-actions {
+    position: absolute !important;
+    top: 50% !important;
+    right: 248px !important;
+
+    width: auto !important;
+    margin: 0 !important;
+
+    gap: 6px !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+
+    transform: translateY(-50%) !important;
+  }
+
+  html body .inbox-live-indicator,
+  html body .system-status {
+    min-height: 31px !important;
+    height: 31px !important;
+
+    padding: 5px 9px !important;
+    border-radius: 9px !important;
+
+    font-size: 9px !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+  }
+
+  /* Compact account box */
+  html body .session-toolbar {
+    top: 5px !important;
+    right: 8px !important;
+
+    min-width: 226px !important;
+    min-height: 44px !important;
+    height: 44px !important;
+
+    padding: 5px 6px 5px 10px !important;
+    border-radius: 11px !important;
+  }
+
+  html body .session-toolbar strong {
+    font-size: 10px !important;
+  }
+
+  html body .session-toolbar small {
+    font-size: 8px !important;
+  }
+
+  html body .session-toolbar button {
+    min-height: 34px !important;
+    height: 34px !important;
+    padding: 6px 10px !important;
+    font-size: 9px !important;
+  }
+
+  /* Compact metric strip */
+  html body .metric-row {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+
+    gap: 7px !important;
+    margin: 0 0 6px !important;
+  }
+
+  html body .metric-card {
+    min-height: 68px !important;
+    height: 68px !important;
+
+    padding: 9px 10px 8px 57px !important;
+    border-radius: 12px !important;
+
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+  }
+
+  html body .metric-card::before {
+    left: 11px !important;
+    top: 16px !important;
+
+    width: 36px !important;
+    height: 36px !important;
+
+    border-radius: 11px !important;
+  }
+
+  html body .metric-card::after {
+    left: 18px !important;
+    top: 23px !important;
+
+    width: 22px !important;
+    height: 22px !important;
+  }
+
+  html body .metric-card span {
+    margin: 0 !important;
+    font-size: 9px !important;
+    line-height: 1 !important;
+  }
+
+  html body .metric-card strong {
+    margin: 3px 0 2px !important;
+    font-size: 22px !important;
+    line-height: 0.95 !important;
+  }
+
+  html body .metric-card small {
+    margin: 0 !important;
+    font-size: 8px !important;
+    line-height: 1.1 !important;
+  }
+
+  /* Narrow side panels, maximum central chat */
+  html body .workspace > .inbox-grid {
+    grid-template-columns:
+      248px
+      minmax(0, 1fr)
+      248px !important;
+
+    min-height: 0 !important;
+    border-radius: 12px !important;
+  }
+
+  /* Compact headings */
+  html body .panel-heading,
+  html body .chat-header {
+    min-height: 50px !important;
+    height: 50px !important;
+
+    padding: 7px 10px !important;
+    gap: 8px !important;
+  }
+
+  html body .panel-heading h2,
+  html body .chat-header h2,
+  html body .lead-card-head h2 {
+    font-size: 14px !important;
+    line-height: 1.1 !important;
+  }
+
+  html body .panel-heading .eyebrow,
+  html body .lead-card-head .eyebrow {
+    margin-bottom: 2px !important;
+    font-size: 8px !important;
+  }
+
+  html body .icon-button {
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 9px !important;
+  }
+
+  /* Compact conversation search and filters */
+  html body .search-box {
+    height: 32px !important;
+    margin: 6px 8px 4px !important;
+    padding: 0 8px !important;
+    border-radius: 9px !important;
+  }
+
+  html body .search-box input {
+    font-size: 9px !important;
+  }
+
+  html body .filter-tabs {
+    min-height: 30px !important;
+    padding: 1px 8px 5px !important;
+    gap: 3px !important;
+  }
+
+  html body .filter-tabs button {
+    padding: 5px 7px !important;
+    border-radius: 7px !important;
+    font-size: 8px !important;
+  }
+
+  /* Smaller conversation rows */
+  html body .conversation-item {
+    min-height: 65px !important;
+    padding: 7px 8px !important;
+    gap: 7px !important;
+  }
+
+  html body .conversation-item .avatar {
+    width: 34px !important;
+    height: 34px !important;
+    font-size: 10px !important;
+  }
+
+  html body .conversation-name-row strong {
+    font-size: 10px !important;
+  }
+
+  html body .conversation-name-row time {
+    font-size: 7px !important;
+  }
+
+  html body .conversation-preview {
+    margin: 2px 0 4px !important;
+    font-size: 8px !important;
+  }
+
+  html body .conversation-meta,
+  html body .temperature {
+    font-size: 7px !important;
+  }
+
+  /* Compact chat controls */
+  html body .chat-header .avatar.large {
+    width: 38px !important;
+    height: 38px !important;
+  }
+
+  html body .chat-person p {
+    margin-top: 2px !important;
+    font-size: 9px !important;
+  }
+
+  html body .chat-actions {
+    gap: 6px !important;
+  }
+
+  html body .secondary-button {
+    min-height: 32px !important;
+    padding: 6px 9px !important;
+    font-size: 9px !important;
+  }
+
+  html body .ai-switch {
+    gap: 5px !important;
+    font-size: 9px !important;
+  }
+
+  html body .ai-switch i {
+    width: 34px !important;
+    height: 19px !important;
+  }
+
+  html body .ai-switch i::after {
+    width: 13px !important;
+    height: 13px !important;
+  }
+
+  html body .ai-switch input:checked + i::after {
+    transform: translateX(15px) !important;
+  }
+
+  /* Compact context strip */
+  html body .context-strip {
+    min-height: 34px !important;
+    padding: 4px 9px !important;
+    gap: 4px !important;
+  }
+
+  html body .context-strip span {
+    padding: 3px 6px !important;
+    border-radius: 6px !important;
+    font-size: 7px !important;
+  }
+
+  /* Give most available height to chat */
+  html body .message-area {
+    padding: 9px 14px 8px !important;
+  }
+
+  html body .day-divider {
+    margin-bottom: 8px !important;
+  }
+
+  html body .message-row {
+    margin: 5px 0 !important;
+  }
+
+  html body .message-bubble {
+    max-width: 82% !important;
+    padding: 8px 10px 6px !important;
+    border-radius: 11px !important;
+  }
+
+  html body .message-bubble p {
+    font-size: 10px !important;
+    line-height: 1.4 !important;
+  }
+
+  html body .message-bubble small {
+    margin-bottom: 2px !important;
+    font-size: 8px !important;
+  }
+
+  html body .message-bubble time {
+    margin-top: 2px !important;
+    font-size: 7px !important;
+  }
+
+  html body .agent-thinking {
+    max-width: 620px !important;
+    margin: 8px auto 0 !important;
+    padding: 7px 9px !important;
+    gap: 7px !important;
+  }
+
+  html body .agent-thinking strong {
+    font-size: 9px !important;
+  }
+
+  html body .agent-thinking p {
+    margin-top: 2px !important;
+    font-size: 8px !important;
+    line-height: 1.35 !important;
+  }
+
+  /* Slim composer while keeping it easy to use */
+  html body .inbox-grid .composer {
+    min-height: 52px !important;
+    height: auto !important;
+
+    padding: 5px 8px !important;
+    gap: 6px !important;
+
+    grid-template-columns:
+      auto
+      minmax(0, 1fr)
+      72px !important;
+  }
+
+  html body .composer-tools {
+    gap: 2px !important;
+  }
+
+  html body .composer-tools button {
+    width: 27px !important;
+    height: 27px !important;
+  }
+
+  html body .composer textarea {
+    min-height: 38px !important;
+    max-height: 68px !important;
+
+    padding: 8px 9px !important;
+    border-radius: 9px !important;
+
+    font-size: 9px !important;
+  }
+
+  html body .send-button {
+    min-height: 38px !important;
+    padding: 7px 9px !important;
+    border-radius: 9px !important;
+    font-size: 9px !important;
+  }
+
+  /* Ultra-compact lead panel */
+  html body .details-panel {
+    padding: 9px !important;
+  }
+
+  html body .lead-card-head {
+    gap: 6px !important;
+  }
+
+  html body .score-block {
+    margin: 7px 0 !important;
+    padding: 8px !important;
+    gap: 7px !important;
+    border-radius: 10px !important;
+  }
+
+  html body .score-ring {
+    width: 45px !important;
+    height: 45px !important;
+    border-width: 4px !important;
+  }
+
+  html body .score-ring strong {
+    font-size: 16px !important;
+  }
+
+  html body .score-block > div:last-child strong {
+    font-size: 9px !important;
+  }
+
+  html body .score-block p {
+    margin-top: 2px !important;
+    font-size: 8px !important;
+    line-height: 1.3 !important;
+  }
+
+  html body .detail-section {
+    margin-top: 7px !important;
+    padding-top: 7px !important;
+  }
+
+  html body .detail-section h3 {
+    margin: 0 0 5px !important;
+    font-size: 9px !important;
+  }
+
+  html body .detail-section dl {
+    gap: 4px !important;
+  }
+
+  html body .detail-section dl > div {
+    min-height: 16px !important;
+  }
+
+  html body .detail-section dt,
+  html body .detail-section dd,
+  html body .summary-copy {
+    font-size: 8px !important;
+    line-height: 1.25 !important;
+  }
+
+  html body .learning-card {
+    margin-top: 7px !important;
+    padding: 8px !important;
+    border-radius: 10px !important;
+  }
+}
+
+/*
+ * Final compact metric strip.
+ * Only the four dashboard summary cards are reduced.
+ */
+@media (min-width: 1200px) {
+  html body .metric-row {
+    gap: 6px !important;
+    margin: 0 0 5px !important;
+  }
+
+  html body .metric-card {
+    min-height: 54px !important;
+    height: 54px !important;
+
+    padding:
+      6px
+      8px
+      6px
+      48px !important;
+
+    border-radius: 10px !important;
+
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+
+    overflow: hidden !important;
+  }
+
+  html body .metric-card::before {
+    left: 9px !important;
+    top: 12px !important;
+
+    width: 30px !important;
+    height: 30px !important;
+
+    border-radius: 9px !important;
+  }
+
+  html body .metric-card::after {
+    left: 15px !important;
+    top: 18px !important;
+
+    width: 18px !important;
+    height: 18px !important;
+  }
+
+  html body .metric-card span {
+    margin: 0 !important;
+    font-size: 8px !important;
+    line-height: 1 !important;
+  }
+
+  html body .metric-card strong {
+    margin: 2px 0 1px !important;
+    font-size: 19px !important;
+    line-height: 0.95 !important;
+  }
+
+  html body .metric-card small {
+    margin: 0 !important;
+
+    font-size: 7px !important;
+    line-height: 1 !important;
+
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+}
+
+/*
+ * Extra-small metric boxes.
+ * Only the four summary cards are affected.
+ */
+@media (min-width: 1200px) {
+  html body .metric-row {
+    gap: 5px !important;
+    margin: 0 0 4px !important;
+  }
+
+  html body .metric-card {
+    min-height: 46px !important;
+    height: 46px !important;
+    max-height: 46px !important;
+
+    padding: 4px 7px 4px 42px !important;
+    border-radius: 9px !important;
+
+    justify-content: center !important;
+    box-sizing: border-box !important;
+  }
+
+  html body .metric-card::before {
+    left: 8px !important;
+    top: 10px !important;
+
+    width: 26px !important;
+    height: 26px !important;
+
+    border-radius: 8px !important;
+  }
+
+  html body .metric-card::after {
+    left: 13px !important;
+    top: 15px !important;
+
+    width: 16px !important;
+    height: 16px !important;
+  }
+
+  html body .metric-card span {
+    font-size: 7px !important;
+    line-height: 1 !important;
+  }
+
+  html body .metric-card strong {
+    margin: 1px 0 !important;
+    font-size: 17px !important;
+    line-height: 1 !important;
+  }
+
+  html body .metric-card small {
+    font-size: 6.5px !important;
+    line-height: 1 !important;
+  }
+}

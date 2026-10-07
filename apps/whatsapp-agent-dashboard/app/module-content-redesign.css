@@ -1,0 +1,1167 @@
+/*
+ * SikhaDenge non-Inbox module content redesign.
+ *
+ * Protected areas:
+ * - the rebuilt Inbox (.sx-inbox)
+ * - the shared left navigation (.sx-side)
+ *
+ * This layer is intentionally scoped to .sx-module .sx-workspace so the
+ * approved Inbox and unified left sidebar remain visually and functionally
+ * unchanged. It standardises hierarchy, spacing, cards, forms, tables,
+ * filters, editors, feedback states and responsive behaviour across every
+ * other dashboard module.
+ */
+
+.sx-module .sx-workspace {
+  --module-accent: #3568f4;
+  --module-accent-strong: #2857dd;
+  --module-accent-soft: #eef3ff;
+  --module-accent-ring: rgba(53, 104, 244, 0.18);
+  --module-canvas: #f5f7fb;
+  --module-surface: #ffffff;
+  --module-surface-soft: #f8fafc;
+  --module-border: #e5eaf1;
+  --module-border-strong: #d5dde8;
+  --module-text: #101828;
+  --module-text-soft: #475467;
+  --module-muted: #667085;
+  --module-faint: #98a2b3;
+  --module-success: #067647;
+  --module-warning: #b54708;
+  --module-danger: #b42318;
+  --module-radius-xl: 20px;
+  --module-radius-lg: 16px;
+  --module-radius-md: 12px;
+  --module-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --module-shadow-md: 0 12px 34px rgba(15, 23, 42, 0.07);
+  min-width: 0;
+  overflow-x: hidden;
+  background: var(--module-canvas);
+}
+
+/* Subtle page-specific accents without changing page logic. */
+.sx-module .sx-workspace:has(.contact-manager) {
+  --module-accent: #3568f4;
+  --module-accent-strong: #2857dd;
+  --module-accent-soft: #eef3ff;
+  --module-accent-ring: rgba(53, 104, 244, 0.18);
+}
+
+.sx-module .sx-workspace:has(.lead-manager) {
+  --module-accent: #e67e22;
+  --module-accent-strong: #c8610b;
+  --module-accent-soft: #fff5eb;
+  --module-accent-ring: rgba(230, 126, 34, 0.18);
+}
+
+.sx-module .sx-workspace:has(.team-chat-manager) {
+  --module-accent: #0f9f92;
+  --module-accent-strong: #087b72;
+  --module-accent-soft: #ecfdf9;
+  --module-accent-ring: rgba(15, 159, 146, 0.18);
+}
+
+.sx-module .sx-workspace:has(.engagement-manager) {
+  --module-accent: #7c5ce7;
+  --module-accent-strong: #6543d8;
+  --module-accent-soft: #f4f1ff;
+  --module-accent-ring: rgba(124, 92, 231, 0.18);
+}
+
+.sx-module .sx-workspace:has(.analytics-manager) {
+  --module-accent: #1379b8;
+  --module-accent-strong: #0d6197;
+  --module-accent-soft: #edf8ff;
+  --module-accent-ring: rgba(19, 121, 184, 0.18);
+}
+
+.sx-module .sx-workspace:has(.knowledge-manager) {
+  --module-accent: #7c3aed;
+  --module-accent-strong: #6528d2;
+  --module-accent-soft: #f5f0ff;
+  --module-accent-ring: rgba(124, 58, 237, 0.18);
+}
+
+.sx-module .sx-workspace:has([class*="training"]),
+.sx-module .sx-workspace:has(.live-agent-manager) {
+  --module-accent: #4f46e5;
+  --module-accent-strong: #3f37c9;
+  --module-accent-soft: #f0f1ff;
+  --module-accent-ring: rgba(79, 70, 229, 0.18);
+}
+
+.sx-module .sx-workspace:has([class*="campaign"]) {
+  --module-accent: #d97706;
+  --module-accent-strong: #b85f00;
+  --module-accent-soft: #fff7e8;
+  --module-accent-ring: rgba(217, 119, 6, 0.18);
+}
+
+.sx-module .sx-workspace:has([class*="automation"]) {
+  --module-accent: #0f8f72;
+  --module-accent-strong: #08715a;
+  --module-accent-soft: #ecfdf5;
+  --module-accent-ring: rgba(15, 143, 114, 0.18);
+}
+
+.sx-module .sx-workspace:has([class*="template"]) {
+  --module-accent: #6366f1;
+  --module-accent-strong: #4f46d8;
+  --module-accent-soft: #f1f1ff;
+  --module-accent-ring: rgba(99, 102, 241, 0.18);
+}
+
+.sx-module .sx-workspace:has([class*="integration"]) {
+  --module-accent: #087ea4;
+  --module-accent-strong: #066483;
+  --module-accent-soft: #ecfaff;
+  --module-accent-ring: rgba(8, 126, 164, 0.18);
+}
+
+.sx-module .sx-workspace:has([class*="admin"]) {
+  --module-accent: #344054;
+  --module-accent-strong: #1d2939;
+  --module-accent-soft: #f2f4f7;
+  --module-accent-ring: rgba(52, 64, 84, 0.16);
+}
+
+.sx-module .sx-workspace:has([class*="cutover"]) {
+  --module-accent: #c2410c;
+  --module-accent-strong: #9a3412;
+  --module-accent-soft: #fff3ed;
+  --module-accent-ring: rgba(194, 65, 12, 0.17);
+}
+
+.sx-module .sx-workspace:has([class*="settings"]) {
+  --module-accent: #475467;
+  --module-accent-strong: #344054;
+  --module-accent-soft: #f2f4f7;
+  --module-accent-ring: rgba(71, 84, 103, 0.16);
+}
+
+/* ================================================================= Header */
+
+.sx-module .sx-workspace-head {
+  position: sticky;
+  top: 0;
+  z-index: 24;
+  min-height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px clamp(18px, 2.2vw, 32px);
+  border-bottom: 1px solid rgba(213, 221, 232, 0.88);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.02);
+  backdrop-filter: saturate(1.12) blur(14px);
+}
+
+.sx-module .sx-workspace-head-left {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.sx-module .sx-workspace-icon {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--module-accent) 22%, #ffffff);
+  border-radius: 15px;
+  background: linear-gradient(145deg, #ffffff, var(--module-accent-soft));
+  color: var(--module-accent-strong);
+  box-shadow: 0 9px 24px var(--module-accent-ring);
+}
+
+.sx-module .sx-workspace-copy {
+  min-width: 0;
+}
+
+.sx-module .sx-workspace-eyebrow {
+  width: fit-content;
+  margin: 0 0 5px;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--module-accent) 18%, #ffffff);
+  border-radius: 999px;
+  background: var(--module-accent-soft);
+  color: var(--module-accent-strong);
+  font-size: 10px;
+  font-weight: 760;
+  line-height: 1.2;
+  letter-spacing: 0.065em;
+  text-transform: uppercase;
+}
+
+.sx-module .sx-workspace-copy h1 {
+  margin: 0;
+  color: var(--module-text);
+  font-size: clamp(22px, 2vw, 29px);
+  font-weight: 760;
+  line-height: 1.14;
+  letter-spacing: -0.03em;
+}
+
+.sx-module .sx-workspace-description {
+  max-width: 820px;
+  margin: 6px 0 0;
+  color: var(--module-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.sx-module .sx-workspace-head-right {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.sx-module .sx-workspace-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--module-border);
+  border-radius: 999px;
+  background: var(--module-surface);
+  color: var(--module-text-soft);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: var(--module-shadow-sm);
+}
+
+/* ================================================================ Canvas */
+
+.sx-module .sx-workspace-body {
+  min-width: 0;
+  min-height: calc(100dvh - 96px);
+  padding: clamp(18px, 2vw, 30px);
+  background:
+    radial-gradient(circle at 88% 0%, var(--module-accent-soft) 0, transparent 28%),
+    linear-gradient(180deg, #f8fafc 0%, var(--module-canvas) 100%);
+}
+
+.sx-module .sx-workspace-body > * {
+  width: min(100%, 1760px);
+  min-width: 0;
+  margin-inline: auto;
+}
+
+.sx-module .sx-workspace-body :where(
+  .contact-manager,
+  .lead-manager,
+  .team-chat-manager,
+  .engagement-manager,
+  .analytics-manager,
+  .knowledge-manager,
+  .training-manager,
+  .live-agent-manager,
+  [class*="campaign"],
+  [class*="automation"],
+  [class*="template"],
+  [class*="integration"],
+  [class*="admin"],
+  [class*="cutover"],
+  [class*="settings"]
+) {
+  min-width: 0;
+}
+
+.sx-module .sx-workspace-body :where(
+  .contact-manager,
+  .lead-manager,
+  .team-chat-manager,
+  .engagement-manager,
+  .analytics-manager,
+  .knowledge-manager,
+  .training-manager,
+  .live-agent-manager
+) {
+  gap: 18px;
+}
+
+/* =========================================================== Metric cards */
+
+.sx-module .sx-workspace-body :where(
+  .contact-metrics,
+  .lead-metrics,
+  .team-metrics,
+  .analytics-metrics,
+  .engagement-metrics,
+  .knowledge-summary-row,
+  [class$="-metrics"],
+  [class$="-stats"],
+  [class$="-summary-row"],
+  [class*="metric-grid"],
+  [class*="stats-grid"]
+) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px;
+}
+
+.sx-module .sx-workspace-body :where(
+  .contact-metrics,
+  .lead-metrics,
+  .team-metrics,
+  .analytics-metrics,
+  .engagement-metrics,
+  .knowledge-summary-row,
+  [class$="-metrics"],
+  [class$="-stats"],
+  [class$="-summary-row"],
+  [class*="metric-grid"],
+  [class*="stats-grid"]
+) > :where(article, .knowledge-summary-card, [class*="metric"], [class*="stat"]) {
+  position: relative;
+  min-width: 0;
+  min-height: 112px;
+  padding: 17px 18px;
+  overflow: hidden;
+  border: 1px solid var(--module-border);
+  border-radius: var(--module-radius-lg);
+  background: linear-gradient(160deg, #ffffff 0%, #fbfcff 100%);
+  box-shadow: var(--module-shadow-sm);
+  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.sx-module .sx-workspace-body :where(
+  .contact-metrics,
+  .lead-metrics,
+  .team-metrics,
+  .analytics-metrics,
+  .engagement-metrics,
+  .knowledge-summary-row,
+  [class$="-metrics"],
+  [class$="-stats"],
+  [class$="-summary-row"],
+  [class*="metric-grid"],
+  [class*="stats-grid"]
+) > :where(article, .knowledge-summary-card, [class*="metric"], [class*="stat"])::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--module-accent), color-mix(in srgb, var(--module-accent) 28%, transparent));
+}
+
+.sx-module .sx-workspace-body :where(
+  .contact-metrics,
+  .lead-metrics,
+  .team-metrics,
+  .analytics-metrics,
+  .engagement-metrics,
+  .knowledge-summary-row,
+  [class$="-metrics"],
+  [class$="-stats"],
+  [class$="-summary-row"],
+  [class*="metric-grid"],
+  [class*="stats-grid"]
+) > :where(article, .knowledge-summary-card, [class*="metric"], [class*="stat"]):hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--module-accent) 28%, var(--module-border));
+  box-shadow: var(--module-shadow-md);
+}
+
+.sx-module .sx-workspace-body :where(
+  .contact-metrics,
+  .lead-metrics,
+  .team-metrics,
+  .analytics-metrics,
+  .engagement-metrics,
+  .knowledge-summary-row,
+  [class$="-metrics"],
+  [class$="-stats"],
+  [class$="-summary-row"],
+  [class*="metric-grid"],
+  [class*="stats-grid"]
+) :where(span, small) {
+  color: var(--module-muted);
+}
+
+.sx-module .sx-workspace-body :where(
+  .contact-metrics,
+  .lead-metrics,
+  .team-metrics,
+  .analytics-metrics,
+  .engagement-metrics,
+  .knowledge-summary-row,
+  [class$="-metrics"],
+  [class$="-stats"],
+  [class$="-summary-row"],
+  [class*="metric-grid"],
+  [class*="stats-grid"]
+) strong {
+  color: var(--module-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ======================================================= Panels and cards */
+
+.sx-module .sx-workspace-body :where(
+  [class$="-card"],
+  [class$="-panel"],
+  [class$="-directory"],
+  [class$="-editor"],
+  [class$="-builder"],
+  [class$="-canvas"],
+  [class$="-inspector"],
+  .knowledge-panel,
+  .team-queue-card,
+  .team-agents-card,
+  .lead-performance
+) {
+  min-width: 0;
+  border-color: var(--module-border);
+  border-radius: var(--module-radius-xl);
+  box-shadow: var(--module-shadow-sm);
+}
+
+.sx-module .sx-workspace-body :where(
+  [class$="-card"],
+  [class$="-panel"],
+  [class$="-directory"],
+  [class$="-editor"],
+  [class$="-builder"],
+  [class$="-canvas"],
+  [class$="-inspector"],
+  .knowledge-panel,
+  .team-queue-card,
+  .team-agents-card,
+  .lead-performance
+):focus-within {
+  border-color: color-mix(in srgb, var(--module-accent) 30%, var(--module-border));
+  box-shadow: 0 0 0 3px var(--module-accent-ring), var(--module-shadow-sm);
+}
+
+.sx-module .sx-workspace-body :where(
+  [class$="-card"],
+  [class$="-panel"],
+  [class$="-directory"],
+  [class$="-editor"],
+  [class$="-builder"],
+  [class$="-inspector"]
+) > header,
+.sx-module .sx-workspace-body :where(
+  .team-panel-header,
+  .knowledge-panel-header,
+  .lead-editor > header,
+  .lead-performance > header,
+  .contact-directory > header,
+  .contact-editor > header
+) {
+  min-height: 70px;
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--module-border);
+  background: linear-gradient(180deg, #ffffff, #fbfcfe);
+}
+
+.sx-module .sx-workspace-body :where(
+  [class$="-card"],
+  [class$="-panel"],
+  [class$="-directory"],
+  [class$="-editor"],
+  [class$="-builder"],
+  [class$="-inspector"]
+) > header :where(h2, h3, h4),
+.sx-module .sx-workspace-body :where(
+  .team-panel-header,
+  .knowledge-panel-header,
+  .lead-editor > header,
+  .lead-performance > header,
+  .contact-directory > header,
+  .contact-editor > header
+) :where(h2, h3, h4) {
+  color: var(--module-text);
+  letter-spacing: -0.02em;
+}
+
+/* ============================================================= Toolbars */
+
+.sx-module .sx-workspace-body :where(
+  [class$="-toolbar"],
+  [class$="-filters"],
+  [class$="-controls"],
+  [class*="filter-bar"],
+  [class*="action-bar"],
+  .team-toolbar,
+  .contact-toolbar,
+  .lead-toolbar,
+  .lead-bulk-bar
+) {
+  min-width: 0;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--module-border);
+  border-radius: var(--module-radius-lg);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.045);
+  backdrop-filter: blur(12px);
+}
+
+.sx-module .sx-workspace-body :where(
+  [class$="-toolbar"],
+  [class$="-filters"],
+  [class$="-controls"],
+  [class*="filter-bar"],
+  [class*="action-bar"],
+  .team-toolbar,
+  .contact-toolbar,
+  .lead-toolbar,
+  .lead-bulk-bar
+) > * {
+  min-width: 0;
+}
+
+/* =============================================================== Forms */
+
+.sx-module .sx-workspace-body :where(input, select, textarea) {
+  max-width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--module-border-strong);
+  border-radius: var(--module-radius-md);
+  background: var(--module-surface);
+  color: var(--module-text);
+  font: inherit;
+  transition: border-color 130ms ease, box-shadow 130ms ease, background-color 130ms ease;
+}
+
+.sx-module .sx-workspace-body :where(input, select, textarea):hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--module-accent) 25%, var(--module-border-strong));
+}
+
+.sx-module .sx-workspace-body :where(input, select, textarea):focus {
+  border-color: var(--module-accent);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--module-accent-ring);
+}
+
+.sx-module .sx-workspace-body :where(input, textarea)::placeholder {
+  color: var(--module-faint);
+}
+
+.sx-module .sx-workspace-body textarea {
+  min-height: 96px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.sx-module .sx-workspace-body :where(label, [class$="-field"]) {
+  min-width: 0;
+}
+
+.sx-module .sx-workspace-body :where(label > span:first-child, [class$="-field"] > span:first-child, .field-label) {
+  color: var(--module-text-soft);
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.sx-module .sx-workspace-body :where(
+  [class$="-form-grid"],
+  [class*="fields-grid"],
+  [class*="settings-grid"],
+  .knowledge-form-row
+) {
+  gap: 13px;
+}
+
+/* ============================================================== Buttons */
+
+.sx-module .sx-workspace-body button,
+.sx-module .sx-workspace-body :where(a[class*="button"], a[class*="action"], a[class*="export"]) {
+  min-height: 42px;
+  border-radius: var(--module-radius-md);
+  font-weight: 680;
+  line-height: 1.1;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: transform 110ms ease, filter 130ms ease, border-color 130ms ease, box-shadow 130ms ease;
+}
+
+.sx-module .sx-workspace-body button:hover:not(:disabled),
+.sx-module .sx-workspace-body :where(a[class*="button"], a[class*="action"], a[class*="export"]):hover {
+  filter: brightness(0.985);
+}
+
+.sx-module .sx-workspace-body button:active:not(:disabled),
+.sx-module .sx-workspace-body :where(a[class*="button"], a[class*="action"], a[class*="export"]):active {
+  transform: translateY(1px);
+}
+
+.sx-module .sx-workspace-body button:focus-visible,
+.sx-module .sx-workspace-body a:focus-visible {
+  outline: 3px solid var(--module-accent-ring);
+  outline-offset: 2px;
+}
+
+.sx-module .sx-workspace-body button[type="submit"]:not(.danger),
+.sx-module .sx-workspace-body :where(.lead-save, [class$="-save"], [class$="-submit"]) {
+  border-color: var(--module-accent);
+  background: linear-gradient(180deg, var(--module-accent), var(--module-accent-strong));
+  color: #ffffff;
+  box-shadow: 0 8px 20px var(--module-accent-ring);
+}
+
+.sx-module .sx-workspace-body :where(.danger, [class*="danger"], [class*="delete"], [class*="remove"]) {
+  color: var(--module-danger);
+}
+
+/* ================================================================ Tables */
+
+.sx-module .sx-workspace-body :where(
+  [class$="-table-wrap"],
+  [class*="table-container"],
+  [class*="table-scroll"]
+) {
+  max-width: 100%;
+  overflow: auto;
+  border-radius: 0 0 var(--module-radius-xl) var(--module-radius-xl);
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sx-module .sx-workspace-body table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.sx-module .sx-workspace-body table :where(th, td) {
+  min-width: 0;
+  padding-block: 12px;
+  vertical-align: middle;
+}
+
+.sx-module .sx-workspace-body table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  border-bottom: 1px solid var(--module-border-strong);
+  background: #f8fafc;
+  color: var(--module-text-soft);
+  font-size: 10.5px;
+  font-weight: 760;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.sx-module .sx-workspace-body table tbody tr {
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.sx-module .sx-workspace-body table tbody tr:hover {
+  background: #f8faff;
+}
+
+.sx-module .sx-workspace-body table tbody tr.selected,
+.sx-module .sx-workspace-body table tbody tr[aria-selected="true"] {
+  background: var(--module-accent-soft);
+  box-shadow: inset 3px 0 0 var(--module-accent);
+}
+
+/* ====================================================== Status and alerts */
+
+.sx-module .sx-workspace-body :where(
+  [class$="-alert"],
+  [class$="-notice"],
+  [class$="-message"],
+  [role="alert"],
+  [role="status"]
+) {
+  overflow-wrap: anywhere;
+  border-radius: var(--module-radius-md);
+}
+
+.sx-module .sx-workspace-body :where(
+  [class$="-pill"],
+  [class$="-badge"],
+  [class$="-chip"],
+  [class*="status-"],
+  [class*="temperature-"],
+  [class*="mode-"]
+) {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ========================================================== Empty states */
+
+.sx-module .sx-workspace-body :where(
+  [class$="-empty"],
+  [class*="empty-state"],
+  [class*="no-results"]
+) {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  min-height: 210px;
+  padding: 32px 22px;
+  color: var(--module-muted);
+  text-align: center;
+}
+
+.sx-module .sx-workspace-body :where(
+  [class$="-empty"],
+  [class*="empty-state"],
+  [class*="no-results"]
+) strong {
+  color: var(--module-text);
+  font-size: 15px;
+}
+
+.sx-module .sx-workspace-body :where(
+  [class$="-empty"],
+  [class*="empty-state"],
+  [class*="no-results"]
+) p {
+  max-width: 520px;
+  margin: 7px 0 0;
+  line-height: 1.55;
+}
+
+/* =========================================================== Dialogs/tabs */
+
+.sx-module .sx-workspace-body :where(dialog, [role="dialog"], [class$="-modal"], [class$="-drawer"]) {
+  max-width: min(94vw, 820px);
+  max-height: min(90dvh, 920px);
+  overflow: auto;
+  border-radius: var(--module-radius-xl);
+  scrollbar-gutter: stable;
+}
+
+.sx-module .sx-workspace-body :where([class$="-tabs"], [role="tablist"], .team-filter-tabs, .lead-view-toggle) {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+}
+
+.sx-module .sx-workspace-body :where([class$="-tabs"], [role="tablist"], .team-filter-tabs, .lead-view-toggle)::-webkit-scrollbar {
+  display: none;
+}
+
+.sx-module .sx-workspace-body :where([role="tab"], [class*="tab-button"], .team-filter-tabs button, .lead-view-toggle button) {
+  flex: 0 0 auto;
+  min-height: 38px;
+}
+
+/* ==================================================== Module-specific flow */
+
+.sx-module .sx-workspace-body :where(.contact-grid, .lead-workspace, .team-layout, .knowledge-workspace-grid) {
+  gap: 18px;
+}
+
+.sx-module .sx-workspace-body .contact-grid {
+  grid-template-columns: minmax(0, 1.6fr) minmax(350px, 0.82fr);
+}
+
+.sx-module .sx-workspace-body .lead-workspace {
+  grid-template-columns: minmax(0, 1.55fr) minmax(370px, 0.86fr);
+}
+
+.sx-module .sx-workspace-body .team-layout {
+  grid-template-columns: minmax(0, 1.62fr) minmax(300px, 0.48fr);
+}
+
+.sx-module .sx-workspace-body .knowledge-workspace-grid {
+  grid-template-columns: minmax(360px, 0.92fr) minmax(480px, 1.32fr);
+}
+
+.sx-module .sx-workspace-body :where(.contact-editor, .lead-editor) {
+  top: 118px;
+  max-height: calc(100dvh - 148px);
+  scrollbar-gutter: stable;
+}
+
+.sx-module .sx-workspace-body .team-queue-item {
+  padding: 17px 18px;
+  border-color: var(--module-border);
+}
+
+.sx-module .sx-workspace-body .team-queue-item:hover {
+  background: #fbfcff;
+}
+
+.sx-module .sx-workspace-body .team-queue-item.mine {
+  background: linear-gradient(90deg, var(--module-accent-soft), #ffffff 58%);
+  box-shadow: inset 3px 0 0 var(--module-accent);
+}
+
+.sx-module .sx-workspace-body .team-agent-list article {
+  padding: 13px 16px;
+  border-color: var(--module-border);
+}
+
+.sx-module .sx-workspace-body .knowledge-form {
+  gap: 16px;
+  padding: 20px;
+}
+
+.sx-module .sx-workspace-body :where(.lead-kanban, [class*="kanban"], [class*="pipeline"]) {
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sx-module .sx-workspace-body :where(.lead-kanban-column, [class*="kanban-column"], [class*="pipeline-column"]) {
+  scroll-snap-align: start;
+}
+
+.sx-module .sx-workspace-body :where(canvas, svg[role="img"], [class*="chart"]) {
+  max-width: 100%;
+}
+
+.sx-module .sx-workspace-body :where(img, video) {
+  max-width: 100%;
+}
+
+/* =============================================================== Responsive */
+
+@media (min-width: 1600px) {
+  .sx-module .sx-workspace-body {
+    padding-inline: 34px;
+  }
+}
+
+@media (max-width: 1280px) {
+  .sx-module .sx-workspace-description {
+    max-width: 660px;
+  }
+
+  .sx-module .sx-workspace-body :where(.contact-grid, .lead-workspace, .team-layout, .knowledge-workspace-grid) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sx-module .sx-workspace-body :where(.contact-editor, .lead-editor) {
+    position: relative;
+    top: auto;
+    max-height: none;
+  }
+
+  .sx-module .sx-workspace-body .team-agents-card {
+    order: -1;
+  }
+}
+
+@media (max-width: 980px) {
+  .sx-module .sx-workspace-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .sx-module .sx-workspace-head-right {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .sx-module .sx-workspace-description {
+    max-width: 100%;
+  }
+
+  .sx-module .sx-workspace-body :where(
+    [class$="-toolbar"],
+    [class$="-filters"],
+    [class$="-controls"],
+    [class*="filter-bar"],
+    [class*="action-bar"],
+    .team-toolbar,
+    .contact-toolbar,
+    .lead-toolbar,
+    .lead-bulk-bar
+  ) {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .sx-module .sx-workspace-body :where(
+    [class$="-toolbar"],
+    [class$="-filters"],
+    [class$="-controls"],
+    [class*="filter-bar"],
+    [class*="action-bar"],
+    .team-toolbar,
+    .contact-toolbar,
+    .lead-toolbar,
+    .lead-bulk-bar
+  ) > :where(div, section) {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 767px) {
+  .sx-module .sx-workspace-head {
+    position: relative;
+    min-height: 0;
+    padding: 14px 12px;
+    gap: 10px;
+  }
+
+  .sx-module .sx-workspace-head-left {
+    width: 100%;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .sx-module .sx-workspace-icon {
+    width: 42px;
+    height: 42px;
+    flex-basis: 42px;
+    border-radius: 13px;
+  }
+
+  .sx-module .sx-workspace-copy h1 {
+    font-size: 21px;
+  }
+
+  .sx-module .sx-workspace-description {
+    font-size: 11.5px;
+  }
+
+  .sx-module .sx-workspace-head-right {
+    gap: 8px;
+  }
+
+  .sx-module .sx-workspace-badge {
+    min-height: 32px;
+  }
+
+  .sx-module .sx-workspace-body {
+    min-height: 0;
+    padding: 12px 10px calc(88px + env(safe-area-inset-bottom));
+  }
+
+  .sx-module .sx-workspace-body :where(
+    .contact-manager,
+    .lead-manager,
+    .team-chat-manager,
+    .engagement-manager,
+    .analytics-manager,
+    .knowledge-manager,
+    .training-manager,
+    .live-agent-manager
+  ) {
+    gap: 12px;
+  }
+
+  .sx-module .sx-workspace-body :where(
+    .contact-metrics,
+    .lead-metrics,
+    .team-metrics,
+    .analytics-metrics,
+    .engagement-metrics,
+    .knowledge-summary-row,
+    [class$="-metrics"],
+    [class$="-stats"],
+    [class$="-summary-row"],
+    [class*="metric-grid"],
+    [class*="stats-grid"]
+  ) {
+    display: flex;
+    gap: 10px;
+    padding-bottom: 3px;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+
+  .sx-module .sx-workspace-body :where(
+    .contact-metrics,
+    .lead-metrics,
+    .team-metrics,
+    .analytics-metrics,
+    .engagement-metrics,
+    .knowledge-summary-row,
+    [class$="-metrics"],
+    [class$="-stats"],
+    [class$="-summary-row"],
+    [class*="metric-grid"],
+    [class*="stats-grid"]
+  )::-webkit-scrollbar {
+    display: none;
+  }
+
+  .sx-module .sx-workspace-body :where(
+    .contact-metrics,
+    .lead-metrics,
+    .team-metrics,
+    .analytics-metrics,
+    .engagement-metrics,
+    .knowledge-summary-row,
+    [class$="-metrics"],
+    [class$="-stats"],
+    [class$="-summary-row"],
+    [class*="metric-grid"],
+    [class*="stats-grid"]
+  ) > :where(article, .knowledge-summary-card, [class*="metric"], [class*="stat"]) {
+    flex: 0 0 min(78vw, 274px);
+    min-height: 108px;
+    scroll-snap-align: start;
+  }
+
+  .sx-module .sx-workspace-body :where(
+    [class$="-toolbar"],
+    [class$="-filters"],
+    [class$="-controls"],
+    [class*="filter-bar"],
+    [class*="action-bar"],
+    .team-toolbar,
+    .contact-toolbar,
+    .lead-toolbar,
+    .lead-bulk-bar
+  ) {
+    position: relative;
+    top: auto;
+    padding: 10px;
+    border-radius: 14px;
+  }
+
+  .sx-module .sx-workspace-body :where(
+    [class$="-toolbar"],
+    [class$="-filters"],
+    [class$="-controls"],
+    [class*="filter-bar"],
+    [class*="action-bar"],
+    .team-toolbar,
+    .contact-toolbar,
+    .lead-toolbar,
+    .lead-bulk-bar
+  ) :where(input, select, textarea, button, a) {
+    width: 100%;
+    min-height: 46px;
+  }
+
+  .sx-module .sx-workspace-body :where(
+    [class$="-form-grid"],
+    [class*="fields-grid"],
+    [class*="settings-grid"],
+    .knowledge-form-row
+  ) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sx-module .sx-workspace-body :where(
+    [class$="-form-grid"],
+    [class*="fields-grid"],
+    [class*="settings-grid"]
+  ) > .wide {
+    grid-column: auto;
+  }
+
+  .sx-module .sx-workspace-body :where(
+    [class$="-form-actions"],
+    [class$="-footer-actions"],
+    [class*="modal-actions"]
+  ) {
+    align-items: stretch;
+    flex-direction: column-reverse;
+    gap: 8px;
+  }
+
+  .sx-module .sx-workspace-body :where(
+    [class$="-form-actions"],
+    [class$="-footer-actions"],
+    [class*="modal-actions"]
+  ) :where(button, a) {
+    width: 100%;
+    min-height: 46px;
+  }
+
+  .sx-module .sx-workspace-body :where(
+    [class$="-card"],
+    [class$="-panel"],
+    [class$="-directory"],
+    [class$="-editor"],
+    [class$="-builder"],
+    [class$="-canvas"],
+    [class$="-inspector"],
+    .knowledge-panel,
+    .team-queue-card,
+    .team-agents-card,
+    .lead-performance
+  ) {
+    border-radius: 15px;
+  }
+
+  .sx-module .sx-workspace-body :where(.lead-kanban, [class*="kanban"], [class*="pipeline"]) {
+    scroll-snap-type: x proximity;
+  }
+
+  .sx-module .sx-workspace-body :where(.lead-kanban-column, [class*="kanban-column"], [class*="pipeline-column"]) {
+    min-width: min(84vw, 320px);
+  }
+
+  .sx-module .sx-workspace-body .team-queue-item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sx-module .sx-workspace-body .team-queue-actions {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 430px) {
+  .sx-module .sx-workspace-body :where(
+    .contact-metrics,
+    .lead-metrics,
+    .team-metrics,
+    .analytics-metrics,
+    .engagement-metrics,
+    .knowledge-summary-row,
+    [class$="-metrics"],
+    [class$="-stats"],
+    [class$="-summary-row"],
+    [class*="metric-grid"],
+    [class*="stats-grid"]
+  ) > :where(article, .knowledge-summary-card, [class*="metric"], [class*="stat"]) {
+    flex-basis: 84vw;
+  }
+
+  .sx-module .sx-workspace-body :where(
+    [class$="-card"],
+    [class$="-panel"],
+    [class$="-directory"],
+    [class$="-editor"],
+    [class$="-builder"],
+    [class$="-inspector"]
+  ) > header,
+  .sx-module .sx-workspace-body :where(
+    .team-panel-header,
+    .knowledge-panel-header,
+    .lead-editor > header,
+    .lead-performance > header,
+    .contact-directory > header,
+    .contact-editor > header
+  ) {
+    align-items: flex-start;
+    flex-direction: column;
+    min-height: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sx-module .sx-workspace *,
+  .sx-module .sx-workspace *::before,
+  .sx-module .sx-workspace *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

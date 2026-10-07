@@ -1,0 +1,378 @@
+/* Engagement route — enterprise UI hardening only.
+   No API, payment, appointment, form or persistence behavior changes. */
+
+.sx-module .sx-workspace:has(.engagement-manager) {
+  --module-accent: #7c5ce7;
+  --module-accent-strong: #6543d8;
+  --module-accent-soft: #f4f1ff;
+  --module-accent-ring: rgba(124, 92, 231, 0.18);
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager :where(button, input, select, textarea):focus-visible {
+  outline: 3px solid rgba(124, 92, 231, 0.22);
+  outline-offset: 2px;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager :where(button, input, select, textarea) {
+  max-width: 100%;
+}
+
+/* Four conversion KPIs should stay visible without a carousel. */
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager > .suite-metrics {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 10px !important;
+  overflow: visible !important;
+  padding: 0 !important;
+  scroll-snap-type: none !important;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager > .suite-metrics > article {
+  min-width: 0 !important;
+  min-height: 94px !important;
+  padding: 14px 15px !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 12px !important;
+  background: #fff !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+  transform: none !important;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager > .suite-metrics > article::after {
+  display: none !important;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager > .suite-metrics > article > span {
+  display: block;
+  color: #667085;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager > .suite-metrics > article > strong {
+  display: block;
+  margin-top: 8px;
+  color: #101828;
+  font-size: clamp(22px, 2vw, 28px);
+  font-weight: 760;
+  line-height: 1;
+  letter-spacing: -0.035em;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager > .suite-metrics > article > small {
+  display: block;
+  margin-top: 7px;
+  color: #667085;
+  font-size: 10.5px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+/* Keep creation tasks balanced on operator desktops. */
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager > .suite-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 14px;
+  min-width: 0;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-card {
+  min-width: 0;
+  border: 1px solid #e4e7ec;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-card > header {
+  min-height: 69px;
+  padding: 15px 17px;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-card > header > div > span {
+  color: #7c5ce7;
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.065em;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-card > header > div > h3 {
+  margin-top: 4px;
+  color: #101828;
+  font-size: 14px;
+  font-weight: 720;
+  line-height: 1.35;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 15px 17px;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-form-grid.four {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-form-grid label {
+  min-width: 0;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-form-grid label > span {
+  color: #667085;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager :where(.suite-form-grid, .suite-field-row, .suite-list) :where(input:not([type="checkbox"]), select, textarea) {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid #d8dee8;
+  border-radius: 9px;
+  background: #fff;
+  color: #101828;
+  font-size: 13px;
+  box-shadow: none;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager :where(.suite-form-grid, .suite-field-row) :where(input:not([type="checkbox"]), select, textarea):focus {
+  border-color: #8d73e7;
+  box-shadow: 0 0 0 3px rgba(124, 92, 231, 0.12);
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-form-grid textarea {
+  min-height: 78px;
+  resize: vertical;
+}
+
+/* Field builder is a real three-control row, not an unconstrained flex strip. */
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-field-list {
+  padding: 0 17px 15px;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(120px, 0.8fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-field-row:last-child {
+  border-bottom: 0;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  margin: 0;
+  color: #475467;
+  font-size: 11.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-check input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  accent-color: #7c5ce7;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-card > footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 62px;
+  padding: 11px 17px;
+  border-top: 1px solid #edf0f4;
+  background: #fbfcfe;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-card > footer button {
+  min-height: 40px;
+  padding: 0 13px;
+  border: 1px solid #7c5ce7;
+  border-radius: 9px;
+  background: #7c5ce7;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-card > footer button.secondary {
+  border-color: #d8d2f3;
+  background: #f7f5ff;
+  color: #6543d8;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-card > footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Recent appointment/payment ledgers remain scannable with long values. */
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-list {
+  padding: 6px 16px 12px;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-list > article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(132px, 164px);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 11px 0;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-list > article > div {
+  min-width: 0;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-list > article strong,
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-list > article small {
+  overflow-wrap: anywhere;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-list > article select {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-empty {
+  min-height: 88px;
+  padding: 30px 16px;
+}
+
+@media (max-width: 1350px) {
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-form-grid.four {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1100px) {
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager > .suite-grid.two {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager > .suite-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager {
+    gap: 12px;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager > .suite-metrics {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 9px !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    scroll-snap-type: none !important;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager > .suite-metrics > article {
+    flex: initial !important;
+    width: auto !important;
+    min-width: 0 !important;
+    min-height: 88px !important;
+    padding: 12px !important;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-card > header {
+    min-height: 0;
+    padding: 13px;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-form-grid,
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-form-grid.two,
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-form-grid.four {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 10px;
+    padding: 13px;
+  }
+
+  /* Mobile Safari/Chrome can zoom text controls below 16px. These explicit,
+     route-scoped selectors also beat the later shared 13px input rule. */
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-form-grid input:not([type="checkbox"]),
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-form-grid select,
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-form-grid textarea,
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-field-row input:not([type="checkbox"]),
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-field-row select,
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-list select {
+    font-size: 16px !important;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-field-list {
+    padding: 0 13px 13px;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-field-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 11px 0;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-check {
+    min-height: 34px;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-card > footer {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 10px 13px 13px;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-card > footer button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-card > footer button:only-child {
+    grid-column: 1 / -1;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-list {
+    padding: 4px 13px 10px;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager .suite-list > article {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 10px 0;
+  }
+}
+
+@media (max-width: 380px) {
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager > .suite-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sx-module .sx-workspace-body > .suite-stack.engagement-manager * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

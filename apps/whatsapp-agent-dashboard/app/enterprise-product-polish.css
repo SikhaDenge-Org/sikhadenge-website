@@ -1,0 +1,709 @@
+/* ============================================================================
+   SikhaDenge WhatsApp — Enterprise Product Polish
+   Flat, high-signal operational UI inspired by enterprise WhatsApp CRMs.
+   Inter remains inherited; no business/product logic is changed.
+   ============================================================================ */
+
+/* -------------------------------------------------------------------------- */
+/* Inbox — conversation discovery                                              */
+/* -------------------------------------------------------------------------- */
+
+.sx-inbox .sx-channels-chips {
+  flex: none !important;
+  margin: 0 16px 10px !important;
+  padding: 0 0 2px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  scrollbar-width: none;
+}
+
+.sx-inbox .sx-channels-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.sx-inbox .sx-channels-chips .sx-channels-list {
+  display: flex !important;
+  flex-direction: row !important;
+  gap: 6px !important;
+  width: max-content !important;
+}
+
+.sx-inbox .sx-channels-chips .sx-chan {
+  width: auto !important;
+  min-width: max-content !important;
+  min-height: 34px !important;
+  padding: 6px 9px !important;
+  border: 1px solid var(--sd-border) !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+  color: var(--sd-muted) !important;
+  font-size: 12px !important;
+  box-shadow: none !important;
+}
+
+.sx-inbox .sx-channels-chips .sx-chan:hover {
+  border-color: #ccd2dc !important;
+  background: #f9fafb !important;
+  color: var(--sd-text-2) !important;
+}
+
+.sx-inbox .sx-channels-chips .sx-chan.is-active {
+  border-color: #aebdfa !important;
+  background: var(--sd-primary-soft) !important;
+  color: var(--sd-primary) !important;
+}
+
+.sx-inbox .sx-channels-chips .sx-chan-ic svg {
+  width: 16px !important;
+  height: 16px !important;
+}
+
+.sx-inbox .sx-search {
+  height: 40px !important;
+  margin: 0 16px 10px !important;
+  padding: 0 11px !important;
+  border: 1px solid var(--sd-border-strong) !important;
+  border-radius: 9px !important;
+  background: #ffffff !important;
+  color: var(--sd-faint) !important;
+  box-shadow: var(--sd-shadow-xs) !important;
+}
+
+.sx-inbox .sx-search:focus-within {
+  border-color: #7c98f5 !important;
+  background: #ffffff !important;
+  box-shadow: var(--sd-focus) !important;
+}
+
+.sx-inbox .sx-search input {
+  font-size: 13px !important;
+}
+
+.sx-inbox .sx-tabs {
+  margin: 0 16px 10px !important;
+  padding: 3px !important;
+  gap: 3px !important;
+  border: 1px solid #eaecf0 !important;
+  border-radius: 9px !important;
+  background: #f2f4f7 !important;
+}
+
+.sx-inbox .sx-tabs button {
+  min-height: 30px !important;
+  padding: 5px 8px !important;
+  border: 0 !important;
+  border-radius: 7px !important;
+  background: transparent !important;
+  color: #667085 !important;
+  font-size: 12px !important;
+  font-weight: 620 !important;
+  box-shadow: none !important;
+}
+
+.sx-inbox .sx-tabs button:hover {
+  color: #344054 !important;
+}
+
+.sx-inbox .sx-tabs button.is-active {
+  background: #ffffff !important;
+  color: #101828 !important;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08) !important;
+}
+
+.sx-inbox .sx-convos {
+  padding-bottom: 8px !important;
+}
+
+.sx-inbox .sx-convo {
+  min-height: 78px !important;
+  padding: 11px 14px !important;
+  gap: 10px !important;
+  border-top: 1px solid #f0f1f3 !important;
+}
+
+.sx-inbox .sx-convo .sx-avatar {
+  width: 40px !important;
+  height: 40px !important;
+  flex: 0 0 40px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+}
+
+.sx-inbox .sx-convo-top strong {
+  color: #101828 !important;
+  font-size: 13px !important;
+  font-weight: 680 !important;
+}
+
+.sx-inbox .sx-convo-top time {
+  color: #98a2b3 !important;
+  font-size: 10.5px !important;
+}
+
+.sx-inbox .sx-convo-prev {
+  margin-top: 3px !important;
+  color: #667085 !important;
+  font-size: 12px !important;
+  line-height: 1.35 !important;
+}
+
+.sx-inbox .sx-convo-meta {
+  margin-top: 6px !important;
+  gap: 6px !important;
+}
+
+.sx-inbox .sx-unread {
+  min-width: 20px !important;
+  height: 20px !important;
+  padding: 0 6px !important;
+  border-radius: 999px !important;
+  background: var(--sd-primary) !important;
+  font-size: 10px !important;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Inbox — live chat workspace                                                 */
+/* -------------------------------------------------------------------------- */
+
+.sx-inbox .sx-chat-person {
+  min-width: 0 !important;
+}
+
+.sx-inbox .sx-chat-ident h2 {
+  color: #101828 !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.01em !important;
+}
+
+.sx-inbox .sx-chat-ident p {
+  margin-top: 3px !important;
+  color: #667085 !important;
+  font-size: 11.5px !important;
+}
+
+.sx-inbox .sx-chat-chip {
+  min-height: 22px !important;
+  padding: 2px 6px !important;
+  border: 1px solid #e4e7ec !important;
+  border-radius: 999px !important;
+  background: #ffffff !important;
+  color: #475467 !important;
+  font-size: 10.5px !important;
+}
+
+.sx-inbox .sx-chat-actions {
+  gap: 6px !important;
+}
+
+.sx-inbox .sx-lead-btn,
+.sx-inbox .sx-btn-outline {
+  min-height: 34px !important;
+  padding: 0 10px !important;
+  border: 1px solid var(--sd-border-strong) !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+  color: #344054 !important;
+  font-size: 11.5px !important;
+  font-weight: 650 !important;
+  box-shadow: none !important;
+}
+
+.sx-inbox .sx-lead-btn:hover,
+.sx-inbox .sx-btn-outline:hover {
+  border-color: #b8c0cc !important;
+  background: #f9fafb !important;
+}
+
+.sx-inbox .sx-switch {
+  min-height: 34px !important;
+  padding: 0 8px !important;
+  border: 1px solid var(--sd-border) !important;
+  border-radius: 8px !important;
+  background: #f9fafb !important;
+  color: #475467 !important;
+  font-size: 11px !important;
+  font-weight: 650 !important;
+}
+
+.sx-inbox .sx-menu {
+  border: 1px solid var(--sd-border) !important;
+  border-radius: 10px !important;
+  background: #ffffff !important;
+  box-shadow: 0 14px 36px rgba(16, 24, 40, 0.14) !important;
+  overflow: hidden !important;
+}
+
+.sx-inbox .sx-menu :where(button, a) {
+  min-height: 36px !important;
+  padding: 8px 11px !important;
+  color: #344054 !important;
+  font-size: 12px !important;
+  font-weight: 580 !important;
+}
+
+.sx-inbox .sx-menu :where(button, a):hover {
+  background: #f9fafb !important;
+}
+
+.sx-inbox .sx-context {
+  min-height: 38px !important;
+  padding: 7px 14px !important;
+  gap: 6px !important;
+  overflow-x: auto !important;
+}
+
+.sx-inbox .sx-context > span {
+  min-height: 24px !important;
+  padding: 4px 7px !important;
+  border: 1px solid #e7e9ee !important;
+  border-radius: 6px !important;
+  background: #ffffff !important;
+  color: #667085 !important;
+  font-size: 10.5px !important;
+  font-weight: 600 !important;
+  white-space: nowrap !important;
+}
+
+.sx-inbox .sx-context > .sx-context-ok {
+  border-color: #ccebdc !important;
+  background: #f0fdf7 !important;
+  color: #067647 !important;
+}
+
+.sx-inbox .sx-bubble {
+  max-width: min(74%, 720px) !important;
+  padding: 9px 11px 7px !important;
+  border: 1px solid #e4e7ec !important;
+  border-radius: 11px !important;
+  background: #ffffff !important;
+  box-shadow: var(--sd-shadow-xs) !important;
+}
+
+.sx-inbox .sx-msgrow.outbound .sx-bubble {
+  border-color: #cfd9ff !important;
+  background: #eef3ff !important;
+}
+
+.sx-inbox .sx-bubble small {
+  margin-bottom: 3px !important;
+  color: var(--sd-primary) !important;
+  font-size: 10px !important;
+  font-weight: 680 !important;
+}
+
+.sx-inbox .sx-bubble p {
+  color: #344054 !important;
+  font-size: 13px !important;
+  line-height: 1.52 !important;
+}
+
+.sx-inbox .sx-bubble time {
+  margin-top: 4px !important;
+  color: #98a2b3 !important;
+  font-size: 9.5px !important;
+}
+
+.sx-inbox .sx-agentnote {
+  max-width: 720px !important;
+  margin: 14px auto 0 !important;
+  padding: 10px 11px !important;
+  border: 1px solid #e4e7ec !important;
+  border-radius: 10px !important;
+  background: #ffffff !important;
+  box-shadow: none !important;
+}
+
+.sx-inbox .sx-agentnote strong {
+  color: #344054 !important;
+  font-size: 11px !important;
+}
+
+.sx-inbox .sx-agentnote p {
+  color: #667085 !important;
+  font-size: 10.5px !important;
+  line-height: 1.45 !important;
+}
+
+.sx-inbox .sx-agentnote button {
+  min-height: 30px !important;
+  padding: 0 8px !important;
+  border: 1px solid var(--sd-border) !important;
+  border-radius: 7px !important;
+  background: #ffffff !important;
+  color: var(--sd-primary) !important;
+  font-size: 10.5px !important;
+  font-weight: 650 !important;
+}
+
+.sx-inbox .sx-composer-channel-note,
+.sx-inbox .sx-composer-note {
+  color: #667085 !important;
+  font-size: 10.5px !important;
+  line-height: 1.4 !important;
+}
+
+.sx-inbox .sx-composer-media {
+  border: 1px solid var(--sd-border) !important;
+  border-radius: 9px !important;
+  background: #f9fafb !important;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Inbox — profile/lead intelligence                                          */
+/* -------------------------------------------------------------------------- */
+
+.sx-inbox .sx-details {
+  padding: 16px !important;
+}
+
+.sx-inbox .sx-details-close {
+  min-width: 34px !important;
+  width: 34px !important;
+  min-height: 34px !important;
+  height: 34px !important;
+  border: 1px solid var(--sd-border) !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+  color: #667085 !important;
+}
+
+.sx-inbox .sx-profile {
+  padding-bottom: 14px !important;
+}
+
+.sx-inbox .sx-profile .sx-avatar {
+  box-shadow: inset 0 0 0 1px #e4e7ec !important;
+}
+
+.sx-inbox .sx-details :where(.sx-detail-section, .sx-detail, [class*="detail-section"]) {
+  padding: 13px 0 !important;
+  border-top: 1px solid #eef0f3 !important;
+}
+
+.sx-inbox .sx-details :where(dt) {
+  color: #667085 !important;
+  font-size: 10.5px !important;
+}
+
+.sx-inbox .sx-details :where(dd) {
+  color: #344054 !important;
+  font-size: 11.5px !important;
+  font-weight: 620 !important;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Shared module surfaces                                                     */
+/* -------------------------------------------------------------------------- */
+
+.sx-module .sx-workspace-body :where(
+  .contact-metrics,
+  .lead-metrics,
+  .team-metrics,
+  .analytics-metrics,
+  .engagement-metrics,
+  .knowledge-summary-row,
+  [class$="-metrics"],
+  [class$="-stats"],
+  [class$="-summary-row"],
+  [class*="metric-grid"],
+  [class*="stats-grid"]
+) {
+  gap: 10px !important;
+}
+
+.sx-module .sx-workspace-body :where(
+  .contact-metrics,
+  .lead-metrics,
+  .team-metrics,
+  .analytics-metrics,
+  .engagement-metrics,
+  .knowledge-summary-row,
+  [class$="-metrics"],
+  [class$="-stats"],
+  [class$="-summary-row"],
+  [class*="metric-grid"],
+  [class*="stats-grid"]
+) > :where(article, .knowledge-summary-card, [class*="metric"], [class*="stat"]) {
+  min-height: 94px !important;
+  padding: 14px 15px !important;
+  border: 1px solid var(--sd-border) !important;
+  border-radius: 12px !important;
+  background: #ffffff !important;
+  box-shadow: var(--sd-shadow-xs) !important;
+  transform: none !important;
+}
+
+.sx-module .sx-workspace-body :where(
+  .contact-metrics,
+  .lead-metrics,
+  .team-metrics,
+  .analytics-metrics,
+  .engagement-metrics,
+  .knowledge-summary-row,
+  [class$="-metrics"],
+  [class$="-stats"],
+  [class$="-summary-row"],
+  [class*="metric-grid"],
+  [class*="stats-grid"]
+) > :where(article, .knowledge-summary-card, [class*="metric"], [class*="stat"])::after {
+  display: none !important;
+}
+
+.sx-module .sx-workspace-body :where(
+  .contact-metrics,
+  .lead-metrics,
+  .team-metrics,
+  .analytics-metrics,
+  .engagement-metrics,
+  .knowledge-summary-row,
+  [class$="-metrics"],
+  [class$="-stats"],
+  [class$="-summary-row"],
+  [class*="metric-grid"],
+  [class*="stats-grid"]
+) > :where(article, .knowledge-summary-card, [class*="metric"], [class*="stat"]):hover {
+  border-color: #d8dde6 !important;
+  box-shadow: var(--sd-shadow-sm) !important;
+  transform: none !important;
+}
+
+.sx-module .sx-workspace-body :where(
+  .contact-metrics,
+  .lead-metrics,
+  .team-metrics,
+  .analytics-metrics,
+  .engagement-metrics,
+  .knowledge-summary-row,
+  [class$="-metrics"],
+  [class$="-stats"],
+  [class$="-summary-row"],
+  [class*="metric-grid"],
+  [class*="stats-grid"]
+) strong {
+  color: #101828 !important;
+  font-size: clamp(21px, 2vw, 26px) !important;
+  font-weight: 720 !important;
+  line-height: 1.15 !important;
+  letter-spacing: -0.025em !important;
+}
+
+.sx-module .sx-workspace-body :where(
+  [class$="-toolbar"],
+  [class$="-filters"],
+  [class$="-controls"],
+  [class*="filter-bar"],
+  [class*="action-bar"],
+  .team-toolbar,
+  .contact-toolbar,
+  .lead-toolbar,
+  .lead-bulk-bar
+) {
+  gap: 8px !important;
+  padding: 10px 12px !important;
+  border: 1px solid var(--sd-border) !important;
+  border-radius: 11px !important;
+  background: #ffffff !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+.sx-module .sx-workspace-body :where(
+  [class$="-card"],
+  [class$="-panel"],
+  [class$="-directory"],
+  [class$="-editor"],
+  [class$="-builder"],
+  [class$="-canvas"],
+  [class$="-inspector"],
+  .knowledge-panel,
+  .team-queue-card,
+  .team-agents-card,
+  .lead-performance
+) {
+  border: 1px solid var(--sd-border) !important;
+  border-radius: 13px !important;
+  background-color: #ffffff !important;
+  box-shadow: var(--sd-shadow-xs) !important;
+}
+
+.sx-module .sx-workspace-body :where(
+  [class$="-card"],
+  [class$="-panel"],
+  [class$="-directory"],
+  [class$="-editor"],
+  [class$="-builder"],
+  [class$="-inspector"]
+) > header,
+.sx-module .sx-workspace-body :where(
+  .team-panel-header,
+  .knowledge-panel-header,
+  .lead-editor > header,
+  .lead-performance > header,
+  .contact-directory > header,
+  .contact-editor > header
+) {
+  min-height: 58px !important;
+  padding: 12px 14px !important;
+  border-bottom: 1px solid var(--sd-border) !important;
+  background: #ffffff !important;
+}
+
+.sx-module .sx-workspace-body button,
+.sx-module .sx-workspace-body :where(a[class*="button"], a[class*="action"], a[class*="export"]) {
+  min-height: 38px !important;
+  border-radius: 9px !important;
+  font-size: 12.5px !important;
+  font-weight: 650 !important;
+  box-shadow: none !important;
+}
+
+.sx-module .sx-workspace-body button[type="submit"]:not(.danger),
+.sx-module .sx-workspace-body :where(.lead-save, [class$="-save"], [class$="-submit"]) {
+  border-color: var(--module-accent, var(--sd-primary)) !important;
+  background: var(--module-accent, var(--sd-primary)) !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+.sx-module .sx-workspace-body button[type="submit"]:not(.danger):hover,
+.sx-module .sx-workspace-body :where(.lead-save, [class$="-save"], [class$="-submit"]):hover {
+  filter: brightness(0.96) !important;
+}
+
+.sx-module .sx-workspace-body :where(
+  [class$="-pill"],
+  [class$="-badge"],
+  [class$="-chip"],
+  [class*="status-"],
+  [class*="temperature-"],
+  [class*="mode-"]
+) {
+  min-height: 22px;
+  border-radius: 999px !important;
+  font-size: 10.5px !important;
+  font-weight: 680 !important;
+  line-height: 1.2 !important;
+}
+
+.sx-module .sx-workspace-body :where(.contact-empty, .lead-empty, .team-empty, [class$="-empty"]) {
+  min-height: 160px !important;
+  padding: 24px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
+  color: #667085 !important;
+}
+
+.sx-module .sx-workspace-body :where(.contact-empty, .lead-empty, .team-empty, [class$="-empty"]) strong {
+  color: #344054 !important;
+  font-size: 14px !important;
+  font-weight: 680 !important;
+}
+
+.sx-module .sx-workspace-body :where(.contact-empty, .lead-empty, .team-empty, [class$="-empty"]) p {
+  max-width: 420px !important;
+  margin-top: 4px !important;
+  font-size: 12.5px !important;
+  line-height: 1.5 !important;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Responsive enterprise density                                               */
+/* -------------------------------------------------------------------------- */
+
+@media (max-width: 1023px) {
+  .sx-module .sx-workspace-body :where(
+    .contact-metrics,
+    .lead-metrics,
+    .team-metrics,
+    .analytics-metrics,
+    .engagement-metrics,
+    .knowledge-summary-row,
+    [class$="-metrics"],
+    [class$="-stats"],
+    [class$="-summary-row"]
+  ) {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .sx-inbox .sx-channels-chips,
+  .sx-inbox .sx-search,
+  .sx-inbox .sx-tabs {
+    margin-left: 12px !important;
+    margin-right: 12px !important;
+  }
+
+  .sx-inbox .sx-chat-actions {
+    gap: 4px !important;
+  }
+
+  .sx-inbox .sx-lead-btn,
+  .sx-inbox .sx-btn-outline {
+    min-height: 36px !important;
+    padding-inline: 8px !important;
+  }
+
+  .sx-inbox .sx-switch {
+    min-height: 36px !important;
+  }
+
+  .sx-inbox .sx-bubble {
+    max-width: 88% !important;
+  }
+
+  .sx-module .sx-workspace-body :where(
+    .contact-metrics,
+    .lead-metrics,
+    .team-metrics,
+    .analytics-metrics,
+    .engagement-metrics,
+    .knowledge-summary-row,
+    [class$="-metrics"],
+    [class$="-stats"],
+    [class$="-summary-row"]
+  ) {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+
+  .sx-module .sx-workspace-body :where(
+    .contact-metrics,
+    .lead-metrics,
+    .team-metrics,
+    .analytics-metrics,
+    .engagement-metrics,
+    .knowledge-summary-row,
+    [class$="-metrics"],
+    [class$="-stats"],
+    [class$="-summary-row"]
+  ) > :where(article, .knowledge-summary-card, [class*="metric"], [class*="stat"]) {
+    min-height: 88px !important;
+    padding: 12px !important;
+  }
+}
+
+@media (max-width: 479px) {
+  .sx-module .sx-workspace-body :where(
+    .contact-metrics,
+    .lead-metrics,
+    .team-metrics,
+    .analytics-metrics,
+    .engagement-metrics,
+    .knowledge-summary-row,
+    [class$="-metrics"],
+    [class$="-stats"],
+    [class$="-summary-row"]
+  ) {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .sx-inbox .sx-chat-phone,
+  .sx-inbox .sx-switch > span {
+    display: none !important;
+  }
+}

@@ -1,0 +1,198 @@
+/*
+ * Current Inbox composer viewport repair.
+ *
+ * Tablet browsers can request desktop-sized CSS viewports and some older
+ * layout layers still allow the long Agent context card to push the manual
+ * composer below the visible screen. Keep the chat panel bounded and dock the
+ * composer to its bottom edge at every effective viewport width.
+ */
+
+body .sx-inbox {
+  height: 100vh !important;
+  height: 100dvh !important;
+  height: 100svh !important;
+  max-height: 100svh !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+body .sx-inbox > .sx-list,
+body .sx-inbox > .sx-chat,
+body .sx-inbox > .sx-details {
+  min-height: 0 !important;
+  max-height: 100% !important;
+  overflow: hidden !important;
+}
+
+body .sx-inbox .sx-chat {
+  position: relative !important;
+  display: flex !important;
+  flex-direction: column !important;
+  box-sizing: border-box !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  min-width: 0 !important;
+  max-height: 100% !important;
+  padding-bottom: 104px !important;
+  overflow: hidden !important;
+}
+
+body .sx-inbox .sx-chat-head,
+body .sx-inbox .sx-context,
+body .sx-inbox .sx-error {
+  flex: 0 0 auto !important;
+}
+
+body .sx-inbox .sx-messages {
+  flex: 1 1 auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  min-width: 0 !important;
+  padding-bottom: 16px !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+body .sx-inbox .sx-composer {
+  position: absolute !important;
+  z-index: 240 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  top: auto !important;
+  display: block !important;
+  box-sizing: border-box !important;
+  width: auto !important;
+  min-width: 0 !important;
+  height: auto !important;
+  min-height: 88px !important;
+  max-height: 42svh !important;
+  margin: 0 !important;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom)) !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  transform: none !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  border-top: 1px solid #e2e8f0 !important;
+  background: #ffffff !important;
+  box-shadow: 0 -10px 28px rgba(15, 23, 42, 0.13) !important;
+}
+
+body .sx-inbox .sx-composer-channel-note,
+body .sx-inbox .sx-composer-note,
+body .sx-inbox .sx-composer-media {
+  position: relative !important;
+  z-index: 1 !important;
+  width: 100% !important;
+}
+
+body .sx-inbox .sx-composer-row {
+  position: relative !important;
+  z-index: 2 !important;
+  display: grid !important;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto !important;
+  align-items: center !important;
+  gap: 6px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+body .sx-inbox .sx-composer-row textarea {
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 44px !important;
+  max-height: 112px !important;
+  margin: 0 !important;
+  padding: 10px 12px !important;
+  resize: none !important;
+  font-size: 16px !important;
+  line-height: 1.4 !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+body .sx-inbox .sx-composer-tool,
+body .sx-inbox .sx-send {
+  min-width: 44px !important;
+  width: 44px !important;
+  min-height: 44px !important;
+  height: 44px !important;
+  margin: 0 !important;
+  flex: 0 0 44px !important;
+}
+
+@media (max-width: 1199px) {
+  body .sx-inbox .sx-list,
+  body .sx-inbox .sx-details {
+    overflow-y: auto !important;
+  }
+}
+
+@media (max-width: 767px) {
+  html,
+  body {
+    height: 100% !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  body .sx-inbox.sx-mv-list .sx-chat {
+    display: none !important;
+  }
+
+  body .sx-inbox.sx-mv-chat .sx-list {
+    display: none !important;
+  }
+
+  body .sx-inbox.sx-mv-chat .sx-chat {
+    display: flex !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    padding-bottom: 72px !important;
+  }
+
+  body .sx-inbox .sx-composer {
+    min-height: 64px !important;
+    max-height: 50svh !important;
+    padding: 6px 7px calc(6px + env(safe-area-inset-bottom)) !important;
+  }
+
+  body .sx-inbox .sx-composer-channel-note {
+    display: none !important;
+  }
+
+  body .sx-inbox .sx-composer-row {
+    grid-template-columns: auto minmax(0, 1fr) auto !important;
+    gap: 5px !important;
+  }
+
+  body .sx-inbox .sx-composer-tools,
+  body .sx-inbox .sx-composer-divider {
+    display: none !important;
+  }
+
+  body .sx-inbox .sx-composer-row textarea {
+    min-height: 44px !important;
+    max-height: 92px !important;
+    padding: 9px 10px !important;
+  }
+}
+
+@media (max-height: 560px) {
+  body .sx-inbox .sx-context,
+  body .sx-inbox .sx-composer-channel-note {
+    display: none !important;
+  }
+
+  body .sx-inbox .sx-chat {
+    padding-bottom: 72px !important;
+  }
+
+  body .sx-inbox .sx-composer {
+    min-height: 64px !important;
+  }
+}

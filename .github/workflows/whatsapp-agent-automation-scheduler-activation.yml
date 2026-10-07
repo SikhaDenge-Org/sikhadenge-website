@@ -7,45 +7,18 @@ on:
         description: Exact protected release SHA currently deployed
         required: true
         type: string
-  workflow_run:
-    workflows:
-      - "WhatsApp Agent Production Batch 1"
-    types:
-      - completed
 
 permissions:
   contents: read
 
 concurrency:
-  group: whatsapp-automation-scheduler-activation
+  group: whatsapp-agent-production
   cancel-in-progress: false
 
 jobs:
-  dispatch-protected-activation:
-    if: >-
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'release/whatsapp-instagram-agent-flow-20260731'
-    runs-on: [self-hosted, Linux, X64, sikhadenge-ci]
-    permissions:
-      actions: write
-      contents: read
-    steps:
-      - name: Dispatch protected release activation
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
-          gh workflow run whatsapp-agent-automation-scheduler-activation.yml             --repo "$GITHUB_REPOSITORY"             --ref release/whatsapp-instagram-agent-flow-20260731             -f expected_live_sha="$TARGET_SHA"
-          printf 'DISPATCHED_PROTECTED_ACTIVATION_SHA=%s\n' "$TARGET_SHA"
-
   activate:
-    if: github.event_name == 'workflow_dispatch'
     environment: whatsapp-agent-production
-    runs-on: [self-hosted, Linux, X64, sikhadenge-ci]
+    runs-on: ubuntu-latest
     env:
       EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
       SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
@@ -58,10 +31,12 @@ jobs:
           set -euo pipefail
           [[ "$EXPECTED_LIVE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test -n "$SSH_HOST"
-          test -n "$SSH_PORT"
           test -n "$SSH_USER"
           test -n "${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}"
           test -n "${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}"
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"
+          fi
 
       - name: Configure pinned SSH identity
         shell: bash
@@ -90,8 +65,12 @@ jobs:
           printf '%s %s\n' "$supplied_key_type" "$supplied_key_material" |
             ssh-keygen -lf - -E sha256 >/dev/null
 
-          canonical_host="[$SSH_HOST]:$SSH_PORT"
-          printf '%s %s %s\n'             "$canonical_host"             "$supplied_key_type"             "$supplied_key_material" > "$HOME/.ssh/known_hosts"
+          if [[ "$SSH_PORT" = "22" ]]; then
+            canonical_host="$SSH_HOST"
+          else
+            canonical_host="[$SSH_HOST]:$SSH_PORT"
+          fi
+          printf '%s %s %s\n' "$canonical_host" "$supplied_key_type" "$supplied_key_material" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
 
           ssh-keygen -y -f "$private_key_file" >/dev/null
@@ -119,6 +98,7 @@ jobs:
           grep -q 'WHATSAPP_AUTOMATION_SCHEDULER_ENABLED: "true"' "$LIVE_APP/ecosystem.automation-scheduler.cjs"
           grep -q 'AUTOMATION_RUNTIME_ENABLED: "false"' "$LIVE_APP/ecosystem.automation-scheduler.cjs"
           grep -q 'AUTOMATION_ACTIONS_ENABLED: "false"' "$LIVE_APP/ecosystem.automation-scheduler.cjs"
+          grep -q 'WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX: ""' "$LIVE_APP/ecosystem.automation-scheduler.cjs"
           grep -q 'JOURNEY_RUNTIME_ENABLED: "false"' "$LIVE_APP/ecosystem.automation-scheduler.cjs"
           grep -q 'JOURNEY_ACTIONS_ENABLED: "false"' "$LIVE_APP/ecosystem.automation-scheduler.cjs"
           grep -q 'WHATSAPP_CAMPAIGNS_ENABLED: "false"' "$LIVE_APP/ecosystem.automation-scheduler.cjs"
@@ -127,11 +107,14 @@ jobs:
           grep -q 'WHATSAPP_OUTBOUND_KILL_SWITCH: "on"' "$LIVE_APP/ecosystem.automation-scheduler.cjs"
 
           cd "$LIVE_APP"
+          activation_epoch_ms="$(date +%s%3N)"
+
           export NODE_ENV=production
           export WHATSAPP_AUTOMATION_SCHEDULER_ENABLED=true
           export WHATSAPP_AUTOMATION_SCHEDULER_INTERVAL_MS=5000
           export AUTOMATION_RUNTIME_ENABLED=false
           export AUTOMATION_ACTIONS_ENABLED=false
+          export WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX=
           export JOURNEY_RUNTIME_ENABLED=false
           export JOURNEY_ACTIONS_ENABLED=false
           export WHATSAPP_CAMPAIGNS_ENABLED=false
@@ -147,30 +130,45 @@ jobs:
             printf 'SCHEDULER_PM2_OPERATION=restart\n'
           else
             test -f "$LIVE_APP/node_modules/tsx/dist/cli.mjs"
-            pm2 start "$LIVE_APP/node_modules/tsx/dist/cli.mjs" \
-              --name "$PROCESS" \
-              --cwd "$LIVE_APP" \
-              --interpreter /usr/bin/node \
-              -- scripts/whatsapp-automation-scheduler.ts
+            pm2 start "$LIVE_APP/node_modules/tsx/dist/cli.mjs"               --name "$PROCESS"               --cwd "$LIVE_APP"               --interpreter /usr/bin/node               -- scripts/whatsapp-automation-scheduler.ts
             printf 'SCHEDULER_PM2_OPERATION=start\n'
           fi
           pm2 save
 
-          sleep 4
+          sleep 8
           state="$(pm2 jlist | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s).find(x=>x.name==="sikhadenge-whatsapp-automation-scheduler");process.stdout.write(p?.pm2_env?.status||"missing")})')"
           test "$state" = "online"
 
-          pm2 logs "$PROCESS" --lines 40 --nostream > /tmp/phase21-scheduler.log
+          pm2 logs "$PROCESS" --lines 80 --nostream > /tmp/phase21-scheduler.log
           grep -q '"service":"sikhadenge-whatsapp-automation-scheduler"' /tmp/phase21-scheduler.log
-          grep -Eq '"event":"(started|paused|cycle)"' /tmp/phase21-scheduler.log
-          ! grep -q '"event":"uncaught_exception"' /tmp/phase21-scheduler.log
+          node -e '
+            const fs = require("fs");
+            const [file, sinceRaw] = process.argv.slice(1);
+            const since = Number(sinceRaw);
+            const events = fs.readFileSync(file, "utf8").split(/\r?\n/).flatMap((line) => {
+              const start = line.indexOf("{");
+              if (start < 0) return [];
+              try { return [JSON.parse(line.slice(start))]; } catch { return []; }
+            }).filter((row) =>
+              row.service === "sikhadenge-whatsapp-automation-scheduler" &&
+              Number.isFinite(Date.parse(row.at)) &&
+              Date.parse(row.at) >= since
+            );
+            if (!events.some((row) => row.event === "cycle" || row.event === "paused")) process.exit(11);
+            if (events.some((row) => ["cycle_error", "uncaught_exception", "unhandled_rejection"].includes(row.event))) process.exit(12);
+          ' /tmp/phase21-scheduler.log "$activation_epoch_ms"
 
-          printf 'LIVE_SHA=%s\n' "$live_sha"
+          final_live_sha="$(git -C "$LIVE_APP" rev-parse HEAD)"
+          test "$final_live_sha" = "$EXPECTED_LIVE_SHA"
+          test "$(git -C "$LIVE_APP" status --porcelain --untracked-files=no | wc -l)" -eq 0
+
+          printf 'LIVE_SHA=%s\n' "$final_live_sha"
           printf 'SCHEDULER_PROCESS=%s\n' "$PROCESS"
           printf 'SCHEDULER_PM2_STATE=%s\n' "$state"
           printf 'SCHEDULER_ENABLED=true\n'
           printf 'AUTOMATION_RUNTIME_ENABLED=false\n'
           printf 'AUTOMATION_ACTIONS_ENABLED=false\n'
+          printf 'WHATSAPP_AUTOMATION_EVENT_SOURCE_PREFIX=\n'
           printf 'JOURNEY_RUNTIME_ENABLED=false\n'
           printf 'JOURNEY_ACTIONS_ENABLED=false\n'
           printf 'WHATSAPP_CAMPAIGNS_ENABLED=false\n'

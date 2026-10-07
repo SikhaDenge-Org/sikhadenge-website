@@ -1,0 +1,226 @@
+.mc-image-editor {
+  margin-top: 24px;
+  padding-top: 22px;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.mc-image-editor-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 16px;
+}
+
+.mc-image-editor-head span {
+  display: block;
+  margin-bottom: 4px;
+  color: #38bdf8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.mc-image-editor-head h3 {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 18px;
+}
+
+.mc-image-editor-head small {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.mc-image-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.mc-image-picker,
+.mc-same-image-preview {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.62);
+}
+
+.mc-image-copy strong,
+.mc-same-image-preview > strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 14px;
+}
+
+.mc-image-copy p,
+.mc-same-image-preview p {
+  margin: 5px 0 14px;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.mc-image-current {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.mc-image-current img,
+.mc-same-image-preview img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 12px;
+  background: #020617;
+}
+
+.mc-image-current div {
+  min-width: 0;
+}
+
+.mc-image-current strong {
+  display: block;
+  overflow: hidden;
+  color: #e2e8f0;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mc-image-current small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 11px;
+}
+
+.mc-image-empty {
+  display: grid;
+  min-height: 78px;
+  margin-bottom: 14px;
+  place-items: center;
+  border: 1px dashed rgba(148, 163, 184, 0.3);
+  border-radius: 12px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.mc-image-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.mc-image-actions label,
+.mc-image-actions button {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid rgba(56, 189, 248, 0.32);
+  border-radius: 10px;
+  background: rgba(14, 165, 233, 0.12);
+  color: #bae6fd;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.mc-image-actions label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mc-image-actions label input {
+  display: none;
+}
+
+.mc-image-actions button {
+  border-color: rgba(248, 113, 113, 0.28);
+  background: rgba(127, 29, 29, 0.16);
+  color: #fecaca;
+}
+
+.mc-image-actions label.disabled,
+.mc-image-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.mc-image-second {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mc-same-image-toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid rgba(34, 197, 94, 0.24);
+  border-radius: 12px;
+  background: rgba(22, 101, 52, 0.12);
+  color: #bbf7d0;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.mc-same-image-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: #22c55e;
+}
+
+.mc-same-image-preview {
+  flex: 1;
+}
+
+.mc-same-image-preview img {
+  max-height: 180px;
+}
+
+.mc-preview-with-media article > img {
+  display: block;
+  width: calc(100% - 32px);
+  max-height: 270px;
+  margin: 0 16px 14px;
+  object-fit: cover;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 14px;
+  background: #020617;
+}
+
+@media (max-width: 920px) {
+  .mc-image-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  .mc-image-editor-head {
+    flex-direction: column;
+  }
+
+  .mc-image-current {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+
+  .mc-image-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .mc-image-actions label,
+  .mc-image-actions button {
+    width: 100%;
+  }
+}

@@ -1,0 +1,5 @@
+import { NextResponse } from "next/server";
+import { isEmailInternalBearerAuthorized } from "@/modules/email-automation/finalization/internal-auth";
+import { enqueueEmailWebhookAutomationEvent } from "@/modules/email-automation/finalization/platform-service";
+export const runtime="nodejs"; export const dynamic="force-dynamic";
+export async function POST(request:Request){if(!isEmailInternalBearerAuthorized(request.headers.get("authorization"),"EMAIL_AUTOMATION_WEBHOOK_TOKEN"))return NextResponse.json({error:"Unauthorized."},{status:401});try{const b=await request.json() as Record<string,unknown>;if(typeof b.workspaceId!=="string"||typeof b.contactId!=="string")return NextResponse.json({error:"workspaceId and contactId are required."},{status:400});const event=await enqueueEmailWebhookAutomationEvent({workspaceId:b.workspaceId,contactId:b.contactId,sourceEventId:typeof b.sourceEventId==="string"?b.sourceEventId:crypto.randomUUID(),payload:b.payload});return NextResponse.json({event},{status:201});}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Webhook automation failed."},{status:400});}}

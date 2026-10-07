@@ -1,0 +1,73 @@
+name: WhatsApp Agent Phase17 Stage2 Drift Signature
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-phase17-stage2-drift-signature.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  capture-drift-signature:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_LIVE_SHA: 2b3efe35b8920082cc94dce989d1847842fb8825
+
+    steps:
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "${SSH_PORT:-}" ]]; then printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "${SSH_PORT:-22}" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Capture file signatures and safe diffs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "EXPECTED_LIVE_SHA='$EXPECTED_LIVE_SHA' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          LIVE_APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          test "$(git -C "$LIVE_APP" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
+          repo_root="$(git -C "$LIVE_APP" rev-parse --show-toplevel)"
+          paths=(
+            apps/whatsapp-agent-dashboard/app/login-page01-left-image.css
+            apps/whatsapp-agent-dashboard/app/login/page.tsx
+            apps/whatsapp-agent-dashboard/next-env.d.ts
+          )
+          actual="$(git -C "$repo_root" diff HEAD --name-only --no-renames | LC_ALL=C sort)"
+          expected="$(printf '%s\n' "${paths[@]}" | LC_ALL=C sort)"
+          test "$actual" = "$expected"
+
+          for path in "${paths[@]}"; do
+            printf 'FILE_SIGNATURE_BEGIN path=%s\n' "$path"
+            stat -c 'mtime=%y size=%s inode=%i' "$repo_root/$path"
+            printf 'working_sha256='; sha256sum "$repo_root/$path" | awk '{print $1}'
+            printf 'head_blob='; git -C "$repo_root" rev-parse "HEAD:$path"
+            printf 'head_sha256='; git -C "$repo_root" show "HEAD:$path" | sha256sum | awk '{print $1}'
+            printf 'FILE_SIGNATURE_END path=%s\n' "$path"
+          done
+
+          printf 'SAFE_DIFF_BEGIN\n'
+          git -C "$repo_root" diff --no-ext-diff --no-color --unified=3 HEAD -- "${paths[@]}"
+          printf 'SAFE_DIFF_END\n'
+          printf 'PASS: PHASE17_STAGE2_DRIFT_SIGNATURE_COMPLETE\n'
+          REMOTE

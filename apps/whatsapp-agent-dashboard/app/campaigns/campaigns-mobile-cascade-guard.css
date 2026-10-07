@@ -1,0 +1,7 @@
+/* Final Campaigns route cascade guard for touch/mobile form controls. */
+@media (max-width: 767px) {
+  .sx-module .sx-workspace-body > .campaign-control-center .campaign-control-grid :where(input, select),
+  .sx-module .sx-workspace-body > .campaign-control-center .campaign-variable-grid input {
+    font-size: 16px !important;
+  }
+}

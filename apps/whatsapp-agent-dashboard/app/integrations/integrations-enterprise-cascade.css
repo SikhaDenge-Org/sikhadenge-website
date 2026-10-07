@@ -1,0 +1,23 @@
+/* Final Integrations route cascade guard.
+   Late enterprise globals collapse any class ending in -grid below 1180px with
+   !important. Reassert the intended provider-health geometry at route scope. */
+
+@media (max-width: 1280px) and (min-width: 901px) {
+  .sx-module .sx-workspace-body > .integrations-enterprise-root .integrations-health-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .sx-module .sx-workspace-body > .integrations-enterprise-root .integrations-health-grid > .suite-card:first-child {
+    grid-column: 1 / -1 !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .sx-module .sx-workspace-body > .integrations-enterprise-root .integrations-health-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .sx-module .sx-workspace-body > .integrations-enterprise-root .integrations-health-grid > .suite-card:first-child {
+    grid-column: auto !important;
+  }
+}

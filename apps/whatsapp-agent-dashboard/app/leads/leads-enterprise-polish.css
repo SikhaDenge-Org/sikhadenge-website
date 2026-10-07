@@ -1,0 +1,112 @@
+/* Leads — screen-specific Enterprise UI hardening.
+   Presentation only: no API, database, messaging or admission logic changes. */
+
+/* Legacy lead-manager.css assigns order:-1 to the editor below 1350px. That
+   reverses the intended directory -> editor workflow and can even swap grid
+   columns between 1181px and 1350px. Preserve source/workflow order. */
+.sx-module .lead-directory,
+.sx-module .lead-editor {
+  order: 0 !important;
+}
+
+.sx-module .lead-filter-group,
+.sx-module .lead-view-toggle,
+.sx-module .lead-bulk-bar {
+  min-width: 0;
+}
+
+.sx-module .lead-table-wrap {
+  max-width: 100%;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: auto;
+}
+
+.sx-module .lead-kanban {
+  max-width: 100%;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: auto;
+}
+
+@media (max-width: 900px) {
+  .sx-module .lead-view-toggle {
+    width: 100%;
+  }
+}
+
+@media (max-width: 767px) {
+  /* Keep discovery controls compact enough for counselor use on phones:
+     search full width, stage/priority paired, counselor and due state full. */
+  .sx-module .lead-filter-group {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .sx-module .lead-filter-group > input:first-child,
+  .sx-module .lead-filter-group > select:last-of-type,
+  .sx-module .lead-filter-group > .lead-due-toggle {
+    grid-column: 1 / -1;
+  }
+
+  .sx-module .lead-filter-group > :where(input, select, label) {
+    width: 100%;
+    min-width: 0 !important;
+  }
+
+  .sx-module .lead-due-toggle {
+    justify-content: flex-start;
+  }
+
+  .sx-module .lead-view-toggle {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    width: 100%;
+    gap: 4px;
+  }
+
+  .sx-module .lead-view-toggle > button {
+    width: 100%;
+    min-width: 0;
+    padding-inline: 8px;
+  }
+
+  .sx-module .lead-bulk-bar {
+    width: 100%;
+  }
+
+  /* The API can return up to 250 leads. Core responsive CSS removes the
+     directory height cap on phones, which can put the editor thousands of
+     pixels below the selected row. Keep the table as an internal scroll
+     region so the directory stays bounded while Y overscroll still chains
+     naturally to the page at its edges. */
+  .sx-module .lead-table-wrap {
+    max-height: min(56vh, 520px);
+  }
+
+  .sx-module .lead-table-wrap,
+  .sx-module .lead-kanban {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* Five horizontal KPI cards hide operational status off-canvas at the locked
+   phone QA width. A compact 2-column grid keeps all five values discoverable;
+   the enrolled total anchors the final row at full width. */
+@media (max-width: 479px) {
+  .sx-module .lead-metrics {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    overflow: visible !important;
+    padding-bottom: 0 !important;
+    scroll-snap-type: none !important;
+  }
+
+  .sx-module .lead-metrics > article {
+    min-width: 0 !important;
+  }
+
+  .sx-module .lead-metrics > article:last-child {
+    grid-column: 1 / -1;
+  }
+}

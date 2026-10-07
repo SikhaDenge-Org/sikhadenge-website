@@ -1,0 +1,68 @@
+name: WhatsApp Agent Page 02 CI
+
+on:
+  push:
+    branches:
+      - ui/page02-inbox-standard-20260914
+    paths:
+      - ".github/workflows/whatsapp-agent-page02-ci.yml"
+      - "apps/whatsapp-agent-dashboard/app/inbox/page.tsx"
+      - "apps/whatsapp-agent-dashboard/app/page02-inbox-standard-v16.css"
+      - "apps/whatsapp-agent-dashboard/components/inbox/**"
+      - "apps/whatsapp-agent-dashboard/components/navigation/**"
+  pull_request:
+    paths:
+      - "apps/whatsapp-agent-dashboard/app/inbox/page.tsx"
+      - "apps/whatsapp-agent-dashboard/app/page02-inbox-standard-v16.css"
+      - "apps/whatsapp-agent-dashboard/components/inbox/**"
+      - "apps/whatsapp-agent-dashboard/components/navigation/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-page02-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-page02:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/whatsapp-agent-dashboard
+    env:
+      DATABASE_URL: postgresql://ci_user:ci_password@localhost:5432/sikhadenge_whatsapp_ci?schema=public
+      SHADOW_DATABASE_URL: postgresql://ci_user:ci_password@localhost:5432/sikhadenge_whatsapp_ci_shadow?schema=public
+      SESSION_SECRET: ci-only-session-secret-please-replace-in-production-1234567890
+      APP_URL: http://localhost:3100
+      INITIAL_ADMIN_EMAIL: admin@example.invalid
+      INITIAL_ADMIN_PASSWORD: CI-only-password-12345
+      INITIAL_ADMIN_NAME: CI Admin
+
+    steps:
+      - name: Checkout Page 02 branch
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --include=dev --no-audit --no-fund
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Validate Inbox layout contract
+        run: npm run test:inbox-layout
+
+      - name: TypeScript check
+        run: npm run typecheck
+
+      - name: Production build
+        run: npm run build

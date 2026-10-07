@@ -1,0 +1,287 @@
+/*
+ * Unified dashboard sidebar.
+ * Keeps the Inbox sidebar as the single visual reference for every module page.
+ */
+
+.sx-module {
+  --panel: #ffffff;
+  --panel-2: #f8f9fb;
+  --line: #ecedf1;
+  --line-2: #e3e5ea;
+  --ink: #15181e;
+  --ink-2: #3c424d;
+  --muted: #6f7783;
+  --faint: #9aa1ab;
+  --blue: #3b6df6;
+  --blue-600: #2f5fe6;
+  --blue-050: #eef3ff;
+  --green: #1fb865;
+}
+
+.sx-module .sx-side {
+  padding: 16px 12px 12px !important;
+  background: var(--panel) !important;
+  border-right: 1px solid var(--line) !important;
+}
+
+.sx-module .sx-side .brand-mark.sx-brand {
+  min-height: 52px !important;
+  height: auto !important;
+  margin: 0 0 12px !important;
+  padding: 4px 6px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 10px !important;
+  overflow: hidden !important;
+  border: 0 !important;
+  border-radius: 12px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.sx-module .sx-side .brand-mark.sx-brand::before,
+.sx-module .sx-side .brand-mark.sx-brand::after {
+  display: none !important;
+  content: none !important;
+}
+
+.sx-module .sx-brand-logo {
+  width: 174px !important;
+  max-width: 100% !important;
+  height: 42px !important;
+  display: block !important;
+  flex: 0 1 174px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.sx-module .sx-brand-logo img {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+  object-position: left center !important;
+}
+
+.sx-module .sx-brand-name {
+  display: none !important;
+}
+
+.sx-module .sx-side-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+  scrollbar-gutter: stable;
+}
+
+.sx-module .sx-side nav {
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+}
+
+.sx-module .sx-side .rail-button {
+  position: relative;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 11px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 9px 11px !important;
+  border: 0 !important;
+  border-radius: 10px !important;
+  background: transparent !important;
+  color: var(--muted) !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 1.2 !important;
+  text-align: left !important;
+  white-space: nowrap !important;
+  overflow: visible !important;
+  box-shadow: none !important;
+}
+
+.sx-module .sx-side .rail-button:hover {
+  background: var(--panel-2) !important;
+  color: var(--ink-2) !important;
+}
+
+.sx-module .sx-side .rail-button.is-active {
+  background: var(--blue-050) !important;
+  color: var(--blue-600) !important;
+  font-weight: 650 !important;
+}
+
+.sx-module .sx-side-group {
+  margin-top: 6px;
+}
+
+.sx-module .sx-side-label {
+  margin: 14px 8px 6px !important;
+  color: var(--faint) !important;
+  font-size: 10.5px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.07em !important;
+  text-transform: uppercase !important;
+}
+
+.sx-module .sx-navic {
+  display: inline-flex;
+  flex: none;
+  color: currentColor;
+}
+
+.sx-module .sx-navlabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sx-module .sx-channels {
+  margin-top: 4px;
+}
+
+.sx-module .sx-channels-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sx-module .sx-chan {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 0 !important;
+  padding: 9px 11px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: left;
+  text-decoration: none;
+  box-shadow: none !important;
+  transition: background-color 130ms ease, color 130ms ease;
+}
+
+.sx-module .sx-chan:hover {
+  background: var(--panel-2);
+}
+
+.sx-module .sx-chan.is-active {
+  background: var(--blue-050);
+  color: var(--blue-600);
+}
+
+.sx-module .sx-chan.is-pending {
+  color: var(--muted);
+}
+
+.sx-module .sx-chan-ic {
+  display: inline-flex;
+  flex: none;
+  line-height: 0;
+  filter: drop-shadow(0 1px 1.5px rgba(17, 24, 39, 0.12));
+}
+
+.sx-module .sx-chan.is-pending .sx-chan-ic {
+  opacity: 0.5;
+  filter: grayscale(0.4);
+}
+
+.sx-module .sx-chan-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sx-module .sx-chan-tag {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.sx-module .sx-chan-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--green);
+  box-shadow: 0 0 0 3px rgba(31, 184, 101, 0.15);
+}
+
+.sx-module .sx-chan:hover .sx-chan-tag {
+  border-color: var(--blue);
+  color: var(--blue-600);
+}
+
+.sx-module .sx-side-foot {
+  flex: none;
+  padding-top: 10px;
+  margin-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.sx-module .sx-account {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+
+.sx-module .sx-account .logout-button {
+  flex: none !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 6px 8px !important;
+  border: 1px solid var(--line-2) !important;
+  border-radius: 8px !important;
+  background: #fff !important;
+  color: var(--muted) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  box-shadow: none !important;
+}
+
+@media (max-width: 760px) {
+  .sx-module .sx-brand-logo {
+    width: 154px !important;
+    flex-basis: 154px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sx-module .sx-side .rail-button,
+  .sx-module .sx-chan {
+    transition: none !important;
+  }
+}

@@ -1,0 +1,190 @@
+/*
+ * Desktop sidebar hard lock.
+ *
+ * The production screenshots showed a wide grid gutter with the rail itself
+ * still collapsed to the legacy icon-only width. These rules deliberately
+ * set the grid track and the rail element dimensions directly instead of
+ * relying only on the shared custom property.
+ */
+
+@media (min-width: 851px) {
+  :root {
+    --wa-sidebar-width: 220px !important;
+  }
+
+  .dashboard-shell {
+    grid-template-columns: 220px minmax(0, 1fr) !important;
+  }
+
+  .dashboard-shell > .rail,
+  aside.rail,
+  .rail {
+    position: sticky !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 220px !important;
+    min-width: 220px !important;
+    max-width: 220px !important;
+    height: 100vh !important;
+    flex: 0 0 220px !important;
+    padding: 14px 12px 12px !important;
+    align-items: stretch !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+  }
+
+  .rail .brand-mark,
+  .brand-mark {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: 52px !important;
+    margin: 0 !important;
+    justify-content: flex-start !important;
+    gap: 9px !important;
+    padding: 7px 8px !important;
+  }
+
+  .brand-mark::before {
+    width: 35px !important;
+    height: 35px !important;
+    flex: 0 0 35px !important;
+  }
+
+  .brand-mark::after {
+    display: block !important;
+    color: #ffffff !important;
+    font-size: 11px !important;
+    line-height: 1.22 !important;
+  }
+
+  .rail nav {
+    width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 2px !important;
+    margin: 12px 0 8px !important;
+  }
+
+  .rail nav::before {
+    display: block !important;
+    margin: 1px 8px 5px !important;
+    font-size: 8px !important;
+  }
+
+  .rail .rail-button,
+  .rail-button,
+  .rail .rail-bottom,
+  .rail-bottom {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    min-height: 33px !important;
+    height: auto !important;
+    margin: 0 !important;
+    justify-content: flex-start !important;
+    padding: 7px 8px 7px 38px !important;
+    overflow: hidden !important;
+    color: #aeb9c9 !important;
+    font-size: 10.5px !important;
+    font-weight: 650 !important;
+    line-height: 1.15 !important;
+    text-align: left !important;
+    text-indent: 0 !important;
+    white-space: nowrap !important;
+  }
+
+  .rail .rail-button.active,
+  .rail-button.active {
+    color: #ffffff !important;
+  }
+
+  .rail .rail-button::before,
+  .rail-button::before {
+    left: 10px !important;
+    width: 18px !important;
+    height: 18px !important;
+    transform: translateY(-50%) !important;
+  }
+
+  .rail .rail-bottom,
+  .rail-bottom {
+    margin-top: auto !important;
+    padding-top: 10px !important;
+  }
+
+  .workspace {
+    width: auto !important;
+    min-width: 0 !important;
+    margin-left: 0 !important;
+  }
+
+  /* Keep the account control in a dedicated right-hand lane. */
+  .topbar {
+    padding-right: 240px !important;
+  }
+
+  .topbar-actions {
+    min-width: 0 !important;
+    max-width: calc(100% - 250px) !important;
+    overflow: hidden !important;
+    flex-wrap: nowrap !important;
+  }
+
+  .session-toolbar {
+    right: 16px !important;
+    max-width: 210px !important;
+  }
+
+  /* Database state is sufficient in the constrained header; the Meta state
+   * remains available in the Integrations area and avoids account overlap. */
+  .topbar-actions .meta-connection-status {
+    display: none !important;
+  }
+}
+
+@media (min-width: 851px) and (max-width: 1120px) {
+  :root {
+    --wa-sidebar-width: 192px !important;
+  }
+
+  .dashboard-shell {
+    grid-template-columns: 192px minmax(0, 1fr) !important;
+  }
+
+  .dashboard-shell > .rail,
+  aside.rail,
+  .rail {
+    width: 192px !important;
+    min-width: 192px !important;
+    max-width: 192px !important;
+    flex-basis: 192px !important;
+    padding-inline: 9px !important;
+  }
+
+  .rail .rail-button,
+  .rail-button,
+  .rail .rail-bottom,
+  .rail-bottom {
+    min-height: 32px !important;
+    padding-left: 35px !important;
+    font-size: 10px !important;
+  }
+
+  .topbar-actions .system-status,
+  .topbar-actions .meta-connection-status {
+    display: none !important;
+  }
+}
+
+@media (max-width: 850px) {
+  /* Preserve the intentional mobile horizontal-navigation behaviour. */
+  .dashboard-shell {
+    grid-template-columns: 1fr !important;
+  }
+
+  .rail {
+    min-width: 0 !important;
+    max-width: none !important;
+  }
+}

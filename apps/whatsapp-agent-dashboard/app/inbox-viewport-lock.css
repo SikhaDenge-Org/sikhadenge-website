@@ -1,0 +1,107 @@
+/*
+ * SikhaDenge WhatsApp Agent
+ * Keep conversation history scrollable and the typing composer visible
+ * inside the available desktop viewport.
+ */
+
+@media (min-width: 851px) {
+  html,
+  body {
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  body .dashboard-shell {
+    width: 100% !important;
+    height: 100vh !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  body .dashboard-shell .workspace {
+    width: auto !important;
+    height: 100vh !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  body .dashboard-shell .workspace > .topbar,
+  body .dashboard-shell .workspace > .metric-row {
+    flex: 0 0 auto !important;
+  }
+
+  body .dashboard-shell .workspace > .inbox-grid {
+    flex: 1 1 auto !important;
+
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+
+    overflow: hidden !important;
+  }
+
+  body .inbox-grid > .conversation-panel,
+  body .inbox-grid > .chat-panel,
+  body .inbox-grid > .details-panel {
+    height: 100% !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  body .inbox-grid .conversation-panel {
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  body .inbox-grid .conversation-list {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+  }
+
+  body .inbox-grid .chat-panel {
+    display: grid !important;
+    grid-template-rows:
+      auto
+      auto
+      minmax(0, 1fr)
+      auto !important;
+
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  body .inbox-grid .message-area {
+    min-width: 0 !important;
+    min-height: 0 !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain !important;
+  }
+
+  body .inbox-grid .composer {
+    position: relative !important;
+    z-index: 5 !important;
+
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    min-height: 64px !important;
+
+    background: #ffffff !important;
+    border-top: 1px solid #e2e8f0 !important;
+    box-shadow: 0 -8px 22px rgba(15, 23, 42, 0.06) !important;
+  }
+
+  body .inbox-grid .details-panel {
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain !important;
+  }
+}

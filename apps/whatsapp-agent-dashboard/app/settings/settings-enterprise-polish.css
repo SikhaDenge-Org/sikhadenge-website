@@ -1,0 +1,299 @@
+/* Settings route-only enterprise hardening.
+   Preserve the existing guarded runtime behavior while making safety state,
+   lifecycle gates and operational metrics readable at every supported width. */
+
+.sx-module .sx-workspace:has(.settings-enterprise-root) {
+  --module-accent: #3157d5;
+  --module-accent-strong: #2442ad;
+  --module-accent-soft: #eef3ff;
+  --module-accent-ring: rgba(49, 87, 213, 0.16);
+}
+
+.sx-module .sx-workspace-body > .settings-enterprise-root {
+  width: min(100%, 1760px);
+  min-width: 0;
+  margin-inline: auto;
+}
+
+.sx-module .settings-enterprise-root,
+.sx-module .settings-enterprise-root .live-agent-manager,
+.sx-module .settings-enterprise-root .live-agent-card,
+.sx-module .settings-enterprise-root .live-agent-card > header,
+.sx-module .settings-enterprise-root .live-agent-card > header > div {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.sx-module .settings-enterprise-root :where(*) {
+  box-sizing: border-box;
+}
+
+.sx-module .settings-enterprise-root :where(button, a, input, select, textarea):focus-visible {
+  outline: 3px solid #3157d5 !important;
+  outline-offset: 2px;
+}
+
+.sx-module .settings-enterprise-root .live-agent-manager {
+  display: grid !important;
+  gap: 16px !important;
+  overflow: visible !important;
+}
+
+.sx-module .settings-enterprise-root .live-agent-loading,
+.sx-module .settings-enterprise-root .live-agent-alert {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* High-level runtime state. Late global dashboard rules previously turned this
+   into a clipped horizontal strip on phones, so keep the route grid explicit. */
+.sx-module .settings-enterprise-root .live-agent-summary {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: visible !important;
+  padding: 0 !important;
+}
+
+.sx-module .settings-enterprise-root .live-agent-summary > article {
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  min-height: 112px !important;
+  padding: 15px 16px !important;
+  border-radius: 15px !important;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.045) !important;
+  transform: none !important;
+}
+
+.sx-module .settings-enterprise-root .live-agent-summary > article :where(span, strong, small) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sx-module .settings-enterprise-root .live-agent-summary > article strong {
+  line-height: 1.2;
+}
+
+/* Shared cards */
+.sx-module .settings-enterprise-root .live-agent-card {
+  overflow: hidden !important;
+  border-radius: 17px !important;
+}
+
+.sx-module .settings-enterprise-root .live-agent-card > header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 16px !important;
+  padding: 17px 19px !important;
+}
+
+.sx-module .settings-enterprise-root .live-agent-card > header :where(h3, p, span) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sx-module .settings-enterprise-root .live-agent-card > header h3 {
+  line-height: 1.3;
+}
+
+.sx-module .settings-enterprise-root .live-agent-card > header p {
+  max-width: 880px;
+}
+
+.sx-module .settings-enterprise-root .live-agent-card button {
+  min-width: 0;
+  min-height: 44px !important;
+  padding-inline: 15px !important;
+  flex: 0 0 auto;
+}
+
+/* Independent safety gates */
+.sx-module .settings-enterprise-root .live-agent-gates {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 10px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: visible !important;
+  padding: 18px !important;
+}
+
+.sx-module .settings-enterprise-root .live-agent-gates > div {
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  min-height: 70px;
+  display: grid;
+  align-content: center;
+}
+
+.sx-module .settings-enterprise-root .live-agent-gates > div :where(span, strong) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Seven operational measures stay compact rather than inheriting generic card
+   widths. They remain fully visible without a root-level horizontal scroller. */
+.sx-module .settings-enterprise-root .live-agent-metrics {
+  display: grid !important;
+  grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+  gap: 9px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: visible !important;
+  padding: 18px !important;
+}
+
+.sx-module .settings-enterprise-root .live-agent-metrics > article {
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  min-height: 86px !important;
+  padding: 11px 10px !important;
+  transform: none !important;
+}
+
+.sx-module .settings-enterprise-root .live-agent-metrics > article :where(span, strong) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sx-module .settings-enterprise-root .live-agent-card > footer {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1280px) {
+  .sx-module .settings-enterprise-root .live-agent-summary,
+  .sx-module .settings-enterprise-root .live-agent-gates {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .sx-module .settings-enterprise-root .live-agent-metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .sx-module .settings-enterprise-root .live-agent-manager {
+    gap: 12px !important;
+  }
+
+  .sx-module .settings-enterprise-root .live-agent-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+
+  .sx-module .settings-enterprise-root .live-agent-summary > article {
+    min-height: 104px !important;
+    padding: 12px !important;
+  }
+
+  .sx-module .settings-enterprise-root .live-agent-summary > article span,
+  .sx-module .settings-enterprise-root .live-agent-summary > article small {
+    font-size: 9.5px !important;
+    line-height: 1.35 !important;
+  }
+
+  .sx-module .settings-enterprise-root .live-agent-summary > article strong {
+    font-size: 17px !important;
+  }
+
+  .sx-module .settings-enterprise-root .live-agent-card > header {
+    min-height: 0 !important;
+    align-items: stretch !important;
+    flex-direction: column !important;
+    padding: 15px !important;
+  }
+
+  .sx-module .settings-enterprise-root .live-agent-card > header h3 {
+    font-size: 16px !important;
+  }
+
+  .sx-module .settings-enterprise-root .live-agent-card > header p {
+    font-size: 11px !important;
+    line-height: 1.55 !important;
+  }
+
+  .sx-module .settings-enterprise-root .live-agent-card button {
+    width: 100% !important;
+    min-height: 44px !important;
+    font-size: 12px !important;
+  }
+
+  .sx-module .settings-enterprise-root .live-agent-gates {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    padding: 14px !important;
+  }
+
+  .sx-module .settings-enterprise-root .live-agent-gates > div {
+    min-height: 76px;
+    padding: 12px !important;
+  }
+
+  .sx-module .settings-enterprise-root .live-agent-gates span {
+    font-size: 9.5px !important;
+  }
+
+  .sx-module .settings-enterprise-root .live-agent-gates strong {
+    font-size: 13px !important;
+    line-height: 1.3 !important;
+  }
+
+  .sx-module .settings-enterprise-root .live-agent-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    padding: 14px !important;
+  }
+
+  .sx-module .settings-enterprise-root .live-agent-metrics > article {
+    min-height: 78px !important;
+    padding: 10px !important;
+  }
+
+  .sx-module .settings-enterprise-root .live-agent-metrics span {
+    font-size: 9px !important;
+    line-height: 1.25 !important;
+  }
+
+  .sx-module .settings-enterprise-root .live-agent-metrics strong {
+    margin-top: 5px !important;
+    font-size: 21px !important;
+  }
+
+  .sx-module .settings-enterprise-root .live-agent-card > footer {
+    padding: 12px 14px !important;
+    font-size: 10px !important;
+    line-height: 1.55 !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .sx-module .settings-enterprise-root .live-agent-summary,
+  .sx-module .settings-enterprise-root .live-agent-gates,
+  .sx-module .settings-enterprise-root .live-agent-metrics {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sx-module .settings-enterprise-root *,
+  .sx-module .settings-enterprise-root *::before,
+  .sx-module .settings-enterprise-root *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

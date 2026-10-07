@@ -1,0 +1,1 @@
+Status note: OAuth provisioning workflow is prepared but must only be triggered after the two Gmail OAuth values are stored as production environment secrets. Do not paste OAuth secrets into repository files.

@@ -1,0 +1,113 @@
+.rail a.rail-button,
+.rail a.brand-mark {
+  text-decoration: none;
+}
+
+.meta-connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+}
+
+.meta-connection-status > span {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: #f59e0b;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.12);
+}
+
+.meta-connection-status.connected > span {
+  background: #14b8a6;
+  box-shadow: 0 0 0 4px rgba(20, 184, 166, 0.12);
+}
+
+.meta-connection-status.live > span {
+  background: #22c55e;
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.14);
+}
+
+.inbox-live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #047857;
+}
+
+.inbox-live-indicator::before {
+  content: "";
+  width: 0.48rem;
+  height: 0.48rem;
+  border-radius: 999px;
+  background: #22c55e;
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.12);
+}
+
+.chat-actions {
+  position: relative;
+}
+
+.chat-action-menu {
+  position: absolute;
+  z-index: 40;
+  right: 0;
+  top: calc(100% + 0.5rem);
+  min-width: 210px;
+  padding: 0.45rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.16);
+}
+
+.chat-action-menu button,
+.chat-action-menu a {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  border: 0;
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+  background: transparent;
+  color: #0f172a;
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.chat-action-menu button:hover,
+.chat-action-menu a:hover {
+  background: #f1f5f9;
+}
+
+.chat-action-menu button.danger {
+  color: #b91c1c;
+}
+
+.task-check.actionable {
+  cursor: pointer;
+}
+
+.task-check.actionable input {
+  cursor: pointer;
+}
+
+.composer-feedback.warning {
+  color: #92400e;
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.inbox-operation-error {
+  margin: 0.5rem 1rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  color: #991b1b;
+  background: #fef2f2;
+  font-size: 0.85rem;
+}

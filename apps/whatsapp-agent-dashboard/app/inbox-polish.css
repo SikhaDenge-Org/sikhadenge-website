@@ -1,0 +1,141 @@
+/*
+ * Inbox visual polish — paint-only overlay.
+ *
+ * Scoped under `.inbox-redesign` (added to the inbox dashboard root alongside
+ * the existing layout/mobile-view classes) and imported only by the /inbox
+ * route. It contains ONLY paint properties — colour, background, border-radius,
+ * border-colour, box-shadow, font-weight/letter-spacing/text-transform — and
+ * deliberately NO grid / display / width / height / position / padding-driven
+ * layout rules and NO @media layout rules. That way the existing responsive
+ * layout (desktop density, tablet, and the mobile master-detail system) is
+ * left completely intact; only the look of the bubbles, badges, pills and
+ * score ring changes. Reuses the existing --wa-* design tokens.
+ */
+
+/* Avatars — softer rounded tiles */
+.inbox-redesign .avatar {
+  border-radius: 14px !important;
+  background: linear-gradient(145deg, #dbeafe, #eef2ff) !important;
+  color: #31518a !important;
+}
+
+/* Temperature badges → pills */
+.inbox-redesign .temperature {
+  border-radius: 999px !important;
+  font-weight: 750 !important;
+  letter-spacing: 0.03em !important;
+}
+
+/* Unread count → solid blue pill */
+.inbox-redesign .unread-count {
+  border-radius: 999px !important;
+  background: var(--wa-blue-600) !important;
+  color: #ffffff !important;
+}
+
+/* Filter tabs → pills with a clear active state */
+.inbox-redesign .filter-tabs button {
+  border-radius: 999px !important;
+}
+
+.inbox-redesign .filter-tabs button.active {
+  background: #eaf2ff !important;
+  color: var(--wa-blue-700) !important;
+}
+
+/* Conversation rows — clearer hover / selected accent */
+.inbox-redesign .conversation-item:hover {
+  background: #f7f9fc !important;
+}
+
+.inbox-redesign .conversation-item.selected {
+  background: #eef4ff !important;
+  box-shadow: inset 3px 0 0 var(--wa-blue-600) !important;
+}
+
+/* Search field focus ring */
+.inbox-redesign .search-box:focus-within {
+  border-color: var(--wa-blue-500) !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.10) !important;
+}
+
+/* Context chips → pills */
+.inbox-redesign .context-strip span {
+  border-radius: 999px !important;
+  background: var(--wa-panel-soft) !important;
+}
+
+.inbox-redesign .context-strip span.knowledge-ok {
+  border-color: #bbf0d3 !important;
+  background: #ecfdf3 !important;
+  color: #067647 !important;
+}
+
+/* Message bubbles — the signature upgrade (inbound white, outbound brand blue) */
+.inbox-redesign .message-bubble {
+  border: 1px solid #e6ebf2 !important;
+  border-radius: 16px 16px 16px 5px !important;
+  background: #ffffff !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+}
+
+.inbox-redesign .message-bubble p {
+  color: #1f2a37 !important;
+}
+
+.inbox-redesign .message-bubble small {
+  color: var(--wa-blue-700) !important;
+  font-weight: 700 !important;
+}
+
+.inbox-redesign .outbound .message-bubble {
+  border-color: transparent !important;
+  border-radius: 16px 16px 5px 16px !important;
+  background: linear-gradient(135deg, var(--wa-blue-600), var(--wa-blue-700)) !important;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.22) !important;
+}
+
+.inbox-redesign .outbound .message-bubble p {
+  color: #ffffff !important;
+}
+
+.inbox-redesign .outbound .message-bubble small {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+.inbox-redesign .outbound .message-bubble time {
+  color: rgba(255, 255, 255, 0.72) !important;
+}
+
+/* Day divider → pill */
+.inbox-redesign .day-divider span {
+  border-radius: 999px !important;
+  background: #e6ebf3 !important;
+  color: #667085 !important;
+}
+
+/* Send button → brand gradient */
+.inbox-redesign .send-button {
+  background: linear-gradient(135deg, var(--wa-blue-600), var(--wa-blue-700)) !important;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.22) !important;
+}
+
+/* Detail section headers → uppercase labels; values in ink */
+.inbox-redesign .detail-section h3 {
+  text-transform: uppercase !important;
+  letter-spacing: 0.02em !important;
+  color: #344054 !important;
+}
+
+.inbox-redesign .detail-section dd {
+  color: var(--wa-navy-900) !important;
+  font-weight: 620 !important;
+}
+
+/* Rounded cards */
+.inbox-redesign .score-block,
+.inbox-redesign .learning-card,
+.inbox-redesign .agent-thinking,
+.inbox-redesign .chat-action-menu {
+  border-radius: 14px !important;
+}

@@ -1,0 +1,454 @@
+/* Analytics route — enterprise UI/UX hardening only.
+   No analytics API, aggregation, campaign, retargeting or persistence behavior changes. */
+
+.sx-module .sx-workspace:has(.analytics-manager) {
+  --module-accent: #1379b8;
+  --module-accent-strong: #0d6197;
+  --module-accent-soft: #edf8ff;
+  --module-accent-ring: rgba(19, 121, 184, 0.18);
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager :where(button, input, select, textarea):focus-visible {
+  outline: 3px solid rgba(19, 121, 184, 0.22);
+  outline-offset: 2px;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Executive KPI strip                                                        */
+/* -------------------------------------------------------------------------- */
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager > .suite-metrics {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 10px !important;
+  overflow: visible !important;
+  padding: 0 !important;
+  scroll-snap-type: none !important;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager > .suite-metrics > article {
+  min-width: 0 !important;
+  min-height: 100px !important;
+  padding: 15px 16px !important;
+  border: 1px solid #e4e7ec !important;
+  border-radius: 13px !important;
+  background: #fff !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+  transform: none !important;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager > .suite-metrics > article::after {
+  display: none !important;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager > .suite-metrics > article > span {
+  display: block;
+  color: #667085;
+  font-size: 11px;
+  font-weight: 660;
+  line-height: 1.35;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager > .suite-metrics > article > strong {
+  display: block;
+  max-width: 100%;
+  margin-top: 8px;
+  color: #101828;
+  font-size: clamp(22px, 2vw, 28px);
+  font-weight: 760;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+  overflow-wrap: anywhere;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager > .suite-metrics > article > small {
+  display: block;
+  margin-top: 7px;
+  color: #667085;
+  font-size: 10.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Shared analytics card treatment                                            */
+/* -------------------------------------------------------------------------- */
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .suite-card {
+  min-width: 0;
+  border: 1px solid #e4e7ec;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .suite-card > header {
+  min-height: 70px;
+  padding: 15px 17px;
+  border-bottom: 1px solid #edf0f4;
+  background: #fff;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .suite-card > header > div {
+  min-width: 0;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .suite-card > header > div > span {
+  color: #1379b8;
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.065em;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .suite-card > header > div > h3 {
+  margin-top: 4px;
+  color: #101828;
+  font-size: 14px;
+  font-weight: 720;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .suite-card > header > div > p {
+  max-width: 820px;
+  margin-top: 5px;
+  color: #667085;
+  font-size: 11px;
+  line-height: 1.48;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .suite-card > header button.secondary {
+  flex: none;
+  min-width: 78px;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid #cfd7e3;
+  border-radius: 9px;
+  background: #fff;
+  color: #344054;
+  font-size: 11.5px;
+  font-weight: 680;
+  box-shadow: none;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .suite-card > header button.secondary:hover {
+  border-color: #9fb9ca;
+  background: #f7fbfd;
+  color: #0d6197;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Activity + delivery                                                        */
+/* -------------------------------------------------------------------------- */
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager > .suite-grid.two {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(340px, 0.9fr);
+  align-items: stretch;
+  gap: 14px;
+  min-width: 0;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .analytics-bars {
+  height: 230px;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  padding: 22px 17px 10px;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .analytics-bar-day {
+  height: 100%;
+  min-width: 0;
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .analytics-bar-day > span {
+  width: min(100%, 18px);
+  min-height: 3px;
+  border-radius: 5px 5px 2px 2px;
+  background: linear-gradient(180deg, #2d8fc7, #3568f4);
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .analytics-bar-day > small {
+  color: #98a2b3;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .suite-grid.two > .suite-card:first-child > footer {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  padding: 10px 17px;
+  border-top: 1px solid #edf0f4;
+  background: #fbfcfe;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .suite-grid.two > .suite-card:first-child > footer > strong {
+  color: #475467;
+  font-size: 11.5px;
+  font-weight: 680;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .analytics-rate-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+  padding: 15px 16px;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .analytics-rate-grid > article {
+  min-width: 0;
+  padding: 14px 10px;
+  border: 1px solid #e4e7ec;
+  border-radius: 11px;
+  background: #f8fafc;
+  text-align: center;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .analytics-rate-grid > article > strong {
+  display: block;
+  color: #101828;
+  font-size: clamp(19px, 2vw, 24px);
+  font-weight: 750;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .analytics-rate-grid > article > span {
+  display: block;
+  margin-top: 5px;
+  color: #667085;
+  font-size: 10.5px;
+  font-weight: 620;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Operational lists                                                          */
+/* -------------------------------------------------------------------------- */
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager > .suite-grid.three {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  min-width: 0;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .suite-list.compact {
+  padding: 4px 16px 12px;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .suite-list.compact > article {
+  min-height: 43px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid #eef1f5;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .suite-list.compact > article:last-child {
+  border-bottom: 0;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .suite-list.compact > article > span {
+  min-width: 0;
+  color: #475467;
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .suite-list.compact > article > strong {
+  color: #101828;
+  font-size: 12.5px;
+  font-weight: 720;
+  font-variant-numeric: tabular-nums;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Retargeting intelligence                                                   */
+/* -------------------------------------------------------------------------- */
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .retargeting-grid {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 10px !important;
+  padding: 16px !important;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .retargeting-grid > article {
+  min-width: 0;
+  min-height: 92px;
+  padding: 13px 14px;
+  border: 1px solid #e4e7ec;
+  border-radius: 11px;
+  background: #f8fafc;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .retargeting-grid > article > span,
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .retargeting-grid > article > small {
+  display: block;
+  color: #667085;
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.sx-module .sx-workspace-body > .suite-stack.analytics-manager .retargeting-grid > article > strong {
+  display: block;
+  margin: 8px 0 6px;
+  color: #101828;
+  font-size: 21px;
+  font-weight: 750;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Responsive                                                                 */
+/* -------------------------------------------------------------------------- */
+
+@media (max-width: 1280px) {
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager > .suite-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager > .suite-grid.two {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager > .suite-grid.three {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager .retargeting-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager {
+    gap: 12px;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager > .suite-metrics {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 9px !important;
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager > .suite-metrics > article {
+    flex: initial !important;
+    width: auto !important;
+    min-width: 0 !important;
+    min-height: 92px !important;
+    padding: 12px !important;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager .suite-card > header {
+    min-height: 0;
+    padding: 13px;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager .suite-grid.two > .suite-card:first-child > header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager .suite-grid.two > .suite-card:first-child > header button.secondary {
+    width: auto !important;
+    min-width: 74px;
+    min-height: 44px !important;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager .analytics-bars {
+    height: 220px;
+    gap: 5px;
+    padding: 20px 13px 10px;
+    overflow-x: auto !important;
+    scrollbar-width: thin;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager .analytics-bar-day {
+    flex: 0 0 22px;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager .analytics-bar-day > small {
+    display: block !important;
+    font-size: 9px !important;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager .analytics-rate-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+    padding: 13px;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager .analytics-rate-grid > article {
+    padding: 12px 6px;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager > .suite-grid.three {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager .retargeting-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    padding: 13px !important;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager .retargeting-grid > article {
+    min-height: 86px;
+    padding: 12px;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager .suite-list.compact {
+    padding-inline: 13px;
+  }
+}
+
+@media (max-width: 380px) {
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager > .suite-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager .retargeting-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sx-module .sx-workspace-body > .suite-stack.analytics-manager * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

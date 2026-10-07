@@ -1,0 +1,17 @@
+/* Final Knowledge route breakpoint guard.
+   The fixed desktop track minima require more than the workspace width available
+   just above 1180px once the sidebar and canvas padding are accounted for. */
+
+@media (max-width: 1200px) {
+  .sx-module .sx-workspace-body > .knowledge-manager .knowledge-summary-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .sx-module .sx-workspace-body > .knowledge-manager .knowledge-workspace-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .sx-module .sx-workspace-body > .knowledge-manager .knowledge-document-list {
+    max-height: min(58vh, 560px) !important;
+  }
+}

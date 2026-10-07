@@ -1,0 +1,139 @@
+/* Page 01 V13 — compact professional SikhaDenge + EngageOS lockup.
+ * Uses the canonical SikhaDenge logo asset without redraw/recolor.
+ */
+
+.split01__signin-brand--v13 {
+  display: block !important;
+  width: 100%;
+  margin-bottom: 26px !important;
+}
+
+.split01__brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  min-height: 54px;
+  max-width: 100%;
+}
+
+.split01__signin-brand--v13 .split01__brand-logo {
+  display: block;
+  width: 214px !important;
+  max-width: none !important;
+  height: auto;
+  max-height: 54px !important;
+  object-fit: contain;
+  object-position: left center;
+}
+
+.split01__brand-divider {
+  width: 1px;
+  height: 35px;
+  margin: 0 16px 0 18px;
+  flex: 0 0 1px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, transparent 0%, #d9e3f5 18%, #cbd9f0 50%, #d9e3f5 82%, transparent 100%);
+}
+
+.split01__product-id {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  line-height: 1;
+}
+
+.split01__product-name {
+  color: #132044;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -.035em;
+  white-space: nowrap;
+}
+
+.split01__product-kicker {
+  color: #7286b2;
+  font-size: 8px;
+  font-weight: 760;
+  letter-spacing: .18em;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+@media (max-height: 820px) and (min-width: 901px) {
+  .split01__signin-brand--v13 {
+    margin-bottom: 18px !important;
+  }
+
+  .split01__signin-brand--v13 .split01__brand-logo {
+    width: 196px !important;
+    max-height: 49px !important;
+  }
+
+  .split01__brand-divider {
+    height: 31px;
+    margin-left: 15px;
+    margin-right: 14px;
+  }
+
+  .split01__product-name {
+    font-size: 17px;
+  }
+}
+
+@media (max-width: 900px) {
+  .split01__signin-brand--v13 {
+    margin-bottom: 24px !important;
+  }
+
+  .split01__signin-brand--v13 .split01__brand-logo {
+    width: 194px !important;
+    max-width: none !important;
+  }
+
+  .split01__brand-divider {
+    margin-left: 15px;
+    margin-right: 14px;
+  }
+}
+
+@media (max-width: 620px) {
+  .split01__signin-brand--v13 .split01__brand-logo {
+    width: 174px !important;
+    max-width: none !important;
+  }
+
+  .split01__brand-divider {
+    height: 30px;
+    margin-left: 12px;
+    margin-right: 11px;
+  }
+
+  .split01__product-name {
+    font-size: 16px;
+  }
+
+  .split01__product-kicker {
+    font-size: 7px;
+    letter-spacing: .15em;
+  }
+}
+
+@media (max-width: 390px) {
+  .split01__signin-brand--v13 .split01__brand-logo {
+    width: 156px !important;
+  }
+
+  .split01__brand-divider {
+    margin-left: 10px;
+    margin-right: 9px;
+  }
+
+  .split01__product-name {
+    font-size: 15px;
+  }
+
+  .split01__product-kicker {
+    font-size: 6.5px;
+  }
+}

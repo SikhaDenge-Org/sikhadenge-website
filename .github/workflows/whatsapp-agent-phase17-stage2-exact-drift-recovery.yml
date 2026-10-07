@@ -1,0 +1,170 @@
+name: WhatsApp Agent Phase17 V17 Untracked Source Reconciliation
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-phase17-stage2-exact-drift-recovery.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  prove-backup-and-remove-canonical-untracked-v17:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      EXPECTED_SOURCE_SHA: f651d0182861c191c041b36e96902f20d5a6da2b
+      TARGET_RELEASE_SHA: ${{ github.sha }}
+      RECONCILIATION_ID: phase17-v17-untracked-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"; SSH_PORT=22; fi
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "${SSH_PORT:-22}" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Prove exact V17 untracked files, preserve bytes, and remove source blockers
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "EXPECTED_SOURCE_SHA='$EXPECTED_SOURCE_SHA' TARGET_RELEASE_SHA='$TARGET_RELEASE_SHA' RECONCILIATION_ID='$RECONCILIATION_ID' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          LIVE_APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          RELEASE_REF=refs/remotes/origin/release/whatsapp-instagram-agent-flow-20260731
+          test "$(id -u)" = "0"
+          test "$(git -C "$LIVE_APP" rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          repo_root="$(git -C "$LIVE_APP" rev-parse --show-toplevel)"
+          test -z "$(git -C "$repo_root" status --porcelain --untracked-files=no)"
+          printf 'PASS: SOURCE_HEAD_AND_TRACKED_WORKTREE_STABLE\n'
+
+          git -C "$repo_root" fetch origin \
+            +refs/heads/release/whatsapp-instagram-agent-flow-20260731:$RELEASE_REF
+          test "$(git -C "$repo_root" rev-parse "$RELEASE_REF")" = "$TARGET_RELEASE_SHA"
+          git -C "$repo_root" cat-file -e "$TARGET_RELEASE_SHA^{commit}"
+          printf 'PASS: RELEASE_REF_EXACT_TARGET\n'
+
+          paths=(
+            apps/whatsapp-agent-dashboard/app/login-right-panel-v16.css
+            apps/whatsapp-agent-dashboard/public/page01-hero-desktop-v17.png
+            apps/whatsapp-agent-dashboard/public/page01-hero-tablet-v17.png
+            apps/whatsapp-agent-dashboard/public/page01-hero-ultrawide-v17.png
+          )
+
+          backup_dir="/root/sikhadenge-backups/$RECONCILIATION_ID"
+          files_dir="$backup_dir/files"
+          manifest="$backup_dir/untracked-v17-manifest.txt"
+          install -d -m 700 "$files_dir"
+
+          # Phase 1 is proof-only. Nothing is removed until every path passes all gates.
+          for path in "${paths[@]}"; do
+            test -f "$repo_root/$path"
+            if git -C "$repo_root" ls-files --error-unmatch -- "$path" >/dev/null 2>&1; then
+              printf 'FAIL: SOURCE_PATH_ALREADY_TRACKED path=%s\n' "$path" >&2
+              exit 51
+            fi
+            test "$(git -C "$repo_root" ls-files --others --exclude-standard -- "$path")" = "$path"
+            git -C "$repo_root" cat-file -e "$TARGET_RELEASE_SHA:$path"
+            working_sha="$(sha256sum "$repo_root/$path" | awk '{print $1}')"
+            target_sha="$(git -C "$repo_root" show "$TARGET_RELEASE_SHA:$path" | sha256sum | awk '{print $1}')"
+            printf 'PROOF path=%s working_sha256=%s target_sha256=%s\n' "$path" "$working_sha" "$target_sha"
+            if [[ "$working_sha" != "$target_sha" ]]; then
+              printf 'FAIL: UNTRACKED_FILE_NOT_CANONICAL path=%s\n' "$path" >&2
+              exit 52
+            fi
+          done
+          printf 'PASS: ALL_FOUR_UNTRACKED_V17_FILES_BYTE_MATCH_RELEASE\n'
+
+          # Preserve exact bytes before removal.
+          : > "$manifest"
+          chmod 600 "$manifest"
+          {
+            printf 'FORMAT_VERSION=1\n'
+            printf 'RECONCILIATION_ID=%s\n' "$RECONCILIATION_ID"
+            printf 'SOURCE_SHA=%s\n' "$EXPECTED_SOURCE_SHA"
+            printf 'TARGET_RELEASE_SHA=%s\n' "$TARGET_RELEASE_SHA"
+            printf 'CAPTURED_UTC=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          } >> "$manifest"
+          for path in "${paths[@]}"; do
+            destination="$files_dir/$path"
+            install -D -m 600 "$repo_root/$path" "$destination"
+            source_sha="$(sha256sum "$repo_root/$path" | awk '{print $1}')"
+            backup_sha="$(sha256sum "$destination" | awk '{print $1}')"
+            target_sha="$(git -C "$repo_root" show "$TARGET_RELEASE_SHA:$path" | sha256sum | awk '{print $1}')"
+            test "$source_sha" = "$backup_sha"
+            test "$source_sha" = "$target_sha"
+            printf 'FILE path=%s sha256=%s backup=%s\n' "$path" "$source_sha" "$destination" >> "$manifest"
+          done
+          manifest_sha="$(sha256sum "$manifest" | awk '{print $1}')"
+          printf 'PASS: UNTRACKED_V17_BACKUP_PRESERVED manifest_sha256=%s\n' "$manifest_sha"
+
+          # Phase 2 mutates only the four proven canonical untracked source blockers.
+          for path in "${paths[@]}"; do
+            rm -f -- "$repo_root/$path"
+          done
+          for path in "${paths[@]}"; do
+            test ! -e "$repo_root/$path"
+          done
+          test "$(git -C "$LIVE_APP" rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          test -z "$(git -C "$repo_root" status --porcelain --untracked-files=no)"
+          for path in "${paths[@]}"; do
+            test -z "$(git -C "$repo_root" ls-files --others --exclude-standard -- "$path")"
+          done
+          printf 'PASS: FOUR_CANONICAL_UNTRACKED_V17_SOURCE_BLOCKERS_REMOVED\n'
+          printf 'SOURCE_SHA_AFTER=%s\n' "$(git -C "$LIVE_APP" rev-parse HEAD)"
+          printf 'TRACKED_DIRTY_AFTER=%s\n' "$(git -C "$repo_root" status --porcelain --untracked-files=no | sed '/^$/d' | wc -l | tr -d ' ')"
+
+          cp "$manifest" /tmp/phase17-v17-untracked-manifest.txt
+          chmod 600 /tmp/phase17-v17-untracked-manifest.txt
+          REMOTE
+
+      - name: Collect reconciliation manifest
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p reconciliation-evidence
+          scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST:/tmp/phase17-v17-untracked-manifest.txt" \
+            reconciliation-evidence/untracked-v17-manifest.txt >/dev/null 2>&1 || true
+          chmod 600 reconciliation-evidence/* 2>/dev/null || true
+          exit 0
+
+      - name: Upload reconciliation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase17-v17-untracked-reconciliation-${{ env.RECONCILIATION_ID }}
+          path: reconciliation-evidence
+          if-no-files-found: warn
+          retention-days: 14

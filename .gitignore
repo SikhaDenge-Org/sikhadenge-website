@@ -82,3 +82,7 @@ pages/*.broken*
 
 # big media (keep on server, not in git)
 public/images/testimonials/*.mp4
+
+# WhatsApp Agent approved PNG icon pack (managed on the server)
+apps/whatsapp-agent-dashboard/SikhaDenge-Premium-Dashboard-Icons-10.zip
+apps/whatsapp-agent-dashboard/public/dashboard-icons/

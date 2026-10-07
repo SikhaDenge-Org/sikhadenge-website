@@ -1,0 +1,49 @@
+# External audit rerun after Page 01 v6 production deployment — 2026-09-13
+name: WhatsApp Page 01 Public Audit
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-page01-public-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  public-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: External HTML probe
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          url="https://whatsapp.sikhadenge.in/login?external-audit=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          curl -4 --connect-timeout 10 --max-time 30 -fsSL -D headers.txt -o login.html "$url"
+          printf 'HTTP_MARKER_V6=' && (grep -Fq 'left-inline-image-v6' login.html && echo true || echo false)
+          printf 'HTTP_HERO_V6=' && (grep -Fq 'split01__hero-approved-image' login.html && echo true || echo false)
+          printf 'HTTP_MARKER_CODE_NATIVE=' && (grep -Fq 'code-native-v3' login.html && echo true || echo false)
+          grep -iE '^(cache-control|age|cf-cache-status|server|etag|last-modified|x-cache):' headers.txt || true
+
+      - name: External browser screenshot
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          chrome="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"
+          test -n "$chrome"
+          timeout 45s "$chrome" --headless --disable-gpu --no-sandbox --hide-scrollbars --window-size=1650,927 --screenshot=page01-live.png "https://whatsapp.sikhadenge.in/login?external-browser=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          test -s page01-live.png
+          file page01-live.png
+          sha256sum page01-live.png
+
+      - name: Upload audit screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatsapp-page01-public-audit-${{ github.run_id }}
+          path: |
+            page01-live.png
+            headers.txt
+            login.html
+          retention-days: 2

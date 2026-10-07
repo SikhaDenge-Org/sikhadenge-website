@@ -1,0 +1,6 @@
+import { NextResponse } from "next/server";
+import { requireEmailManagerAccess, EmailDashboardAccessError } from "@/modules/email-automation/application/dashboard-access";
+import { createEmailSequence, listEmailSequences } from "@/modules/email-automation/sequences/sequence-service";
+export const runtime="nodejs"; export const dynamic="force-dynamic";
+export async function GET(){try{const a=await requireEmailManagerAccess();return NextResponse.json({sequences:await listEmailSequences(a.workspaceId)},{headers:{"Cache-Control":"no-store"}});}catch(e){if(e instanceof EmailDashboardAccessError)return NextResponse.json({error:e.message},{status:e.status});return NextResponse.json({error:e instanceof Error?e.message:"Sequence list failed."},{status:400});}}
+export async function POST(request:Request){try{const a=await requireEmailManagerAccess();const b=await request.json() as Record<string,unknown>;return NextResponse.json({sequence:await createEmailSequence({workspaceId:a.workspaceId,actorUserId:a.user.id,name:b.name,purpose:b.purpose,steps:b.steps})},{status:201});}catch(e){if(e instanceof EmailDashboardAccessError)return NextResponse.json({error:e.message},{status:e.status});return NextResponse.json({error:e instanceof Error?e.message:"Sequence creation failed."},{status:400});}}

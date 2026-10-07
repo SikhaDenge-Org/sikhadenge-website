@@ -1,0 +1,127 @@
+/*
+ * SikhaDenge WhatsApp Agent
+ * Approved balanced metric strip.
+ * Must remain the final loaded metric stylesheet.
+ */
+
+@media (min-width: 851px) {
+  html body .dashboard-shell .workspace > .metric-row {
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    grid-auto-rows: 54px !important;
+
+    width: 100% !important;
+    min-height: 54px !important;
+    height: 54px !important;
+    max-height: 54px !important;
+
+    margin: 0 0 6px !important;
+    padding: 0 !important;
+    gap: 8px !important;
+
+    align-items: stretch !important;
+    overflow: hidden !important;
+  }
+
+  html body .dashboard-shell .workspace > .metric-row > .metric-card {
+    position: relative !important;
+
+    min-width: 0 !important;
+    min-height: 54px !important;
+    height: 54px !important;
+    max-height: 54px !important;
+
+    margin: 0 !important;
+    padding: 6px 12px 6px 58px !important;
+
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    grid-template-rows: 1fr 1fr !important;
+
+    column-gap: 10px !important;
+    row-gap: 0 !important;
+
+    align-items: center !important;
+
+    border-radius: 11px !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+
+    box-shadow:
+      0 3px 10px rgba(15, 23, 42, 0.055),
+      inset 0 1px 0 #ffffff !important;
+  }
+
+  html body .dashboard-shell .workspace > .metric-row > .metric-card::before {
+    left: 8px !important;
+    top: 50% !important;
+
+    width: 42px !important;
+    height: 42px !important;
+
+    border-radius: 12px !important;
+    transform: translateY(-50%) !important;
+  }
+
+  html body .dashboard-shell .workspace > .metric-row > .metric-card::after {
+    left: 14px !important;
+    top: 50% !important;
+
+    width: 30px !important;
+    height: 30px !important;
+
+    transform: translateY(-50%) !important;
+  }
+
+  html body .dashboard-shell .workspace > .metric-row > .metric-card span {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+
+    align-self: end !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    font-size: 9px !important;
+    font-weight: 750 !important;
+    line-height: 1.1 !important;
+
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  html body .dashboard-shell .workspace > .metric-row > .metric-card strong {
+    grid-column: 2 !important;
+    grid-row: 1 / span 2 !important;
+
+    align-self: center !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    font-size: 21px !important;
+    font-weight: 850 !important;
+    line-height: 1 !important;
+
+    white-space: nowrap !important;
+  }
+
+  html body .dashboard-shell .workspace > .metric-row > .metric-card small {
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+
+    align-self: start !important;
+    display: block !important;
+
+    margin: 1px 0 0 !important;
+    padding: 0 !important;
+
+    font-size: 7.5px !important;
+    line-height: 1.1 !important;
+
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+}

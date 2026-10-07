@@ -1,0 +1,377 @@
+/* Page 01 desktop pixel-reference pass.
+   The supplied 1672×941 reference is the desktop visual source of truth.
+   Existing semantic DOM/auth controls remain in place for accessibility and behavior;
+   the live controls are precisely overlaid on the visual master. */
+
+@media (min-width: 1180px) {
+  .login01 {
+    background-color: #020917 !important;
+    background-image: url('/page01-reference-master.webp') !important;
+    background-repeat: no-repeat !important;
+    background-size: 100% 100% !important;
+    background-position: 0 0 !important;
+  }
+
+  /* Disable generated approximation layers. The reference artwork already contains
+     header, city, hero, cards, metrics, Earth/network, panel chrome and static labels. */
+  .login01::before,
+  .login01::after,
+  .login01__ambient,
+  .login01__city {
+    display: none !important;
+  }
+
+  /* Preserve real navigation hit targets while letting the supplied visual render them. */
+  .login01__topbar {
+    position: fixed !important;
+    inset: 0 0 auto !important;
+    z-index: 30 !important;
+    height: 8.18% !important;
+    padding: 0 3.82% !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    opacity: .001 !important;
+  }
+
+  .login01__layout,
+  .login01__login-side,
+  .login01__panel {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 20 !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: block !important;
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  .login01__panel::before,
+  .login01__panel::after,
+  .login01__panel-notch {
+    display: none !important;
+  }
+
+  /* Keep compatibility DOM measurable for regression/a11y, but remove duplicate paint. */
+  .login01__hero,
+  .login01__trusted,
+  .login01__panel-head,
+  .login01__heading,
+  .login01__secure-note,
+  .login01__signature {
+    opacity: .001 !important;
+    pointer-events: none !important;
+  }
+
+  .login01__hero {
+    position: fixed !important;
+    left: 3.8% !important;
+    top: 12% !important;
+    width: 51% !important;
+    height: 82% !important;
+  }
+
+  .login01__heading .auth__compat-heading {
+    display: block !important;
+    opacity: .001 !important;
+  }
+
+  /* Functional form overlay. Coordinates are normalized from the supplied 1672×941 reference. */
+  .login01__form,
+  .login01 .auth-form {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 80 !important;
+    width: 100% !important;
+    height: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    pointer-events: none !important;
+    background: transparent !important;
+  }
+
+  .login01__field,
+  .login01 .auth-field {
+    position: fixed !important;
+    z-index: 82 !important;
+    width: 33.074163% !important;
+    height: 4.888417% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    pointer-events: auto !important;
+  }
+
+  .login01__field:first-child {
+    left: 60.526316% !important;
+    top: 40.595112% !important;
+  }
+
+  .login01__field:nth-child(2) {
+    left: 60.526316% !important;
+    top: 51.434644% !important;
+    height: 4.782147% !important;
+  }
+
+  .login01__label,
+  .login01 .auth-field__label,
+  .login01__input-icon {
+    position: absolute !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
+
+  .login01__input-wrap {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  /* Empty/unfocused controls are visually transparent so the supplied reference is exact.
+     Focused/filled controls become real editable fields without disturbing the surrounding scene. */
+  .login01__input,
+  .login01 .auth-input {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    margin: 0 !important;
+    padding: 0 50px 0 54px !important;
+    border: 1px solid transparent !important;
+    border-radius: 9px !important;
+    outline: 0 !important;
+    color: transparent !important;
+    caret-color: #ffffff !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    font-size: 14px !important;
+    line-height: 1 !important;
+  }
+
+  .login01__input::placeholder,
+  .login01 .auth-input::placeholder {
+    color: transparent !important;
+  }
+
+  .login01__input:focus,
+  .login01__input:focus-visible,
+  .login01 .auth-input:focus,
+  .login01 .auth-input:focus-visible,
+  .login01__input:not(:placeholder-shown),
+  .login01 .auth-input:not(:placeholder-shown) {
+    color: #f3f8ff !important;
+    border-color: rgba(88, 129, 175, .72) !important;
+    outline: 2px solid rgba(62, 180, 255, .45) !important;
+    outline-offset: 2px !important;
+    background: rgb(17, 36, 61) !important;
+    box-shadow: none !important;
+  }
+
+  .login01__input:focus::placeholder,
+  .login01 .auth-input:focus::placeholder {
+    color: #8397b3 !important;
+  }
+
+  .login01__password-toggle {
+    position: absolute !important;
+    z-index: 84 !important;
+    top: 0 !important;
+    right: 0 !important;
+    width: 10% !important;
+    height: 100% !important;
+    transform: none !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: transparent !important;
+    opacity: .001 !important;
+    pointer-events: auto !important;
+  }
+
+  .login01__form-options {
+    position: fixed !important;
+    z-index: 84 !important;
+    left: 60.35% !important;
+    top: 57.60% !important;
+    width: 33.15% !important;
+    height: 3.15% !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    display: block !important;
+    pointer-events: none !important;
+  }
+
+  .login01__remember {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 29% !important;
+    height: 100% !important;
+    opacity: .001 !important;
+    pointer-events: auto !important;
+  }
+
+  .login01__form-options a {
+    position: absolute !important;
+    right: 0 !important;
+    top: 0 !important;
+    width: 26% !important;
+    height: 100% !important;
+    color: transparent !important;
+    text-decoration: none !important;
+    opacity: .001 !important;
+    pointer-events: auto !important;
+  }
+
+  .login01__submit,
+  .login01 .auth-submit {
+    position: fixed !important;
+    z-index: 84 !important;
+    left: 60.526316% !important;
+    top: 63.124336% !important;
+    width: 33.074163% !important;
+    height: 5.738576% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 9px !important;
+    color: transparent !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    opacity: .001 !important;
+    transform: none !important;
+    filter: none !important;
+    pointer-events: auto !important;
+    cursor: pointer !important;
+  }
+
+  .login01__submit:hover:not(:disabled),
+  .login01__submit:focus-visible:not(:disabled),
+  .login01 .auth-submit:hover:not(:disabled),
+  .login01 .auth-submit:focus-visible:not(:disabled) {
+    transform: none !important;
+    filter: none !important;
+    box-shadow: none !important;
+  }
+
+  .login01__divider {
+    display: none !important;
+  }
+
+  .login01__google {
+    position: fixed !important;
+    z-index: 84 !important;
+    left: 60.526316% !important;
+    top: 75.238044% !important;
+    width: 33.074163% !important;
+    height: 5.632306% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    color: transparent !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    opacity: .001 !important;
+    pointer-events: auto !important;
+  }
+
+  .login01__error,
+  .login01 .auth-error {
+    position: fixed !important;
+    z-index: 96 !important;
+    left: 60.526316% !important;
+    top: 58.55% !important;
+    width: 33.074163% !important;
+    margin: 0 !important;
+    padding: 7px 11px !important;
+    border: 1px solid rgba(255, 112, 120, .38) !important;
+    border-radius: 7px !important;
+    color: #ffd2d5 !important;
+    background: rgba(72, 14, 28, .94) !important;
+    font-size: 11px !important;
+    line-height: 1.25 !important;
+    pointer-events: none !important;
+  }
+}
+
+/* Current tablet/mobile responsive implementation remains the functional fallback.
+   The original DOM becomes visible below the desktop reference breakpoint. */
+@media (max-width: 1179px) {
+  .login01 {
+    background-image: none !important;
+  }
+}
+
+/* Brand lock: always render the exact SikhaDenge header asset already shipped by this app.
+   The reference artwork remains the visual source of truth for desktop layout; these rules
+   replace only the visible logo treatment and do not alter authentication behavior. */
+.login01__brand {
+  background-image: url('/sikhadenge-header-safe-320.png') !important;
+  background-repeat: no-repeat !important;
+  background-position: center !important;
+  background-size: contain !important;
+}
+
+.login01__brand img {
+  opacity: 0 !important;
+}
+
+@media (min-width: 1180px) {
+  .login01__topbar {
+    opacity: 1 !important;
+    pointer-events: none !important;
+  }
+
+  .login01__home {
+    pointer-events: auto !important;
+  }
+
+  .login01__nav,
+  .login01__top-actions {
+    opacity: .001 !important;
+    pointer-events: auto !important;
+  }
+
+  .login01__panel-head {
+    position: fixed !important;
+    z-index: 110 !important;
+    left: 60.45% !important;
+    top: 15.45% !important;
+    width: 23.5% !important;
+    height: 7.2% !important;
+    display: flex !important;
+    align-items: center !important;
+    opacity: 1 !important;
+    pointer-events: none !important;
+  }
+
+  .login01__panel-head .login01__brand--panel {
+    width: 100% !important;
+    max-width: 248px !important;
+    height: 100% !important;
+  }
+
+  .login01__panel-meta {
+    display: none !important;
+  }
+}
+
+/* Keep mobile auth fields at a touch-safe text size and avoid iOS focus zoom. */
+@media (max-width: 640px) {
+  .login01__input,
+  .login01 .auth-input {
+    font-size: 16px !important;
+  }
+}

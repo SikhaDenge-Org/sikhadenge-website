@@ -1,0 +1,489 @@
+/* Integrations route-only enterprise hardening.
+   All selectors stay under .integrations-enterprise-root so provider controls
+   cannot alter sibling dashboard modules after client navigation. */
+
+.sx-module .sx-workspace:has(.integrations-enterprise-root) {
+  --module-accent: #3155d9;
+  --module-accent-strong: #233fb3;
+  --module-accent-soft: #eef2ff;
+  --module-accent-ring: rgba(49, 85, 217, 0.16);
+}
+
+.sx-module .sx-workspace-body > .integrations-enterprise-root {
+  width: min(100%, 1760px);
+  min-width: 0;
+  margin-inline: auto;
+  display: grid;
+  gap: 16px;
+}
+
+.sx-module .integrations-enterprise-root :where(*) {
+  box-sizing: border-box;
+}
+
+.sx-module .integrations-enterprise-root :where(button, input, select, textarea, a):focus-visible {
+  outline: 3px solid #3155d9 !important;
+  outline-offset: 2px;
+}
+
+/* Verification cards */
+.sx-module .integrations-enterprise-root .integrations-health-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+  align-items: start;
+}
+
+.sx-module .integrations-enterprise-root .integrations-health-grid > .suite-card {
+  min-width: 0;
+  max-width: 100%;
+  border-radius: 16px;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.045);
+}
+
+.sx-module .integrations-enterprise-root .integrations-health-grid > .suite-card > header {
+  min-height: 132px;
+  align-items: flex-start;
+  padding: 16px;
+}
+
+.sx-module .integrations-enterprise-root .integrations-health-grid > .suite-card > header > div {
+  min-width: 0;
+}
+
+.sx-module .integrations-enterprise-root .integrations-health-grid > .suite-card > header :where(h3, p) {
+  overflow-wrap: anywhere;
+}
+
+.sx-module .integrations-enterprise-root .integrations-health-grid .suite-list article {
+  min-width: 0;
+  align-items: stretch;
+  flex-direction: column;
+  gap: 10px;
+  padding: 13px 15px;
+}
+
+.sx-module .integrations-enterprise-root .integrations-health-grid .suite-list article > div:first-child {
+  min-width: 0;
+}
+
+.sx-module .integrations-enterprise-root .integrations-health-grid .suite-list :where(strong, small) {
+  overflow-wrap: anywhere;
+}
+
+.sx-module .integrations-enterprise-root .integrations-health-grid .suite-actions {
+  width: 100%;
+  min-width: 0;
+  align-items: stretch;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.sx-module .integrations-enterprise-root .integrations-health-grid .suite-actions > :where(span, button) {
+  max-width: 100%;
+}
+
+.sx-module .integrations-enterprise-root .integrations-health-grid .suite-actions > span {
+  align-self: flex-start;
+  overflow-wrap: anywhere;
+}
+
+.sx-module .integrations-enterprise-root .integrations-health-grid .suite-actions > button {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px !important;
+  padding-inline: 10px;
+  white-space: normal;
+}
+
+/* Manager and metrics */
+.sx-module .integrations-enterprise-root > .suite-stack {
+  min-width: 0;
+  gap: 16px;
+}
+
+.sx-module .integrations-enterprise-root > .suite-stack > .suite-metrics {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+  min-width: 0;
+  overflow: visible !important;
+}
+
+.sx-module .integrations-enterprise-root > .suite-stack > .suite-metrics > article {
+  min-width: 0 !important;
+  min-height: 104px !important;
+  padding: 15px 16px !important;
+  border-radius: 15px !important;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.045) !important;
+  transform: none !important;
+}
+
+.sx-module .integrations-enterprise-root > .suite-stack > .suite-metrics > article :where(span, strong, small) {
+  overflow-wrap: anywhere;
+}
+
+.sx-module .integrations-enterprise-root > .suite-stack > .suite-card,
+.sx-module .integrations-enterprise-root > .suite-stack > .suite-grid > .suite-card {
+  min-width: 0;
+  max-width: 100%;
+  border-radius: 17px;
+}
+
+.sx-module .integrations-enterprise-root .suite-card > header {
+  min-width: 0;
+  gap: 14px;
+  padding: 16px 18px;
+}
+
+.sx-module .integrations-enterprise-root .suite-card > header > div {
+  min-width: 0;
+}
+
+.sx-module .integrations-enterprise-root .suite-card > header :where(h3, p) {
+  overflow-wrap: anywhere;
+}
+
+.sx-module .integrations-enterprise-root .suite-card > footer {
+  min-width: 0;
+}
+
+.sx-module .integrations-enterprise-root .suite-card > footer > button {
+  min-height: 44px !important;
+}
+
+/* Meta embedded signup */
+.sx-module .integrations-enterprise-root > .suite-stack > .suite-card > .suite-stack {
+  min-width: 0;
+  padding: 16px 18px;
+  gap: 10px;
+}
+
+.sx-module .integrations-enterprise-root > .suite-stack > .suite-card > .suite-stack .suite-alert {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sx-module .integrations-enterprise-root > .suite-stack > .suite-card > .suite-stack .integration-provider-list {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+/* Registry + provider readiness */
+.sx-module .integrations-enterprise-root > .suite-stack > .suite-grid.two {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+  gap: 16px;
+  min-width: 0;
+}
+
+.sx-module .integrations-enterprise-root .suite-form-grid.two {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  min-width: 0;
+  gap: 12px;
+}
+
+.sx-module .integrations-enterprise-root .suite-form-grid label {
+  min-width: 0;
+}
+
+.sx-module .integrations-enterprise-root .suite-form-grid :where(input, select) {
+  min-width: 0;
+  height: 44px !important;
+}
+
+.sx-module .integrations-enterprise-root .suite-form-grid textarea {
+  min-width: 0;
+  min-height: 100px;
+  line-height: 1.5;
+}
+
+.sx-module .integrations-enterprise-root .suite-check {
+  min-height: 44px;
+  padding: 8px 0;
+  align-items: center !important;
+}
+
+.sx-module .integrations-enterprise-root .suite-check input {
+  width: 18px !important;
+  height: 18px !important;
+  flex: 0 0 18px;
+}
+
+.sx-module .integrations-enterprise-root .integration-provider-list {
+  min-width: 0;
+}
+
+.sx-module .integrations-enterprise-root > .suite-stack > .suite-grid.two > .suite-card .integration-provider-list {
+  max-height: min(60vh, 590px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+}
+
+.sx-module .integrations-enterprise-root .integration-provider-list article {
+  min-width: 0;
+  max-width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 9px 12px;
+}
+
+.sx-module .integrations-enterprise-root .integration-provider-list article > div:first-child {
+  min-width: 0;
+}
+
+.sx-module .integrations-enterprise-root .integration-provider-list :where(strong, p, small, span) {
+  overflow-wrap: anywhere;
+}
+
+.sx-module .integrations-enterprise-root .integration-badges {
+  min-width: 0;
+  max-width: 240px;
+}
+
+/* Saved configurations */
+.sx-module .integrations-enterprise-root > .suite-stack > .suite-card:last-child > .suite-list {
+  min-width: 0;
+  max-height: min(58vh, 560px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+}
+
+.sx-module .integrations-enterprise-root .suite-list article {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.sx-module .integrations-enterprise-root .suite-list article > div:first-child {
+  min-width: 0;
+}
+
+.sx-module .integrations-enterprise-root .suite-list :where(strong, small) {
+  overflow-wrap: anywhere;
+}
+
+.sx-module .integrations-enterprise-root .suite-actions {
+  min-width: 0;
+}
+
+.sx-module .integrations-enterprise-root .suite-actions > button {
+  min-height: 44px !important;
+}
+
+@media (max-width: 1280px) {
+  .sx-module .integrations-enterprise-root > .suite-stack > .suite-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .sx-module .integrations-enterprise-root .integrations-health-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sx-module .integrations-enterprise-root .integrations-health-grid > .suite-card:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .sx-module .integrations-enterprise-root .integrations-health-grid > .suite-card:first-child .suite-list {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .sx-module .integrations-enterprise-root .integrations-health-grid > .suite-card:first-child .suite-list > article {
+    border-right: 1px solid #eef2f7;
+    border-bottom: 0;
+  }
+
+  .sx-module .integrations-enterprise-root .integrations-health-grid > .suite-card:first-child .suite-list > article:last-child {
+    border-right: 0;
+  }
+}
+
+@media (max-width: 1180px) {
+  .sx-module .integrations-enterprise-root > .suite-stack > .suite-grid.two {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .sx-module .integrations-enterprise-root > .suite-stack > .suite-grid.two > .suite-card .integration-provider-list {
+    max-height: min(54vh, 520px);
+  }
+}
+
+@media (max-width: 900px) {
+  .sx-module .integrations-enterprise-root .integrations-health-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sx-module .integrations-enterprise-root .integrations-health-grid > .suite-card:first-child {
+    grid-column: auto;
+  }
+
+  .sx-module .integrations-enterprise-root .integrations-health-grid > .suite-card:first-child .suite-list {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sx-module .integrations-enterprise-root .integrations-health-grid > .suite-card:first-child .suite-list > article {
+    border-right: 0;
+    border-bottom: 1px solid #eef2f7;
+  }
+
+  .sx-module .integrations-enterprise-root .integrations-health-grid > .suite-card:first-child .suite-list > article:last-child {
+    border-bottom: 0;
+  }
+}
+
+@media (max-width: 767px) {
+  .sx-module .sx-workspace-body > .integrations-enterprise-root {
+    gap: 12px;
+  }
+
+  .sx-module .integrations-enterprise-root > .suite-stack {
+    gap: 12px;
+  }
+
+  .sx-module .integrations-enterprise-root > .suite-stack > .suite-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+
+  .sx-module .integrations-enterprise-root > .suite-stack > .suite-metrics > article {
+    min-height: 86px !important;
+    padding: 12px !important;
+  }
+
+  .sx-module .integrations-enterprise-root > .suite-stack > .suite-metrics > article strong {
+    font-size: 20px !important;
+  }
+
+  .sx-module .integrations-enterprise-root > .suite-stack > .suite-metrics > article :where(span, small) {
+    font-size: 9.5px !important;
+    line-height: 1.25;
+  }
+
+  .sx-module .integrations-enterprise-root .integrations-health-grid {
+    gap: 10px;
+  }
+
+  .sx-module .integrations-enterprise-root .integrations-health-grid > .suite-card > header {
+    min-height: 0;
+    padding: 14px;
+  }
+
+  .sx-module .integrations-enterprise-root .suite-card > header {
+    min-height: 0;
+    align-items: flex-start !important;
+    flex-direction: row !important;
+    padding: 14px;
+  }
+
+  .sx-module .integrations-enterprise-root .suite-card > header h3 {
+    font-size: 15px;
+  }
+
+  .sx-module .integrations-enterprise-root .suite-card > footer {
+    align-items: stretch !important;
+    flex-direction: column !important;
+    padding: 11px 14px;
+  }
+
+  .sx-module .integrations-enterprise-root .suite-card > footer > button {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .sx-module .integrations-enterprise-root > .suite-stack > .suite-card > .suite-stack {
+    padding: 14px;
+  }
+
+  .sx-module .integrations-enterprise-root .suite-form-grid.two {
+    grid-template-columns: minmax(0, 1fr) !important;
+    padding: 14px;
+  }
+
+  .sx-module .integrations-enterprise-root .suite-span-two {
+    grid-column: auto !important;
+  }
+
+  .sx-module .integrations-enterprise-root :where(
+    .suite-form-grid input,
+    .suite-form-grid select,
+    .suite-form-grid textarea
+  ) {
+    font-size: 16px !important;
+  }
+
+  .sx-module .integrations-enterprise-root .suite-check {
+    min-height: 44px !important;
+    font-size: 12px;
+  }
+
+  .sx-module .integrations-enterprise-root .integration-provider-list article {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 13px 14px;
+  }
+
+  .sx-module .integrations-enterprise-root .integration-provider-list small {
+    grid-column: auto;
+  }
+
+  .sx-module .integrations-enterprise-root .integration-badges {
+    max-width: none;
+    justify-content: flex-start;
+  }
+
+  .sx-module .integrations-enterprise-root > .suite-stack > .suite-card:last-child > .suite-list {
+    max-height: min(56vh, 520px);
+  }
+
+  .sx-module .integrations-enterprise-root .suite-list article {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+    padding: 13px 14px;
+  }
+
+  .sx-module .integrations-enterprise-root .suite-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    gap: 8px;
+  }
+
+  .sx-module .integrations-enterprise-root .suite-actions > button {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px !important;
+  }
+
+  .sx-module .integrations-enterprise-root .suite-actions > :only-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 420px) {
+  .sx-module .integrations-enterprise-root .suite-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sx-module .integrations-enterprise-root .suite-actions > :only-child {
+    grid-column: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sx-module .integrations-enterprise-root *,
+  .sx-module .integrations-enterprise-root *::before,
+  .sx-module .integrations-enterprise-root *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

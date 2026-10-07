@@ -1,0 +1,129 @@
+/* Final sidebar icon completeness layer.
+ * Uses real inline SVG elements for every menu link and removes legacy
+ * pseudo-element dividers/icons that caused partial or missing icon rows.
+ */
+
+/* Remove the blank divider/white line above Inbox in both sidebar variants. */
+.rail nav::before,
+.rail nav::after,
+.sx-inbox .sx-side nav::before,
+.sx-inbox .sx-side nav::after {
+  content: none !important;
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+
+.rail nav,
+.rail nav:first-of-type,
+.rail nav .rail-button:first-child,
+.rail nav .rail-button[title="Inbox"] {
+  border-top: 0 !important;
+  box-shadow: none !important;
+}
+
+/* Legacy module pages: icons are rendered directly in DashboardModuleShell. */
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button,
+.dashboard-shell:not(.sx-inbox) .rail .rail-bottom {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 10px !important;
+  padding: 7px 10px !important;
+  text-indent: 0 !important;
+}
+
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button::before,
+.dashboard-shell:not(.sx-inbox) .rail nav .rail-button::after,
+.dashboard-shell:not(.sx-inbox) .rail .rail-bottom::before,
+.dashboard-shell:not(.sx-inbox) .rail .rail-bottom::after {
+  content: none !important;
+  display: none !important;
+  background: none !important;
+  -webkit-mask-image: none !important;
+  mask-image: none !important;
+}
+
+.sidebar-menu-icon {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 18px !important;
+  height: 18px !important;
+  min-width: 18px !important;
+  flex: 0 0 18px !important;
+  color: currentColor !important;
+  line-height: 0 !important;
+  opacity: 0.95 !important;
+}
+
+.sidebar-menu-icon svg {
+  display: block !important;
+  width: 18px !important;
+  height: 18px !important;
+  overflow: visible !important;
+}
+
+.sidebar-menu-label {
+  display: block !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+/* Rebuilt Inbox: force every existing inline nav icon to remain visible. */
+.sx-inbox .sx-side .rail-button::before,
+.sx-inbox .sx-side .rail-button::after {
+  content: none !important;
+  display: none !important;
+  background: none !important;
+  -webkit-mask-image: none !important;
+  mask-image: none !important;
+}
+
+.sx-inbox .sx-side .sx-navic {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 18px !important;
+  height: 18px !important;
+  min-width: 18px !important;
+  flex: 0 0 18px !important;
+  color: currentColor !important;
+  line-height: 0 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.sx-inbox .sx-side .sx-navic svg {
+  display: block !important;
+  width: 18px !important;
+  height: 18px !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+@media (max-width: 850px) {
+  .dashboard-shell:not(.sx-inbox) .rail nav .rail-button,
+  .dashboard-shell:not(.sx-inbox) .rail .rail-bottom {
+    min-height: 44px !important;
+    padding: 0 10px !important;
+    gap: 8px !important;
+  }
+
+  .sidebar-menu-icon,
+  .sidebar-menu-icon svg,
+  .sx-inbox .sx-side .sx-navic,
+  .sx-inbox .sx-side .sx-navic svg {
+    width: 17px !important;
+    height: 17px !important;
+    min-width: 17px !important;
+    flex-basis: 17px !important;
+  }
+}

@@ -1,0 +1,155 @@
+name: WhatsApp Agent Email Inbound Readiness
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+  workflow_dispatch:
+    inputs:
+      deployed_sha:
+        description: Exact production SHA to audit or operate against
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  email-inbound-readiness:
+    concurrency:
+      group: whatsapp-agent-production
+      cancel-in-progress: false
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[email-inbound-readiness]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      DEPLOYED_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.deployed_sha || github.event.before }}
+      AUDIT_RUN_ID: email-inbound-readiness-${{ github.run_id }}-${{ github.run_attempt }}
+      ACTIVATION_WORKSPACE_ID: engagews_default
+    steps:
+      - name: Validate trigger and production secrets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$DEPLOYED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ACTIVATION_WORKSPACE_ID" == "engagews_default" ]]
+          missing=0
+          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            [[ -n "${!variable_name:-}" ]] || { echo "Missing production secret: $variable_name" >&2; missing=1; }
+          done
+          test "$missing" = "0"
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then printf '%s\n' "$SSH_PRIVATE_KEY" > "$key"; else printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$key"; fi
+          chmod 600 "$key"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = "ssh-ed25519"
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$key" >/dev/null
+
+      - name: Audit production inbound readiness
+        shell: bash
+        run: |
+          set -o pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" \
+            "DEPLOYED_SHA='$DEPLOYED_SHA' RUN_ID='$AUDIT_RUN_ID' WORKSPACE_ID='$ACTIVATION_WORKSPACE_ID' bash -s" <<'REMOTE' | tee email-inbound-readiness.log
+          set -Eeuo pipefail
+          APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          BACKUP=/root/sikhadenge-backups/$RUN_ID
+          test "$(id -u)" = "0"
+          cd "$APP"
+          test "$(git rev-parse HEAD)" = "$DEPLOYED_SHA"
+          install -d -m 700 "$BACKUP"
+          set -a
+          source "$APP/.env"
+          set +a
+          set +e
+          EXPECTED_RELEASE_SHA="$DEPLOYED_SHA" EMAIL_INBOUND_ACTIVATION_WORKSPACE_ID="$WORKSPACE_ID" npx tsx scripts/email-inbound-production-readiness.ts | tee "$BACKUP/inbound-readiness.json"
+          code=${PIPESTATUS[0]}
+          set -e
+          printf 'EXIT_CODE=%s\n' "$code" > "$BACKUP/inbound-readiness-result.txt"
+          chmod 600 "$BACKUP"/*
+          exit "$code"
+          REMOTE
+
+      - name: Collect protected readiness evidence
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p email-inbound-readiness-evidence
+          for file_name in inbound-readiness.json inbound-readiness-result.txt; do
+            scp -P "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ConnectionAttempts=1 \
+              "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/${AUDIT_RUN_ID}/${file_name}" "email-inbound-readiness-evidence/${file_name}" >/dev/null 2>&1 || true
+          done
+          chmod -R go-rwx email-inbound-readiness-evidence 2>/dev/null || true
+
+      - name: Publish readiness summary
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          json_file="email-inbound-readiness-evidence/inbound-readiness.json"
+          result_file="email-inbound-readiness-evidence/inbound-readiness-result.txt"
+          {
+            echo "## Email inbound production readiness"
+            echo
+            echo "- Audited SHA: \`$DEPLOYED_SHA\`"
+            if [[ -f "$json_file" ]]; then
+              status="$(jq -r '.status // "UNKNOWN"' "$json_file")"
+              account="$(jq -r '.activationAccount // "unknown"' "$json_file")"
+              workspace="$(jq -r '.activationWorkspaceId // "unknown"' "$json_file")"
+              mode="$(jq -r '.inboundMode // "unknown"' "$json_file")"
+              runtime="$(jq -r '.runtimeMode // "unknown"' "$json_file")"
+              sync="$(jq -r '.inboundSyncEnabled // false' "$json_file")"
+              access="$(jq -r '.checks.gmailInboundReadAccess // false' "$json_file")"
+              cursor="$(jq -r '.cursorReadyGmailConnections // 0' "$json_file")"
+              echo "- Status: **$status**"
+              echo "- Activation account: \`$account\`"
+              echo "- Activation workspace: \`$workspace\`"
+              echo "- Inbound mode: \`$mode\`"
+              echo "- Runtime mode: \`$runtime\`"
+              echo "- Inbound sync enabled: \`$sync\`"
+              echo "- Gmail read access: \`$access\`"
+              echo "- Cursor-ready Gmail connections: \`$cursor\`"
+              echo
+              echo "### Blockers"
+              blockers="$(jq -r '.blockers[]? // empty' "$json_file")"
+              if [[ -n "$blockers" ]]; then
+                while IFS= read -r blocker; do echo "- $blocker"; done <<< "$blockers"
+              else
+                echo "- None"
+              fi
+            else
+              echo "- Status: **NO_EVIDENCE**"
+              echo "- Readiness evidence was not collected."
+            fi
+            if [[ -f "$result_file" ]]; then
+              echo
+              echo "- $(cat "$result_file")"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload protected readiness evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatsapp-agent-email-inbound-readiness-${{ env.AUDIT_RUN_ID }}
+          path: |
+            email-inbound-readiness.log
+            email-inbound-readiness-evidence
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,14 @@
+-- Prisma Migrate adoption baseline for the existing SikhaDenge WhatsApp schema.
+--
+-- This file is intentionally non-mutating. The production database and the
+-- migration-regression database already contain the legacy schema represented
+-- by release commit 4f44a1176d5da201ca6c917489f3cd0a3ad4b95a.
+--
+-- Before the first `prisma migrate deploy` against an existing database, mark
+-- this migration as applied with:
+--
+--   npx prisma migrate resolve --applied 20260802000000_baseline_existing_schema
+--
+-- Fresh/empty database provisioning is still owned by the existing seed/setup
+-- workflow and is not authorized by this baseline-only migration.
+SELECT 1;

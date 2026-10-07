@@ -1,0 +1,173 @@
+name: WhatsApp Agent Production Ledger
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-production-ledger.yml"
+  workflow_run:
+    workflows:
+      - "WhatsApp Agent Production Batch 1"
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+concurrency:
+  group: whatsapp-agent-production-ledger
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
+      LEDGER_ISSUE: "65"
+      BOOTSTRAP_PRODUCTION_SHA: "fdbf6d9401a4101314b18b2e930b097262e673bd"
+
+    steps:
+      - name: Resolve production workflow run
+        id: resolve
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            run_id="${{ github.event.workflow_run.id }}"
+            run_url="${{ github.event.workflow_run.html_url }}"
+            run_sha="${{ github.event.workflow_run.head_sha }}"
+            run_status="${{ github.event.workflow_run.status }}"
+            run_conclusion="${{ github.event.workflow_run.conclusion }}"
+          else
+            target_sha="$BOOTSTRAP_PRODUCTION_SHA"
+            run_id=""
+
+            for attempt in $(seq 1 60); do
+              response="$(
+                gh api \
+                  -H 'Accept: application/vnd.github+json' \
+                  "/repos/${GITHUB_REPOSITORY}/actions/workflows/whatsapp-agent-production-batch1.yml/runs?head_sha=${target_sha}&per_page=20"
+              )"
+
+              run_id="$(
+                jq -r '
+                  .workflow_runs
+                  | map(select(.event == "push"))
+                  | sort_by(.created_at)
+                  | reverse
+                  | .[0].id // empty
+                ' <<<"$response"
+              )"
+
+              if [[ -n "$run_id" ]]; then
+                break
+              fi
+
+              sleep 10
+            done
+
+            if [[ -z "$run_id" ]]; then
+              run_url="https://github.com/${GITHUB_REPOSITORY}/actions/workflows/whatsapp-agent-production-batch1.yml"
+              run_sha="$target_sha"
+              run_status="not_found"
+              run_conclusion="not_found"
+            else
+              for attempt in $(seq 1 100); do
+                run_json="$(
+                  gh api \
+                    -H 'Accept: application/vnd.github+json' \
+                    "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}"
+                )"
+                run_url="$(jq -r '.html_url' <<<"$run_json")"
+                run_sha="$(jq -r '.head_sha' <<<"$run_json")"
+                run_status="$(jq -r '.status' <<<"$run_json")"
+                run_conclusion="$(jq -r '.conclusion // "pending"' <<<"$run_json")"
+
+                if [[ "$run_status" == "completed" ]]; then
+                  break
+                fi
+
+                sleep 10
+              done
+            fi
+          fi
+
+          {
+            printf 'run_id=%s\n' "$run_id"
+            printf 'run_url=%s\n' "$run_url"
+            printf 'run_sha=%s\n' "$run_sha"
+            printf 'run_status=%s\n' "$run_status"
+            printf 'run_conclusion=%s\n' "$run_conclusion"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Read production job result
+        id: job
+        if: steps.resolve.outputs.run_id != ''
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          jobs_json="$(
+            gh api \
+              -H 'Accept: application/vnd.github+json' \
+              "/repos/${GITHUB_REPOSITORY}/actions/runs/${{ steps.resolve.outputs.run_id }}/jobs?per_page=100"
+          )"
+
+          job_result="$(
+            jq -r '
+              (.jobs | map(select(.name == "production-batch-1")) | .[0]) as $job
+              | ($job.conclusion // $job.status // "not_found")
+            ' <<<"$jobs_json"
+          )"
+
+          failed_step="$(
+            jq -r '
+              ((.jobs | map(select(.name == "production-batch-1")) | .[0].steps) // [])
+              | map(select(.conclusion == "failure"))
+              | .[0].name // "none"
+            ' <<<"$jobs_json"
+          )"
+
+          printf 'job_result=%s\n' "$job_result" >> "$GITHUB_OUTPUT"
+          printf 'failed_step=%s\n' "$failed_step" >> "$GITHUB_OUTPUT"
+
+      - name: Write deployment ledger entry
+        shell: bash
+        env:
+          RUN_ID_VALUE: ${{ steps.resolve.outputs.run_id }}
+          RUN_URL_VALUE: ${{ steps.resolve.outputs.run_url }}
+          RUN_SHA_VALUE: ${{ steps.resolve.outputs.run_sha }}
+          RUN_STATUS_VALUE: ${{ steps.resolve.outputs.run_status }}
+          RUN_CONCLUSION_VALUE: ${{ steps.resolve.outputs.run_conclusion }}
+          JOB_RESULT_VALUE: ${{ steps.job.outputs.job_result }}
+          FAILED_STEP_VALUE: ${{ steps.job.outputs.failed_step }}
+        run: |
+          set -Eeuo pipefail
+
+          [[ -n "$RUN_ID_VALUE" ]] || RUN_ID_VALUE="not_found"
+          [[ -n "$JOB_RESULT_VALUE" ]] || JOB_RESULT_VALUE="not_found"
+          [[ -n "$FAILED_STEP_VALUE" ]] || FAILED_STEP_VALUE="none"
+
+          cat > ledger-entry.md <<EOF
+          ## Production workflow report
+
+          - Release SHA: $RUN_SHA_VALUE
+          - Workflow run: $RUN_URL_VALUE
+          - Run ID: $RUN_ID_VALUE
+          - Run status: $RUN_STATUS_VALUE
+          - Run conclusion: $RUN_CONCLUSION_VALUE
+          - Production job result: $JOB_RESULT_VALUE
+          - Failed step: $FAILED_STEP_VALUE
+          - Reported UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')
+
+          This entry contains no production secrets, database URLs, provider credentials, or backup contents.
+          EOF
+
+          gh issue comment "$LEDGER_ISSUE" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file ledger-entry.md

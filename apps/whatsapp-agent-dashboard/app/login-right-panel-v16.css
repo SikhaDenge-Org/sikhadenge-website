@@ -1,0 +1,3405 @@
+/*
+ * Page 01 V16.1
+ * Keep original login dimensions.
+ * Only normalize vertical rhythm + Secure Team Access pill.
+ *
+ * Canonical dimensions preserved:
+ * - signin max width: 535px
+ * - card min-height: 355px
+ * - card padding: 30px 31px 23px
+ * - control height: 55px
+ * - submit height: 57px
+ * - control radius: 9px
+ */
+
+/* ---------- Secure Team Access pill only ---------- */
+
+.split01__signin .split01__signin-heading p {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+
+  min-height: 38px;
+  padding: 0 18px;
+
+  margin: 0 0 16px !important;
+
+  border: 1px solid rgba(48, 119, 255, 0.22);
+  border-radius: 999px;
+
+  background: rgba(248, 251, 255, 0.88);
+
+  box-shadow:
+    0 7px 20px rgba(46, 91, 174, 0.07),
+    inset 0 1px 0 rgba(255,255,255,0.90);
+
+  color: #1677f3 !important;
+
+  font-size: 13px !important;
+  line-height: 18px !important;
+  font-weight: 700 !important;
+
+  letter-spacing: 0.14em !important;
+  text-transform: none !important;
+
+  white-space: nowrap;
+}
+
+
+/* ---------- Restore original container width ---------- */
+
+.split01__signin .split01__signin-inner {
+  max-width: 535px !important;
+}
+
+
+/* ---------- Restore original card geometry ---------- */
+
+.split01__signin .split01__form-card {
+  width: 100% !important;
+
+  min-height: 355px !important;
+
+  padding:
+    30px
+    31px
+    23px !important;
+
+  margin-top: 0 !important;
+
+  border-radius: 17px !important;
+
+  border:
+    1px solid
+    #d9e3f4 !important;
+
+  background:
+    rgba(255,255,255,.92) !important;
+
+  box-shadow:
+    0 16px 42px rgba(45,74,135,.09),
+    0 3px 10px rgba(52,82,140,.04) !important;
+}
+
+
+/* =====================================================
+   FORM RHYTHM
+   Important:
+   Do NOT use display:flex + gap on the complete form.
+   Field margin is the single source of vertical spacing.
+   ===================================================== */
+
+.split01__signin .split01-form {
+  width: 100% !important;
+
+  display: block !important;
+
+  margin: 0 !important;
+
+  gap: 0 !important;
+}
+
+
+/* 18px between form groups */
+
+.split01__signin .split01-form__field {
+  margin:
+    0
+    0
+    18px !important;
+
+  padding: 0 !important;
+
+  display: block !important;
+}
+
+
+/* ---------- Labels ---------- */
+
+.split01__signin .split01-form__field > label {
+  display: block !important;
+
+  margin:
+    0
+    0
+    8px !important;
+
+  font-size: 14px !important;
+  line-height: 20px !important;
+  font-weight: 700 !important;
+}
+
+
+/* Password + Forgot password row */
+
+.split01__signin .split01-form__label-row {
+  display: flex !important;
+
+  align-items: center !important;
+  justify-content: space-between !important;
+
+  gap: 16px !important;
+
+  margin:
+    0
+    0
+    8px !important;
+}
+
+.split01__signin .split01-form__label-row label {
+  margin: 0 !important;
+
+  font-size: 14px !important;
+  line-height: 20px !important;
+  font-weight: 700 !important;
+}
+
+.split01__signin .split01-form__forgot {
+  margin: 0 !important;
+  padding: 0 !important;
+
+  font-size: 13px !important;
+  line-height: 20px !important;
+  font-weight: 700 !important;
+}
+
+
+/* =====================================================
+   INPUTS — original size
+   ===================================================== */
+
+.split01__signin .split01-form__control {
+  position: relative !important;
+
+  width: 100% !important;
+  height: 55px !important;
+
+  display: flex !important;
+  align-items: center !important;
+
+  margin: 0 !important;
+
+  border:
+    1.4px solid
+    #c7d7f3 !important;
+
+  border-radius: 9px !important;
+
+  background: #fff !important;
+
+  box-shadow:
+    inset 0 1px 2px
+    rgba(27,55,105,.02) !important;
+}
+
+
+/*
+ * Critical:
+ * Do not set min-height on input itself.
+ * Wrapper owns the 55px height.
+ */
+
+.split01__signin .split01-form__control input {
+  width: 100% !important;
+  height: 100% !important;
+
+  min-height: 0 !important;
+
+  padding:
+    0
+    51px
+    0
+    55px !important;
+
+  margin: 0 !important;
+
+  border: 0 !important;
+  border-radius: 9px !important;
+
+  background: transparent !important;
+
+  font-size: 16px !important;
+  line-height: 1 !important;
+}
+
+
+/* ---------- Password eye ---------- */
+
+.split01__signin .split01-form__eye {
+  width: 36px !important;
+  height: 36px !important;
+
+  right: 11px !important;
+
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+
+/* =====================================================
+   SIGN IN BUTTON — original size
+   ===================================================== */
+
+.split01__signin .split01-form__submit {
+  width: 100% !important;
+
+  height: 57px !important;
+  min-height: 57px !important;
+
+  margin:
+    0 !important;
+
+  border-radius: 9px !important;
+
+  font-size: 16px !important;
+  line-height: 22px !important;
+  font-weight: 700 !important;
+}
+
+
+/* ---------- Protected sign-in meta ---------- */
+
+.split01__signin .split01-form__meta {
+  margin:
+    14px
+    0
+    0 !important;
+
+  min-height: 20px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  font-size: 12px !important;
+  line-height: 18px !important;
+}
+
+
+/* ---------- Access note: restore compact style ---------- */
+
+.split01__signin .split01__access-note {
+  margin:
+    18px
+    0
+    0 !important;
+
+  padding:
+    18px
+    0
+    0 !important;
+
+  font-size: 13px !important;
+  line-height: 20px !important;
+}
+
+
+/* =====================================================
+   SHORT DESKTOPS
+   Preserve original compact behaviour
+   ===================================================== */
+
+@media (max-height: 820px) and (min-width: 901px) {
+
+  .split01__signin .split01__form-card {
+    min-height: 330px !important;
+
+    padding:
+      24px
+      31px
+      19px !important;
+  }
+
+  .split01__signin .split01-form__field {
+    margin-bottom: 15px !important;
+  }
+
+  .split01__signin .split01-form__field > label,
+  .split01__signin .split01-form__label-row {
+    margin-bottom: 7px !important;
+  }
+
+  .split01__signin .split01-form__control {
+    height: 51px !important;
+  }
+
+  .split01__signin .split01-form__submit {
+    height: 52px !important;
+    min-height: 52px !important;
+  }
+
+  .split01__signin .split01-form__meta {
+    margin-top: 10px !important;
+  }
+
+  .split01__signin .split01__access-note {
+    margin-top: 14px !important;
+    padding-top: 14px !important;
+  }
+}
+
+
+/* ---------- Tablet ---------- */
+
+@media (max-width: 900px) {
+
+  .split01__signin .split01__signin-inner {
+    max-width: 535px !important;
+  }
+
+  .split01__signin .split01__form-card {
+    min-height: 0 !important;
+
+    padding:
+      26px
+      24px
+      21px !important;
+  }
+
+  .split01__signin .split01-form__control {
+    height: 54px !important;
+  }
+
+  .split01__signin .split01-form__submit {
+    height: 55px !important;
+    min-height: 55px !important;
+  }
+}
+
+
+/* ---------- Mobile ---------- */
+
+@media (max-width: 620px) {
+
+  .split01__signin .split01__signin-heading p {
+    min-height: 34px;
+
+    padding:
+      0
+      14px;
+
+    font-size: 12px !important;
+
+    letter-spacing:
+      .10em !important;
+  }
+
+  .split01__signin .split01__form-card {
+    padding:
+      22px
+      18px
+      18px !important;
+
+    border-radius:
+      16px !important;
+  }
+
+  .split01__signin .split01-form__field {
+    margin-bottom:
+      16px !important;
+  }
+
+  .split01__signin .split01-form__control {
+    height:
+      52px !important;
+  }
+
+  .split01__signin .split01-form__submit {
+    height:
+      54px !important;
+
+    min-height:
+      54px !important;
+  }
+}
+
+/* ===== V16.2 FINAL RHYTHM START ===== */
+
+/*
+ * Do NOT change field/control geometry here.
+ * V16.1 already restored:
+ * 55px inputs
+ * 57px submit
+ * 9px radii
+ * 8px label gap
+ * 18px field rhythm
+ */
+
+/* Remove redundant second security status line.
+   The authorized-team access note below is sufficient. */
+.split01__signin .split01-form__meta {
+  display: none !important;
+}
+
+/* Keep exactly one consistent gap between password and button. */
+.split01__signin .split01-form__field {
+  margin-bottom: 18px !important;
+}
+
+/* Keep labels close to their own controls. */
+.split01__signin .split01-form__field > label,
+.split01__signin .split01-form__label-row {
+  margin-bottom: 8px !important;
+}
+
+/* Preserve original control dimensions. */
+.split01__signin .split01-form__control {
+  height: 55px !important;
+  min-height: 55px !important;
+  border-radius: 9px !important;
+}
+
+/* Preserve original CTA dimensions. */
+.split01__signin .split01-form__submit {
+  height: 57px !important;
+  min-height: 57px !important;
+  margin-top: 0 !important;
+  border-radius: 9px !important;
+}
+
+/*
+ * Compact card footer.
+ * Keeps authorized-access information without making
+ * the card visually bottom-heavy.
+ */
+.split01__signin .split01__access-note {
+  display: flex !important;
+  align-items: center !important;
+
+  gap: 10px !important;
+
+  margin: 17px 0 0 !important;
+  padding: 16px 0 0 !important;
+
+  border-top:
+    1px solid
+    rgba(191, 204, 232, 0.48) !important;
+
+  font-size: 12px !important;
+  line-height: 18px !important;
+  font-weight: 500 !important;
+}
+
+.split01__signin .split01__access-note svg {
+  width: 21px !important;
+  height: 21px !important;
+  flex: 0 0 21px !important;
+}
+
+/*
+ * Tagline belongs outside the card.
+ * Lowering it creates a real visual separation
+ * instead of touching the card border.
+ */
+.split01__signin .split01__tagline {
+  bottom: 2.8% !important;
+  margin: 0 !important;
+}
+
+/* Slightly softer pill tracking.
+   Keep Title Case and Manrope. */
+.split01__signin .split01__signin-heading p {
+  letter-spacing: 0.10em !important;
+}
+
+/* Short desktop displays need extra footer clearance. */
+@media (max-height: 820px) and (min-width: 901px) {
+
+  .split01__signin .split01__tagline {
+    bottom: 1.6% !important;
+  }
+
+  .split01__signin .split01__access-note {
+    margin-top: 14px !important;
+    padding-top: 13px !important;
+  }
+}
+
+/* Tablet/mobile: tagline should join normal flow. */
+@media (max-width: 900px) {
+
+  .split01__signin .split01__tagline {
+    position: relative !important;
+
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+
+    width: min(535px, 100%);
+
+    margin:
+      24px
+      auto
+      0 !important;
+  }
+}
+
+/* ===== V16.2 FINAL RHYTHM END ===== */
+
+/* ===== V16.3 RESPONSIVE START ===== */
+
+/*
+ * V16.3 principles:
+ * - Desktop >= 901px remains unchanged.
+ * - Tablet preserves the approved artwork.
+ * - Phone prioritizes authentication and hides the marketing hero.
+ * - No horizontal overflow.
+ * - iOS-safe spacing.
+ * - 16px text inputs on phones to avoid browser zoom.
+ */
+
+/* --------------------------------------------------
+   TABLET — 621px to 900px
+   -------------------------------------------------- */
+
+@media (min-width: 621px) and (max-width: 900px) {
+
+  html,
+  body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+  }
+
+  .page01-login-asset-root {
+    width: 100% !important;
+    min-height: 100dvh !important;
+  }
+
+  .page01-login-asset-root .split01 {
+    width: 100% !important;
+    height: auto !important;
+    min-height: 100dvh !important;
+
+    display: flex !important;
+    flex-direction: column !important;
+
+    overflow: visible !important;
+  }
+
+  /*
+   * Keep entire approved artwork visible on tablet.
+   * Its native ratio is already optimized.
+   */
+  .page01-login-asset-root
+  .split01__hero--approved-image {
+    order: 1 !important;
+
+    width: 100% !important;
+    height: auto !important;
+
+    min-height: 0 !important;
+
+    aspect-ratio: 1421 / 1107 !important;
+
+    overflow: hidden !important;
+  }
+
+  .page01-login-asset-root
+  .split01__hero-approved-image {
+    width: 100% !important;
+    height: 100% !important;
+
+    object-fit: cover !important;
+    object-position: center center !important;
+  }
+
+  .split01__signin {
+    order: 2 !important;
+
+    width: 100% !important;
+
+    min-height: 0 !important;
+
+    overflow: visible !important;
+
+    padding:
+      44px
+      max(24px, env(safe-area-inset-right))
+      36px
+      max(24px, env(safe-area-inset-left)) !important;
+  }
+
+  .split01__signin-inner {
+    position: relative !important;
+
+    inset: auto !important;
+
+    width: min(550px, 100%) !important;
+    max-width: 550px !important;
+
+    margin:
+      0
+      auto !important;
+  }
+
+  /* Brand lockup */
+
+  .split01__signin-brand--v13 {
+    margin-bottom: 22px !important;
+  }
+
+  .split01__signin-brand--v13
+  .split01__brand-logo {
+    width: 190px !important;
+  }
+
+  .split01__brand-divider {
+    height: 31px !important;
+
+    margin-left: 14px !important;
+    margin-right: 13px !important;
+  }
+
+  .split01__product-name {
+    font-size: 16px !important;
+  }
+
+  .split01__product-kicker {
+    font-size: 7px !important;
+  }
+
+  /* Heading */
+
+  .split01__signin-heading {
+    margin-bottom: 22px !important;
+  }
+
+  .split01__signin-heading p {
+    min-height: 36px !important;
+
+    padding:
+      0
+      16px !important;
+
+    margin-bottom: 15px !important;
+
+    font-size: 12px !important;
+    line-height: 18px !important;
+
+    letter-spacing: .10em !important;
+  }
+
+  .split01__signin-heading h2 {
+    margin-bottom: 11px !important;
+
+    font-size: 34px !important;
+    line-height: 38px !important;
+  }
+
+  .split01__signin-heading span {
+    max-width: 500px !important;
+
+    margin-bottom: 0 !important;
+
+    font-size: 15px !important;
+    line-height: 23px !important;
+  }
+
+  .split01__desktop-break {
+    display: none !important;
+  }
+
+  /* Card */
+
+  .split01__form-card {
+    width: 100% !important;
+
+    min-height: 0 !important;
+
+    padding:
+      26px
+      24px
+      21px !important;
+
+    border-radius: 20px !important;
+  }
+
+  .split01-form__field {
+    margin-bottom: 17px !important;
+  }
+
+  .split01-form__control {
+    height: 54px !important;
+    min-height: 54px !important;
+  }
+
+  .split01-form__submit,
+  .split01-form__reset-submit {
+    height: 56px !important;
+    min-height: 56px !important;
+  }
+
+  .split01-form__eye {
+    width: 40px !important;
+    height: 40px !important;
+  }
+
+  .split01-form__forgot {
+    min-height: 28px !important;
+
+    display: inline-flex !important;
+    align-items: center !important;
+  }
+
+  .split01__access-note {
+    margin-top: 16px !important;
+    padding-top: 15px !important;
+  }
+
+  /* Tagline becomes document flow, no overlap */
+
+  .split01__tagline {
+    position: relative !important;
+
+    left: auto !important;
+    right: auto !important;
+    top: auto !important;
+    bottom: auto !important;
+
+    width: min(550px, 100%) !important;
+
+    margin:
+      26px
+      auto
+      0 !important;
+  }
+}
+
+
+/* --------------------------------------------------
+   MOBILE — <= 620px
+   Login-first UX.
+   -------------------------------------------------- */
+
+@media (max-width: 620px) {
+
+  html,
+  body {
+    width: 100% !important;
+    max-width: 100% !important;
+
+    margin: 0 !important;
+
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+  }
+
+  .page01-login-asset-root {
+    width: 100% !important;
+    min-height: 100dvh !important;
+  }
+
+  .page01-login-asset-root .split01 {
+    width: 100% !important;
+
+    min-height: 100dvh !important;
+    height: auto !important;
+
+    display: block !important;
+
+    overflow: visible !important;
+
+    background: #f7faff !important;
+  }
+
+  /*
+   * The desktop hero contains substantial text/UI detail
+   * that becomes unreadable on phones and pushes the
+   * actual login below the fold.
+   *
+   * Right panel already contains full SikhaDenge branding,
+   * so mobile intentionally becomes authentication-first.
+   */
+  .page01-login-asset-root
+  .split01__hero--approved-image {
+    display: none !important;
+  }
+
+  .split01__signin {
+    width: 100% !important;
+
+    min-height: 100dvh !important;
+
+    overflow: visible !important;
+
+    padding:
+      max(24px, env(safe-area-inset-top))
+      max(16px, env(safe-area-inset-right))
+      max(28px, env(safe-area-inset-bottom))
+      max(16px, env(safe-area-inset-left)) !important;
+
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .split01__signin::before {
+    width: 175px !important;
+    height: 175px !important;
+
+    right: -90px !important;
+    top: -86px !important;
+
+    opacity: .65 !important;
+  }
+
+  .split01__signin::after {
+    display: none !important;
+  }
+
+  .split01__orb--top {
+    width: 220px !important;
+    height: 220px !important;
+
+    top: -135px !important;
+    right: -78px !important;
+
+    opacity: .55 !important;
+  }
+
+  .split01__orb--bottom,
+  .split01__right-dots {
+    display: none !important;
+  }
+
+  .split01__signin-inner {
+    position: relative !important;
+
+    inset: auto !important;
+
+    width: 100% !important;
+    max-width: 520px !important;
+
+    margin:
+      0
+      auto !important;
+  }
+
+  /* ---------- Brand ---------- */
+
+  .split01__signin-brand--v13 {
+    margin-bottom: 20px !important;
+  }
+
+  .split01__brand-lockup {
+    min-height: 44px !important;
+  }
+
+  .split01__signin-brand--v13
+  .split01__brand-logo {
+    width: 158px !important;
+    max-height: 44px !important;
+  }
+
+  .split01__brand-divider {
+    height: 29px !important;
+
+    margin-left: 10px !important;
+    margin-right: 10px !important;
+  }
+
+  .split01__product-id {
+    gap: 3px !important;
+  }
+
+  .split01__product-name {
+    font-size: 15px !important;
+    line-height: 18px !important;
+  }
+
+  .split01__product-kicker {
+    font-size: 6.5px !important;
+    line-height: 9px !important;
+    letter-spacing: .13em !important;
+  }
+
+  /* ---------- Heading ---------- */
+
+  .split01__signin-heading {
+    margin:
+      0
+      0
+      20px !important;
+  }
+
+  .split01__signin-heading p {
+    min-height: 34px !important;
+
+    padding:
+      0
+      14px !important;
+
+    margin:
+      0
+      0
+      14px !important;
+
+    font-size: 11px !important;
+    line-height: 16px !important;
+
+    letter-spacing: .08em !important;
+  }
+
+  .split01__signin-heading h2 {
+    margin:
+      0
+      0
+      10px !important;
+
+    font-size: 32px !important;
+    line-height: 36px !important;
+
+    letter-spacing: -.035em !important;
+  }
+
+  .split01__signin-heading span {
+    display: block !important;
+
+    margin: 0 !important;
+
+    font-size: 14px !important;
+    line-height: 22px !important;
+
+    max-width: 100% !important;
+  }
+
+  .split01__desktop-break {
+    display: none !important;
+  }
+
+  /* ---------- Form card ---------- */
+
+  .split01__form-card {
+    width: 100% !important;
+
+    min-height: 0 !important;
+
+    margin: 0 !important;
+
+    padding:
+      21px
+      16px
+      18px !important;
+
+    border-radius: 18px !important;
+
+    box-shadow:
+      0 14px 34px rgba(45, 74, 135, .08),
+      0 3px 9px rgba(52, 82, 140, .035) !important;
+  }
+
+  .split01__form-card::before {
+    left: 16px !important;
+    right: 16px !important;
+  }
+
+  /* ---------- Fields ---------- */
+
+  .split01-form {
+    width: 100% !important;
+  }
+
+  .split01-form__field {
+    margin-bottom: 16px !important;
+  }
+
+  .split01-form__field > label,
+  .split01-form__label-row {
+    margin-bottom: 7px !important;
+  }
+
+  .split01-form__field > label,
+  .split01-form__label-row label {
+    font-size: 14px !important;
+    line-height: 20px !important;
+  }
+
+  .split01-form__label-row {
+    gap: 12px !important;
+  }
+
+  .split01-form__forgot {
+    min-height: 30px !important;
+
+    padding:
+      4px
+      0 !important;
+
+    display: inline-flex !important;
+    align-items: center !important;
+
+    font-size: 12.5px !important;
+    line-height: 18px !important;
+
+    white-space: nowrap !important;
+  }
+
+  /* 52px gives comfortable touch size without bloating */
+
+  .split01-form__control {
+    height: 52px !important;
+    min-height: 52px !important;
+
+    border-radius: 11px !important;
+  }
+
+  .split01-form__control > svg {
+    left: 15px !important;
+
+    width: 20px !important;
+    height: 20px !important;
+  }
+
+  /*
+   * 16px is intentional on phone:
+   * prevents unwanted browser text-field zoom.
+   */
+  .split01-form__control input {
+    height: 100% !important;
+
+    padding:
+      0
+      50px
+      0
+      47px !important;
+
+    font-size: 16px !important;
+    line-height: 20px !important;
+
+    border-radius: 11px !important;
+  }
+
+  .split01-form__eye {
+    right: 5px !important;
+
+    width: 44px !important;
+    height: 44px !important;
+
+    border-radius: 9px !important;
+  }
+
+  .split01-form__eye svg {
+    width: 20px !important;
+    height: 20px !important;
+  }
+
+  /* ---------- CTA ---------- */
+
+  .split01-form__submit,
+  .split01-form__reset-submit {
+    width: 100% !important;
+
+    height: 54px !important;
+    min-height: 54px !important;
+
+    margin-top: 0 !important;
+
+    border-radius: 11px !important;
+
+    font-size: 16px !important;
+    line-height: 22px !important;
+  }
+
+  /* ---------- Error / status ---------- */
+
+  .split01-form__error {
+    margin:
+      -4px
+      0
+      12px !important;
+
+    font-size: 12px !important;
+    line-height: 18px !important;
+  }
+
+  .split01-form__caps {
+    margin-top: 7px !important;
+
+    font-size: 11px !important;
+    line-height: 16px !important;
+  }
+
+  /*
+   * V16.2 intentionally removes duplicate
+   * "Protected sign-in" copy.
+   */
+  .split01-form__meta {
+    display: none !important;
+  }
+
+  /* ---------- Access footer ---------- */
+
+  .split01__access-note {
+    gap: 9px !important;
+
+    margin:
+      15px
+      0
+      0 !important;
+
+    padding:
+      14px
+      0
+      0 !important;
+
+    font-size: 11.5px !important;
+    line-height: 18px !important;
+  }
+
+  .split01__access-note svg {
+    width: 20px !important;
+    height: 20px !important;
+    flex-basis: 20px !important;
+  }
+
+  /*
+   * Marketing tagline is redundant on a phone login
+   * and costs useful vertical space.
+   */
+  .split01__tagline {
+    display: none !important;
+  }
+
+  /* ---------- Password reset mode ---------- */
+
+  .split01-form__reset-head {
+    grid-template-columns:
+      40px
+      minmax(0, 1fr) !important;
+
+    column-gap: 11px !important;
+
+    margin-bottom: 18px !important;
+  }
+
+  .split01-form__reset-icon {
+    width: 40px !important;
+    height: 40px !important;
+
+    border-radius: 11px !important;
+  }
+
+  .split01-form__reset-head h3 {
+    font-size: 17px !important;
+    line-height: 21px !important;
+  }
+
+  .split01-form__reset-head p {
+    font-size: 11.5px !important;
+    line-height: 17px !important;
+  }
+
+  .split01-form__back {
+    min-height: 36px !important;
+
+    padding:
+      8px
+      0 !important;
+  }
+}
+
+
+/* --------------------------------------------------
+   SMALL MOBILE — <= 390px
+   -------------------------------------------------- */
+
+@media (max-width: 390px) {
+
+  .split01__signin {
+    padding-left:
+      max(12px, env(safe-area-inset-left)) !important;
+
+    padding-right:
+      max(12px, env(safe-area-inset-right)) !important;
+
+    padding-top:
+      max(20px, env(safe-area-inset-top)) !important;
+
+    padding-bottom:
+      max(22px, env(safe-area-inset-bottom)) !important;
+  }
+
+  .split01__signin-brand--v13 {
+    margin-bottom: 17px !important;
+  }
+
+  .split01__signin-brand--v13
+  .split01__brand-logo {
+    width: 146px !important;
+  }
+
+  .split01__brand-divider {
+    height: 27px !important;
+
+    margin-left: 8px !important;
+    margin-right: 8px !important;
+  }
+
+  .split01__product-name {
+    font-size: 14px !important;
+  }
+
+  .split01__product-kicker {
+    font-size: 6px !important;
+  }
+
+  .split01__signin-heading p {
+    min-height: 32px !important;
+
+    padding:
+      0
+      12px !important;
+
+    margin-bottom:
+      12px !important;
+
+    font-size: 10.5px !important;
+  }
+
+  .split01__signin-heading h2 {
+    font-size: 30px !important;
+    line-height: 34px !important;
+  }
+
+  .split01__signin-heading span {
+    font-size: 13.5px !important;
+    line-height: 21px !important;
+  }
+
+  .split01__form-card {
+    padding:
+      19px
+      14px
+      16px !important;
+
+    border-radius:
+      16px !important;
+  }
+
+  .split01-form__label-row {
+    gap: 8px !important;
+  }
+
+  .split01-form__forgot {
+    font-size: 12px !important;
+  }
+
+  .split01__access-note {
+    font-size: 11px !important;
+  }
+}
+
+
+/* --------------------------------------------------
+   MOBILE LANDSCAPE / SHORT VIEWPORT
+   -------------------------------------------------- */
+
+@media (max-width: 900px) and (max-height: 560px) {
+
+  .page01-login-asset-root
+  .split01__hero--approved-image {
+    display: none !important;
+  }
+
+  .split01__signin {
+    min-height: 100dvh !important;
+  }
+}
+
+
+/* --------------------------------------------------
+   Accessibility
+   -------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+
+  .split01-form__submit,
+  .split01-form__reset-submit,
+  .split01-form__forgot,
+  .split01-form__eye,
+  .split01-form__back {
+    transition: none !important;
+  }
+}
+
+/* ===== V16.3 RESPONSIVE END ===== */
+
+/* ===== V16.4 CENTERING START ===== */
+
+/*
+ * Desktop >= 901px remains untouched except explicit
+ * tablet portrait / tablet-width rules below.
+ *
+ * Goal:
+ * - Phone: complete auth composition vertically centered.
+ * - Tablet portrait: compact hero + centered auth section.
+ * - Short screens: never clip controls.
+ */
+
+
+/* =====================================================
+   TABLET PORTRAIT / TABLET WIDTH
+   621px — 900px
+   ===================================================== */
+
+@media (min-width: 621px) and (max-width: 900px) {
+
+  .page01-login-asset-root .split01 {
+    display: flex !important;
+    flex-direction: column !important;
+
+    width: 100% !important;
+    min-height: 100dvh !important;
+    height: auto !important;
+
+    overflow: visible !important;
+  }
+
+  /*
+   * Full 1421/1107 hero at tablet width becomes ~600px tall.
+   * That's unnecessarily large for a login flow.
+   * Use a premium compact banner instead.
+   */
+  .page01-login-asset-root
+  .split01__hero--approved-image {
+    display: block !important;
+
+    width: 100% !important;
+    height: clamp(320px, 44vw, 400px) !important;
+    min-height: 320px !important;
+    max-height: 400px !important;
+
+    aspect-ratio: auto !important;
+
+    flex: 0 0 auto !important;
+
+    overflow: hidden !important;
+  }
+
+  .page01-login-asset-root
+  .split01__hero-approved-image {
+    width: 100% !important;
+    height: 100% !important;
+
+    object-fit: cover !important;
+    object-position: center 42% !important;
+  }
+
+  .split01__signin {
+    width: 100% !important;
+
+    min-height: 660px !important;
+
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+
+    padding:
+      42px
+      max(28px, env(safe-area-inset-right))
+      42px
+      max(28px, env(safe-area-inset-left)) !important;
+
+    overflow: visible !important;
+  }
+
+  .split01__signin-inner {
+    position: relative !important;
+
+    inset: auto !important;
+
+    width: min(550px, 100%) !important;
+    max-width: 550px !important;
+
+    margin:
+      auto
+      auto
+      0 !important;
+  }
+
+  .split01__signin-brand--v13 {
+    margin-bottom: 22px !important;
+  }
+
+  .split01__signin-heading {
+    margin-bottom: 22px !important;
+  }
+
+  .split01__signin-heading p {
+    margin-bottom: 14px !important;
+  }
+
+  .split01__signin-heading h2 {
+    font-size: 36px !important;
+    line-height: 40px !important;
+
+    margin-bottom: 10px !important;
+  }
+
+  .split01__signin-heading span {
+    font-size: 15px !important;
+    line-height: 23px !important;
+  }
+
+  .split01__form-card {
+    width: 100% !important;
+
+    min-height: 0 !important;
+
+    padding:
+      26px
+      24px
+      21px !important;
+
+    border-radius: 20px !important;
+  }
+
+  .split01__tagline {
+    position: relative !important;
+
+    inset: auto !important;
+
+    width: min(550px, 100%) !important;
+
+    margin:
+      25px
+      auto
+      auto !important;
+  }
+}
+
+
+/* =====================================================
+   PHONE
+   <= 620px
+   ===================================================== */
+
+@media (max-width: 620px) {
+
+  .page01-login-asset-root {
+    min-height: 100dvh !important;
+  }
+
+  .page01-login-asset-root .split01 {
+    width: 100% !important;
+
+    min-height: 100dvh !important;
+    height: auto !important;
+
+    overflow: visible !important;
+  }
+
+  /* Mobile remains authentication-first. */
+  .page01-login-asset-root
+  .split01__hero--approved-image {
+    display: none !important;
+  }
+
+  /*
+   * Critical V16.4 change:
+   * center the complete auth composition inside viewport.
+   */
+  .split01__signin {
+    width: 100% !important;
+
+    min-height: 100dvh !important;
+
+    display: flex !important;
+    flex-direction: column !important;
+
+    justify-content: center !important;
+    align-items: stretch !important;
+
+    padding-top:
+      max(20px, env(safe-area-inset-top)) !important;
+
+    padding-right:
+      max(16px, env(safe-area-inset-right)) !important;
+
+    padding-bottom:
+      max(20px, env(safe-area-inset-bottom)) !important;
+
+    padding-left:
+      max(16px, env(safe-area-inset-left)) !important;
+
+    overflow: visible !important;
+  }
+
+  .split01__signin-inner {
+    position: relative !important;
+
+    inset: auto !important;
+
+    flex: 0 0 auto !important;
+
+    width: 100% !important;
+    max-width: 520px !important;
+
+    margin:
+      auto
+      auto !important;
+  }
+
+  /*
+   * Keep horizontal alignment consistent.
+   * We center the composition — not every text label.
+   */
+  .split01__signin-brand,
+  .split01__signin-heading,
+  .split01__form-card {
+    width: 100% !important;
+  }
+
+  .split01__brand-lockup {
+    max-width: 100% !important;
+  }
+
+  .split01__signin-brand--v13 {
+    margin-bottom: 18px !important;
+  }
+
+  .split01__signin-heading {
+    margin-bottom: 19px !important;
+  }
+
+  .split01__signin-heading p {
+    margin-bottom: 13px !important;
+  }
+
+  .split01__signin-heading h2 {
+    margin-bottom: 9px !important;
+  }
+
+  .split01__signin-heading span {
+    line-height: 21px !important;
+  }
+
+  .split01__form-card {
+    margin:
+      0
+      auto !important;
+  }
+
+  /*
+   * Footer/tagline already unnecessary on phone.
+   * Keep hidden so the visual center is based on
+   * the actual login task.
+   */
+  .split01__tagline {
+    display: none !important;
+  }
+}
+
+
+/* =====================================================
+   NORMAL PHONE — extra visual balance
+   roughly 390×844 class devices
+   ===================================================== */
+
+@media (max-width: 620px) and (min-height: 700px) {
+
+  .split01__signin {
+    /*
+     * Slight optical adjustment:
+     * humans perceive blocks as lower because the card
+     * is visually heavier than the heading.
+     */
+    padding-top:
+      max(30px, env(safe-area-inset-top)) !important;
+
+    padding-bottom:
+      max(30px, env(safe-area-inset-bottom)) !important;
+  }
+}
+
+
+/* =====================================================
+   SHORT MOBILE / LANDSCAPE
+   Never force centering if content cannot fit.
+   ===================================================== */
+
+@media (max-width: 620px) and (max-height: 579px) {
+
+  .split01__signin {
+    justify-content: flex-start !important;
+
+    min-height: 100dvh !important;
+
+    padding-top:
+      max(16px, env(safe-area-inset-top)) !important;
+
+    padding-bottom:
+      max(18px, env(safe-area-inset-bottom)) !important;
+  }
+
+  .split01__signin-inner {
+    margin:
+      0
+      auto !important;
+  }
+
+  .split01__signin-brand--v13 {
+    margin-bottom: 14px !important;
+  }
+
+  .split01__signin-heading {
+    margin-bottom: 15px !important;
+  }
+
+  .split01__signin-heading p {
+    margin-bottom: 10px !important;
+  }
+
+  .split01__signin-heading h2 {
+    font-size: 28px !important;
+    line-height: 32px !important;
+
+    margin-bottom: 7px !important;
+  }
+
+  .split01__signin-heading span {
+    font-size: 13px !important;
+    line-height: 19px !important;
+  }
+
+  .split01__form-card {
+    padding-top: 18px !important;
+    padding-bottom: 15px !important;
+  }
+}
+
+
+/* =====================================================
+   SMALL PHONE <= 390px
+   ===================================================== */
+
+@media (max-width: 390px) {
+
+  .split01__signin {
+    padding-left:
+      max(12px, env(safe-area-inset-left)) !important;
+
+    padding-right:
+      max(12px, env(safe-area-inset-right)) !important;
+  }
+
+  .split01__signin-inner {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}
+
+
+/* ===== V16.4 CENTERING END ===== */
+
+/* ===== V16.5 TABLET START ===== */
+
+/*
+ * Tablet architecture:
+ *
+ * Phone       <= 620px       : V16.4 untouched.
+ * Tablet      621–1180px     : V16.5.
+ * Desktop     >= 1181px      : existing desktop untouched.
+ *
+ * Portrait and landscape intentionally use
+ * different compositions.
+ */
+
+
+/* =====================================================
+   TABLET PORTRAIT
+   621px — 1180px
+   ===================================================== */
+
+@media
+  (min-width: 621px)
+  and (max-width: 1180px)
+  and (orientation: portrait) {
+
+  html,
+  body {
+    width: 100% !important;
+    max-width: 100% !important;
+
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+  }
+
+  .page01-login-asset-root {
+    width: 100% !important;
+
+    min-height: 100dvh !important;
+
+    background:
+      linear-gradient(
+        180deg,
+        #05112f 0,
+        #07163b 32%,
+        #f7faff 32.1%,
+        #f7faff 100%
+      ) !important;
+  }
+
+  .page01-login-asset-root .split01 {
+    display: flex !important;
+    flex-direction: column !important;
+
+    width: 100% !important;
+
+    min-height: 100dvh !important;
+    height: auto !important;
+
+    overflow: visible !important;
+
+    background: transparent !important;
+  }
+
+
+  /* ---------------------------------------------
+     Portrait artwork:
+     preserve exact 1421:1107 ratio.
+     No cropping.
+     No stretched banner.
+     --------------------------------------------- */
+
+  .page01-login-asset-root
+  .split01__hero--approved-image {
+    position: relative !important;
+
+    display: block !important;
+
+    width:
+      min(
+        480px,
+        calc(100% - 64px)
+      ) !important;
+
+    height: auto !important;
+
+    min-height: 0 !important;
+    max-height: none !important;
+
+    aspect-ratio:
+      1421 / 1107 !important;
+
+    flex: none !important;
+
+    margin:
+      32px
+      auto
+      26px !important;
+
+    padding: 0 !important;
+
+    overflow: hidden !important;
+
+    border-radius: 24px !important;
+
+    background: #020b26 !important;
+
+    box-shadow:
+      0 28px 65px rgba(0, 16, 58, .28),
+      0 0 0 1px rgba(92, 140, 255, .18) !important;
+
+    isolation: isolate !important;
+  }
+
+  .page01-login-asset-root
+  .split01__hero-approved-image {
+    position: absolute !important;
+
+    inset: 0 !important;
+
+    width: 100% !important;
+    height: 100% !important;
+
+    max-width: none !important;
+    max-height: none !important;
+
+    object-fit: cover !important;
+    object-position: center center !important;
+
+    border-radius: inherit !important;
+
+    transform: none !important;
+  }
+
+
+  /* ---------------------------------------------
+     Authentication
+     --------------------------------------------- */
+
+  .split01__signin {
+    width: 100% !important;
+
+    min-height: 0 !important;
+
+    display: block !important;
+
+    padding:
+      8px
+      max(28px, env(safe-area-inset-right))
+      44px
+      max(28px, env(safe-area-inset-left)) !important;
+
+    overflow: visible !important;
+  }
+
+  .split01__signin-inner {
+    position: relative !important;
+
+    inset: auto !important;
+
+    width:
+      min(
+        550px,
+        100%
+      ) !important;
+
+    max-width: 550px !important;
+
+    margin:
+      0
+      auto !important;
+  }
+
+
+  /* Brand */
+
+  .split01__signin-brand--v13 {
+    margin-bottom: 21px !important;
+  }
+
+  .split01__signin-brand--v13
+  .split01__brand-logo {
+    width: 194px !important;
+    max-height: 50px !important;
+  }
+
+  .split01__brand-divider {
+    height: 31px !important;
+
+    margin-left: 14px !important;
+    margin-right: 13px !important;
+  }
+
+  .split01__product-name {
+    font-size: 17px !important;
+  }
+
+  .split01__product-kicker {
+    font-size: 7px !important;
+  }
+
+
+  /* Heading */
+
+  .split01__signin-heading {
+    margin:
+      0
+      0
+      22px !important;
+  }
+
+  .split01__signin-heading p {
+    min-height: 36px !important;
+
+    padding:
+      0
+      16px !important;
+
+    margin:
+      0
+      0
+      14px !important;
+
+    font-size: 12px !important;
+    line-height: 18px !important;
+
+    letter-spacing: .10em !important;
+  }
+
+  .split01__signin-heading h2 {
+    margin:
+      0
+      0
+      10px !important;
+
+    font-size: 36px !important;
+    line-height: 40px !important;
+
+    letter-spacing: -.035em !important;
+  }
+
+  .split01__signin-heading span {
+    display: block !important;
+
+    max-width: 520px !important;
+
+    margin: 0 !important;
+
+    font-size: 15px !important;
+    line-height: 23px !important;
+  }
+
+  .split01__desktop-break {
+    display: none !important;
+  }
+
+
+  /* Form */
+
+  .split01__form-card {
+    width: 100% !important;
+
+    min-height: 0 !important;
+
+    padding:
+      25px
+      24px
+      21px !important;
+
+    border-radius: 20px !important;
+  }
+
+  .split01-form__field {
+    margin-bottom: 17px !important;
+  }
+
+  .split01-form__field > label,
+  .split01-form__label-row {
+    margin-bottom: 8px !important;
+  }
+
+  .split01-form__control {
+    height: 54px !important;
+    min-height: 54px !important;
+
+    border-radius: 11px !important;
+  }
+
+  .split01-form__submit,
+  .split01-form__reset-submit {
+    height: 56px !important;
+    min-height: 56px !important;
+
+    border-radius: 11px !important;
+  }
+
+  .split01-form__eye {
+    width: 42px !important;
+    height: 42px !important;
+  }
+
+  .split01-form__forgot {
+    min-height: 30px !important;
+
+    display: inline-flex !important;
+    align-items: center !important;
+  }
+
+
+  /* Footer */
+
+  .split01__access-note {
+    margin-top: 16px !important;
+    padding-top: 15px !important;
+  }
+
+  .split01__tagline {
+    position: relative !important;
+
+    inset: auto !important;
+
+    width:
+      min(
+        550px,
+        100%
+      ) !important;
+
+    margin:
+      24px
+      auto
+      0 !important;
+
+    padding-bottom:
+      max(
+        4px,
+        env(safe-area-inset-bottom)
+      ) !important;
+  }
+}
+
+
+/* =====================================================
+   LARGE TABLET PORTRAIT
+   iPad Pro / 1024 portrait class
+   ===================================================== */
+
+@media
+  (min-width: 900px)
+  and (max-width: 1180px)
+  and (orientation: portrait) {
+
+  .page01-login-asset-root
+  .split01__hero--approved-image {
+    width: 510px !important;
+
+    margin-top: 38px !important;
+    margin-bottom: 30px !important;
+  }
+
+  .split01__signin {
+    padding-bottom: 52px !important;
+  }
+
+  .split01__signin-inner {
+    max-width: 570px !important;
+  }
+
+  .split01__tagline {
+    width: min(570px, 100%) !important;
+  }
+}
+
+
+/* =====================================================
+   TABLET LANDSCAPE
+   621px — 1180px
+   ===================================================== */
+
+@media
+  (min-width: 621px)
+  and (max-width: 1180px)
+  and (orientation: landscape) {
+
+  html,
+  body {
+    width: 100% !important;
+    height: 100% !important;
+
+    overflow-x: hidden !important;
+  }
+
+  .page01-login-asset-root {
+    width: 100% !important;
+
+    min-height: 100dvh !important;
+  }
+
+  .page01-login-asset-root .split01 {
+    width: 100% !important;
+
+    min-height: 100dvh !important;
+    height: auto !important;
+
+    display: grid !important;
+
+    grid-template-columns:
+      minmax(330px, 44%)
+      minmax(0, 56%) !important;
+
+    overflow: hidden !important;
+  }
+
+
+  /* ---------------------------------------------
+     Left landscape tablet visual
+     --------------------------------------------- */
+
+  .page01-login-asset-root
+  .split01__hero--approved-image {
+    position: relative !important;
+
+    display: grid !important;
+    place-items: center !important;
+
+    width: 100% !important;
+
+    min-height: 100dvh !important;
+    height: 100dvh !important;
+
+    aspect-ratio: auto !important;
+
+    margin: 0 !important;
+
+    padding:
+      28px
+      22px !important;
+
+    overflow: hidden !important;
+
+    border-radius: 0 !important;
+
+    background:
+      radial-gradient(
+        circle at 40% 35%,
+        rgba(34, 81, 255, .20),
+        transparent 38%
+      ),
+      #020b26 !important;
+  }
+
+  .page01-login-asset-root
+  .split01__hero-approved-image {
+    position: relative !important;
+
+    inset: auto !important;
+
+    display: block !important;
+
+    width: 100% !important;
+    height: auto !important;
+
+    max-width: 510px !important;
+    max-height:
+      calc(100dvh - 72px) !important;
+
+    aspect-ratio:
+      1421 / 1107 !important;
+
+    object-fit: contain !important;
+    object-position: center !important;
+
+    border-radius: 22px !important;
+
+    box-shadow:
+      0 30px 70px rgba(0,0,0,.30),
+      0 0 0 1px rgba(78,135,255,.16) !important;
+
+    transform: none !important;
+  }
+
+
+  /* ---------------------------------------------
+     Right landscape tablet authentication
+     --------------------------------------------- */
+
+  .split01__signin {
+    width: 100% !important;
+
+    min-width: 0 !important;
+
+    min-height: 100dvh !important;
+
+    display: flex !important;
+    align-items: center !important;
+
+    padding:
+      28px
+      max(30px, env(safe-area-inset-right))
+      28px
+      max(30px, env(safe-area-inset-left)) !important;
+
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+  }
+
+  .split01__signin-inner {
+    position: relative !important;
+
+    inset: auto !important;
+
+    width:
+      min(
+        520px,
+        100%
+      ) !important;
+
+    max-width: 520px !important;
+
+    margin:
+      auto !important;
+  }
+
+
+  /* Brand */
+
+  .split01__signin-brand--v13 {
+    margin-bottom: 17px !important;
+  }
+
+  .split01__signin-brand--v13
+  .split01__brand-logo {
+    width: 180px !important;
+  }
+
+  .split01__brand-divider {
+    height: 29px !important;
+
+    margin-left: 12px !important;
+    margin-right: 11px !important;
+  }
+
+  .split01__product-name {
+    font-size: 16px !important;
+  }
+
+
+  /* Heading */
+
+  .split01__signin-heading {
+    margin-bottom: 17px !important;
+  }
+
+  .split01__signin-heading p {
+    min-height: 32px !important;
+
+    padding:
+      0
+      13px !important;
+
+    margin-bottom: 10px !important;
+
+    font-size: 11px !important;
+  }
+
+  .split01__signin-heading h2 {
+    margin-bottom: 8px !important;
+
+    font-size: 31px !important;
+    line-height: 35px !important;
+  }
+
+  .split01__signin-heading span {
+    font-size: 13.5px !important;
+    line-height: 20px !important;
+  }
+
+
+  /* Form */
+
+  .split01__form-card {
+    min-height: 0 !important;
+
+    padding:
+      21px
+      20px
+      17px !important;
+
+    border-radius: 18px !important;
+  }
+
+  .split01-form__field {
+    margin-bottom: 14px !important;
+  }
+
+  .split01-form__control {
+    height: 50px !important;
+    min-height: 50px !important;
+  }
+
+  .split01-form__submit,
+  .split01-form__reset-submit {
+    height: 52px !important;
+    min-height: 52px !important;
+  }
+
+  .split01__access-note {
+    margin-top: 13px !important;
+    padding-top: 12px !important;
+  }
+
+
+  /*
+   * Landscape tablet does not need the extra tagline:
+   * save vertical space.
+   */
+  .split01__tagline {
+    display: none !important;
+  }
+}
+
+
+/* =====================================================
+   SHORT TABLET LANDSCAPE
+   1024×600 / smaller-height devices
+   ===================================================== */
+
+@media
+  (min-width: 621px)
+  and (max-width: 1180px)
+  and (orientation: landscape)
+  and (max-height: 700px) {
+
+  .split01__signin {
+    align-items: flex-start !important;
+
+    padding-top:
+      max(18px, env(safe-area-inset-top)) !important;
+
+    padding-bottom:
+      max(18px, env(safe-area-inset-bottom)) !important;
+  }
+
+  .split01__signin-inner {
+    margin:
+      0
+      auto !important;
+  }
+
+  .split01__signin-brand--v13 {
+    margin-bottom: 12px !important;
+  }
+
+  .split01__signin-heading {
+    margin-bottom: 13px !important;
+  }
+
+  .split01__signin-heading p {
+    margin-bottom: 8px !important;
+  }
+
+  .split01__signin-heading h2 {
+    font-size: 28px !important;
+    line-height: 32px !important;
+
+    margin-bottom: 6px !important;
+  }
+
+  .split01__signin-heading span {
+    font-size: 13px !important;
+    line-height: 18px !important;
+  }
+
+  .split01__form-card {
+    padding-top: 17px !important;
+    padding-bottom: 14px !important;
+  }
+
+  .split01-form__field {
+    margin-bottom: 11px !important;
+  }
+
+  .split01-form__control {
+    height: 48px !important;
+    min-height: 48px !important;
+  }
+
+  .split01-form__submit,
+  .split01-form__reset-submit {
+    height: 50px !important;
+    min-height: 50px !important;
+  }
+}
+
+
+/*
+ * Important:
+ * these selectors deliberately start at 621px.
+ * Existing V16.4 phone CSS remains authoritative.
+ */
+
+/* ===== V16.5 TABLET END ===== */
+
+/* ===== V16.6 FLUID DESKTOP START ===== */
+
+/*
+ * Desktop system starts strictly above tablet architecture.
+ *
+ * Target consistency:
+ * 1366×768
+ * 1440×900
+ * 1536×864
+ * 1600×900
+ * 1920×1080
+ * 2560×1440
+ * 3440×1440 ultrawide
+ *
+ * We preserve the same visual hierarchy rather than
+ * scaling everything blindly with viewport width.
+ */
+
+@media (min-width: 1181px) {
+
+  html,
+  body {
+    width: 100%;
+    height: 100%;
+    min-height: 100%;
+
+    overflow: hidden !important;
+  }
+
+  .page01-login-asset-root {
+    width: 100% !important;
+    height: 100dvh !important;
+    min-height: 650px !important;
+  }
+
+  /* ==================================================
+     MAIN DESKTOP SPLIT
+     ================================================== */
+
+  .page01-login-asset-root .split01 {
+    width: 100% !important;
+    height: 100dvh !important;
+    min-height: 650px !important;
+
+    display: grid !important;
+
+    /*
+     * Stable product-story/auth relationship.
+     * minmax prevents either side collapsing.
+     */
+    grid-template-columns:
+      minmax(0, 58.15%)
+      minmax(430px, 41.85%) !important;
+
+    overflow: hidden !important;
+  }
+
+
+  /* ==================================================
+     LEFT ARTWORK
+     ================================================== */
+
+  .page01-login-asset-root
+  .split01__hero--approved-image {
+    position: relative !important;
+
+    width: 100% !important;
+    height: 100dvh !important;
+
+    min-width: 0 !important;
+    min-height: 650px !important;
+
+    padding: 0 !important;
+
+    overflow: hidden !important;
+
+    background: #020b26 !important;
+  }
+
+  .page01-login-asset-root
+  .split01__hero-approved-image {
+    position: absolute !important;
+
+    inset: 0 !important;
+
+    width: 100% !important;
+    height: 100% !important;
+
+    max-width: none !important;
+    max-height: none !important;
+
+    object-fit: cover !important;
+
+    /*
+     * Keep important text/dashboard region inside
+     * the visible safe area across desktop ratios.
+     */
+    object-position:
+      center center !important;
+
+    transform: none !important;
+    filter: none !important;
+  }
+
+
+  /* ==================================================
+     RIGHT AUTH SECTION
+     Remove fragile top/left percentage positioning.
+     ================================================== */
+
+  .split01__signin {
+    position: relative !important;
+
+    width: 100% !important;
+    height: 100dvh !important;
+
+    min-width: 0 !important;
+    min-height: 650px !important;
+
+    display: grid !important;
+    place-items: center !important;
+
+    padding:
+      clamp(28px, 4vh, 56px)
+      clamp(34px, 3.4vw, 72px) !important;
+
+    overflow: hidden !important;
+  }
+
+
+  .split01__signin-inner {
+    position: relative !important;
+
+    inset: auto !important;
+
+    /*
+     * Same usable width on laptop and large monitors.
+     * Large screens get breathing room rather than
+     * an oversized login form.
+     */
+    width:
+      min(
+        100%,
+        clamp(470px, 30vw, 550px)
+      ) !important;
+
+    max-width: 550px !important;
+
+    margin: 0 auto !important;
+
+    transform: none !important;
+  }
+
+
+  /* ==================================================
+     BRAND LOCKUP
+     ================================================== */
+
+  .split01__signin-brand--v13 {
+    margin-bottom:
+      clamp(18px, 2.4vh, 27px) !important;
+  }
+
+  .split01__signin-brand--v13
+  .split01__brand-logo {
+    width:
+      clamp(
+        184px,
+        12vw,
+        214px
+      ) !important;
+
+    max-height: 54px !important;
+  }
+
+  .split01__brand-divider {
+    height:
+      clamp(
+        30px,
+        3.3vh,
+        35px
+      ) !important;
+
+    margin-left:
+      clamp(13px, 1vw, 18px) !important;
+
+    margin-right:
+      clamp(12px, .9vw, 16px) !important;
+  }
+
+  .split01__product-name {
+    font-size:
+      clamp(
+        16px,
+        1.05vw,
+        18px
+      ) !important;
+  }
+
+  .split01__product-kicker {
+    font-size:
+      clamp(
+        7px,
+        .47vw,
+        8px
+      ) !important;
+  }
+
+
+  /* ==================================================
+     HEADING
+     ================================================== */
+
+  .split01__signin-heading {
+    margin:
+      0
+      0
+      clamp(18px, 2.3vh, 24px)
+      0 !important;
+  }
+
+  .split01__signin-heading p {
+    min-height:
+      clamp(
+        34px,
+        3.8vh,
+        38px
+      ) !important;
+
+    padding:
+      0
+      clamp(14px, 1.2vw, 18px) !important;
+
+    margin:
+      0
+      0
+      clamp(11px, 1.5vh, 15px)
+      0 !important;
+
+    font-size:
+      clamp(
+        11px,
+        .72vw,
+        13px
+      ) !important;
+
+    line-height: 18px !important;
+
+    letter-spacing: .10em !important;
+  }
+
+  .split01__signin-heading h2 {
+    margin:
+      0
+      0
+      clamp(9px, 1.1vh, 12px)
+      0 !important;
+
+    /*
+     * User-approved reference:
+     * standard view resolves around 36/40.
+     */
+    font-size:
+      clamp(
+        32px,
+        2.15vw,
+        38px
+      ) !important;
+
+    line-height:
+      clamp(
+        36px,
+        2.45vw,
+        42px
+      ) !important;
+
+    letter-spacing: -.035em !important;
+  }
+
+  .split01__signin-heading span {
+    max-width: 520px !important;
+
+    margin: 0 !important;
+
+    font-size:
+      clamp(
+        14px,
+        .92vw,
+        16px
+      ) !important;
+
+    line-height:
+      clamp(
+        21px,
+        1.42vw,
+        24px
+      ) !important;
+  }
+
+
+  /* ==================================================
+     FORM CARD
+     ================================================== */
+
+  .split01__form-card {
+    width: 100% !important;
+
+    min-height: 0 !important;
+
+    padding:
+      clamp(22px, 2.8vh, 27px)
+      clamp(23px, 1.8vw, 29px)
+      clamp(18px, 2.1vh, 22px) !important;
+
+    border-radius:
+      clamp(
+        17px,
+        1.25vw,
+        22px
+      ) !important;
+  }
+
+
+  /* ==================================================
+     FORM RHYTHM
+     ================================================== */
+
+  .split01-form__field {
+    margin-bottom:
+      clamp(
+        15px,
+        1.9vh,
+        18px
+      ) !important;
+  }
+
+  .split01-form__field > label,
+  .split01-form__label-row {
+    margin-bottom: 8px !important;
+  }
+
+  .split01-form__field > label,
+  .split01-form__label-row label {
+    font-size:
+      clamp(
+        13px,
+        .82vw,
+        15px
+      ) !important;
+  }
+
+  .split01-form__forgot {
+    font-size:
+      clamp(
+        12px,
+        .72vw,
+        13px
+      ) !important;
+  }
+
+
+  /* ==================================================
+     INPUTS
+     Stable size across desktops.
+     ================================================== */
+
+  .split01-form__control {
+    height:
+      clamp(
+        51px,
+        5.4vh,
+        55px
+      ) !important;
+
+    min-height:
+      clamp(
+        51px,
+        5.4vh,
+        55px
+      ) !important;
+
+    border-radius:
+      clamp(
+        9px,
+        .65vw,
+        11px
+      ) !important;
+  }
+
+  .split01-form__control input {
+    font-size:
+      clamp(
+        14px,
+        .9vw,
+        16px
+      ) !important;
+  }
+
+  .split01-form__eye {
+    width:
+      clamp(
+        36px,
+        3.7vh,
+        40px
+      ) !important;
+
+    height:
+      clamp(
+        36px,
+        3.7vh,
+        40px
+      ) !important;
+  }
+
+
+  /* ==================================================
+     SIGN IN
+     ================================================== */
+
+  .split01-form__submit,
+  .split01-form__reset-submit {
+    height:
+      clamp(
+        52px,
+        5.6vh,
+        57px
+      ) !important;
+
+    min-height:
+      clamp(
+        52px,
+        5.6vh,
+        57px
+      ) !important;
+
+    border-radius:
+      clamp(
+        9px,
+        .65vw,
+        11px
+      ) !important;
+
+    font-size:
+      clamp(
+        15px,
+        .95vw,
+        17px
+      ) !important;
+  }
+
+
+  /* ==================================================
+     AUTH FOOTER
+     ================================================== */
+
+  .split01__access-note {
+    margin-top:
+      clamp(
+        13px,
+        1.7vh,
+        17px
+      ) !important;
+
+    padding-top:
+      clamp(
+        12px,
+        1.5vh,
+        15px
+      ) !important;
+
+    font-size:
+      clamp(
+        11px,
+        .72vw,
+        12.5px
+      ) !important;
+  }
+
+
+  /* ==================================================
+     BOTTOM TAGLINE
+     Align to same auth-column width.
+     ================================================== */
+
+  .split01__tagline {
+    position: absolute !important;
+
+    z-index: 4 !important;
+
+    left: 50% !important;
+    right: auto !important;
+
+    bottom:
+      clamp(
+        24px,
+        4.6vh,
+        52px
+      ) !important;
+
+    width:
+      min(
+        calc(100% - 68px),
+        550px
+      ) !important;
+
+    margin: 0 !important;
+
+    transform:
+      translateX(-50%) !important;
+
+    font-size:
+      clamp(
+        11px,
+        .72vw,
+        13px
+      ) !important;
+  }
+}
+
+
+/* =====================================================
+   COMPACT DESKTOP
+   1181–1439px
+   ===================================================== */
+
+@media
+  (min-width: 1181px)
+  and (max-width: 1439px) {
+
+  .page01-login-asset-root .split01 {
+    grid-template-columns:
+      minmax(0, 57%)
+      minmax(440px, 43%) !important;
+  }
+
+  .split01__signin {
+    padding-left:
+      clamp(30px, 3vw, 46px) !important;
+
+    padding-right:
+      clamp(30px, 3vw, 46px) !important;
+  }
+
+  .split01__signin-inner {
+    width:
+      min(
+        100%,
+        500px
+      ) !important;
+  }
+
+  .split01__tagline {
+    width:
+      min(
+        calc(100% - 60px),
+        500px
+      ) !important;
+  }
+}
+
+
+/* =====================================================
+   STANDARD DESKTOP
+   1440–1919px
+   This is the visual reference range.
+   ===================================================== */
+
+@media
+  (min-width: 1440px)
+  and (max-width: 1919px) {
+
+  .page01-login-asset-root .split01 {
+    grid-template-columns:
+      minmax(0, 58.15%)
+      minmax(0, 41.85%) !important;
+  }
+
+  .split01__signin-inner {
+    max-width: 535px !important;
+  }
+
+  .split01__tagline {
+    max-width: 535px !important;
+  }
+}
+
+
+/* =====================================================
+   LARGE DESKTOP
+   >=1920px
+   Do not allow UI to become oversized.
+   ===================================================== */
+
+@media (min-width: 1920px) {
+
+  .split01__signin-inner {
+    width: 535px !important;
+    max-width: 535px !important;
+  }
+
+  .split01__tagline {
+    width: 535px !important;
+    max-width: 535px !important;
+  }
+}
+
+
+/* =====================================================
+   ULTRAWIDE
+   >=2560px
+   Preserve same readable scale and composition.
+   ===================================================== */
+
+@media (min-width: 2560px) {
+
+  .page01-login-asset-root .split01 {
+    /*
+     * Don't let the right panel become absurdly wide.
+     * Left story absorbs additional screen width.
+     */
+    grid-template-columns:
+      minmax(0, 1fr)
+      clamp(640px, 34vw, 820px) !important;
+  }
+
+  .split01__signin {
+    padding-left: 52px !important;
+    padding-right: 52px !important;
+  }
+}
+
+
+/* =====================================================
+   SHORT DESKTOP HEIGHT
+   e.g. 1366×768 / 1440×768
+   ===================================================== */
+
+@media
+  (min-width: 1181px)
+  and (max-height: 800px) {
+
+  .split01__signin {
+    padding-top: 22px !important;
+    padding-bottom: 22px !important;
+  }
+
+  .split01__signin-brand--v13 {
+    margin-bottom: 15px !important;
+  }
+
+  .split01__signin-heading {
+    margin-bottom: 15px !important;
+  }
+
+  .split01__signin-heading p {
+    min-height: 32px !important;
+    margin-bottom: 8px !important;
+  }
+
+  .split01__signin-heading h2 {
+    font-size: 31px !important;
+    line-height: 35px !important;
+
+    margin-bottom: 7px !important;
+  }
+
+  .split01__signin-heading span {
+    font-size: 13.5px !important;
+    line-height: 19px !important;
+  }
+
+  .split01__form-card {
+    padding-top: 19px !important;
+    padding-bottom: 15px !important;
+  }
+
+  .split01-form__field {
+    margin-bottom: 12px !important;
+  }
+
+  .split01-form__control {
+    height: 49px !important;
+    min-height: 49px !important;
+  }
+
+  .split01-form__submit,
+  .split01-form__reset-submit {
+    height: 50px !important;
+    min-height: 50px !important;
+  }
+
+  .split01__access-note {
+    margin-top: 11px !important;
+    padding-top: 10px !important;
+  }
+
+  .split01__tagline {
+    bottom: 18px !important;
+  }
+}
+
+
+/* =====================================================
+   TALL DESKTOP
+   Avoid content floating too high.
+   ===================================================== */
+
+@media
+  (min-width: 1181px)
+  and (min-height: 1200px) {
+
+  .split01__signin-inner {
+    transform:
+      translateY(-1.5vh) !important;
+  }
+}
+
+
+/* ===== V16.6 FLUID DESKTOP END ===== */
+
+/* ===== V16.7 DESKTOP ARTWORK START ===== */
+
+/*
+ * Desktop LEFT artwork fix.
+ *
+ * Approved artwork:
+ * 1421 × 1107
+ * aspect ratio ≈ 1.28365
+ *
+ * Desktop panels can become much taller/narrower
+ * than that artwork. `cover` therefore cuts the
+ * logo, headline and dashboard.
+ *
+ * V16.7 keeps the ENTIRE artwork visible.
+ *
+ * Tablet <=1180px and mobile <=620px remain
+ * controlled by V16.5 / V16.4.
+ */
+
+@media (min-width: 1181px) {
+
+  /* -----------------------------------------------
+     LEFT PANEL
+     ----------------------------------------------- */
+
+  .page01-login-asset-root
+  .split01__hero--approved-image {
+
+    position: relative !important;
+
+    display: grid !important;
+    place-items: center !important;
+
+    width: 100% !important;
+    height: 100dvh !important;
+
+    min-width: 0 !important;
+    min-height: 650px !important;
+
+    padding: 0 !important;
+
+    overflow: hidden !important;
+
+    background:
+      radial-gradient(
+        circle at 50% 45%,
+        rgba(18, 71, 210, .12),
+        transparent 62%
+      ),
+      #020b26 !important;
+
+    isolation: isolate !important;
+  }
+
+
+  /* -----------------------------------------------
+     FULL APPROVED ARTWORK
+     ----------------------------------------------- */
+
+  .page01-login-asset-root
+  .split01__hero-approved-image {
+
+    /*
+     * Cancel V16.6 absolute full-panel stretching.
+     */
+    position: relative !important;
+
+    inset: auto !important;
+
+    display: block !important;
+
+    /*
+     * 128.365dvh corresponds to the native
+     * 1421/1107 image ratio at viewport height.
+     *
+     * min() ensures it never exceeds the panel.
+     */
+    width:
+      min(
+        100%,
+        128.365dvh
+      ) !important;
+
+    height: auto !important;
+
+    max-width: 100% !important;
+    max-height: 100dvh !important;
+
+    aspect-ratio:
+      1421 / 1107 !important;
+
+    object-fit: contain !important;
+    object-position: center center !important;
+
+    margin: 0 auto !important;
+
+    border: 0 !important;
+    border-radius: 0 !important;
+
+    transform: none !important;
+    filter: none !important;
+
+    image-rendering: auto !important;
+
+    pointer-events: none !important;
+    user-select: none !important;
+  }
+
+
+  /*
+   * No duplicate DOM logo.
+   * Artwork already contains approved branding.
+   */
+  .page01-login-asset-root
+  .split01__brand--approved-image {
+    display: none !important;
+  }
+}
+
+
+/* =====================================================
+   SHORT DESKTOP
+   1366×768 / similar laptop displays
+
+   Width is the limiting dimension, so keep the artwork
+   centered vertically without cropping.
+   ===================================================== */
+
+@media
+  (min-width: 1181px)
+  and (max-height: 800px) {
+
+  .page01-login-asset-root
+  .split01__hero--approved-image {
+    align-items: center !important;
+  }
+
+  .page01-login-asset-root
+  .split01__hero-approved-image {
+    width: 100% !important;
+    height: auto !important;
+
+    max-height: 100% !important;
+
+    object-fit: contain !important;
+    object-position: center center !important;
+  }
+}
+
+
+/* =====================================================
+   TALL / 16:10 DESKTOP
+   MacBook-style displays
+
+   Prevent any return to cover cropping.
+   ===================================================== */
+
+@media
+  (min-width: 1181px)
+  and (min-aspect-ratio: 4/5)
+  and (max-aspect-ratio: 17/10) {
+
+  .page01-login-asset-root
+  .split01__hero-approved-image {
+
+    width: 100% !important;
+    height: auto !important;
+
+    object-fit: contain !important;
+    object-position: center center !important;
+  }
+}
+
+
+/* =====================================================
+   LARGE DESKTOP / QHD / 4K
+   Avoid uncontrolled image upscaling.
+   ===================================================== */
+
+@media (min-width: 1920px) {
+
+  .page01-login-asset-root
+  .split01__hero-approved-image {
+
+    width:
+      min(
+        100%,
+        1380px
+      ) !important;
+
+    height: auto !important;
+
+    object-fit: contain !important;
+  }
+}
+
+
+/* =====================================================
+   ULTRAWIDE
+   Keep artwork readable rather than stretching.
+   ===================================================== */
+
+@media (min-width: 2560px) {
+
+  .page01-login-asset-root
+  .split01__hero-approved-image {
+
+    width:
+      min(
+        100%,
+        1421px
+      ) !important;
+
+    height: auto !important;
+  }
+}
+
+
+/* ===== V16.7 DESKTOP ARTWORK END ===== */
+
+/* ===== V17.1 SEAM FIX START ===== */
+/*
+  Fixes the dark/black vertical seam between left hero and right form.
+  Cause: sub-pixel rounding / background bleed at split boundary.
+*/
+
+@media (min-width: 621px) {
+
+  /* Main split wrapper: never allow visual gap */
+  .page01-login-asset-root,
+  .page01-login-root,
+  .split01,
+  .split01__layout,
+  .split01__shell,
+  .split01__frame {
+    gap: 0 !important;
+    column-gap: 0 !important;
+    row-gap: 0 !important;
+    overflow: hidden !important;
+    background: #f7fbff !important;
+  }
+
+  /* Left visual side */
+  .split01__visual,
+  .split01__media,
+  .split01__left,
+  .page01-hero-v17-shell,
+  .page01-hero-v17-picture {
+    position: relative !important;
+    z-index: 1 !important;
+    margin-right: -2px !important;
+    border-right: 0 !important;
+    box-shadow: none !important;
+    overflow: hidden !important;
+    background: #f7fbff !important;
+  }
+
+  /* Right form side */
+  .split01__signin,
+  .split01__auth,
+  .split01__right,
+  .split01__content,
+  .split01__panel {
+    position: relative !important;
+    z-index: 3 !important;
+    margin-left: -2px !important;
+    border-left: 0 !important;
+    box-shadow: none !important;
+    background: #f7fbff !important;
+    background-clip: padding-box !important;
+  }
+
+  /* Paint over any 1px seam from rounding */
+  .split01__signin::before,
+  .split01__auth::before,
+  .split01__right::before,
+  .split01__content::before,
+  .split01__panel::before {
+    content: "" !important;
+    position: absolute !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    left: -4px !important;
+    width: 8px !important;
+    background: #f7fbff !important;
+    pointer-events: none !important;
+    z-index: 2 !important;
+  }
+}
+/* ===== V17.1 SEAM FIX END ===== */

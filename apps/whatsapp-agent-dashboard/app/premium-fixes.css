@@ -1,0 +1,251 @@
+:root {
+  --sd-brand-blue: #1d4ed8;
+  --sd-brand-cyan: #0891b2;
+  --sd-brand-teal: #0f9f8f;
+  --sd-brand-gold: #f59e0b;
+  --sd-brand-violet: #7c3aed;
+  --sd-ink-strong: #08152f;
+  --sd-ink-soft: #405a78;
+  --sd-canvas-strong: #edf3ff;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 12% 4%, rgba(37, 99, 235, 0.16), transparent 28%),
+    radial-gradient(circle at 88% 8%, rgba(8, 145, 178, 0.13), transparent 25%),
+    radial-gradient(circle at 72% 100%, rgba(124, 58, 237, 0.07), transparent 30%),
+    linear-gradient(145deg, #f7faff 0%, var(--sd-canvas-strong) 48%, #f5f9ff 100%);
+}
+
+.dashboard-shell {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspace {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  align-content: stretch;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.12), transparent 42%);
+}
+
+.topbar {
+  margin-bottom: 14px;
+}
+
+.metric-row {
+  margin-bottom: 14px;
+}
+
+.metric-card {
+  border-color: rgba(99, 122, 167, 0.22);
+}
+
+.metric-card:nth-child(1) {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(37, 99, 235, 0.13), transparent 42%),
+    linear-gradient(145deg, #ffffff, #f3f7ff);
+}
+
+.metric-card:nth-child(2) {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(15, 159, 143, 0.14), transparent 42%),
+    linear-gradient(145deg, #ffffff, #effcf9);
+}
+
+.metric-card:nth-child(3) {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(245, 158, 11, 0.14), transparent 42%),
+    linear-gradient(145deg, #ffffff, #fff8ec);
+}
+
+.metric-card:nth-child(4) {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(124, 58, 237, 0.13), transparent 42%),
+    linear-gradient(145deg, #ffffff, #f6f2ff);
+}
+
+.metric-card span {
+  color: #4a6484;
+}
+
+.metric-card small {
+  color: #617895;
+}
+
+.inbox-grid {
+  height: auto !important;
+  min-height: 0 !important;
+  align-self: stretch;
+  overflow: hidden;
+  border-color: rgba(92, 119, 166, 0.24);
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow:
+    0 28px 70px rgba(15, 35, 75, 0.14),
+    0 5px 18px rgba(37, 99, 235, 0.07),
+    inset 0 1px 0 #ffffff;
+}
+
+.conversation-panel,
+.chat-panel,
+.details-panel {
+  min-height: 0;
+}
+
+.conversation-panel,
+.details-panel {
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+}
+
+.chat-panel {
+  min-height: 0;
+  overflow: hidden;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  background: #f8fbff;
+}
+
+.panel-heading,
+.chat-header {
+  border-bottom-color: rgba(110, 137, 181, 0.2);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.055), transparent 42%),
+    linear-gradient(145deg, #ffffff, #f6f9ff);
+}
+
+.context-strip {
+  border-bottom-color: rgba(110, 137, 181, 0.18);
+  background: #fcfdff;
+}
+
+.context-strip span {
+  border: 1px solid rgba(122, 146, 184, 0.14);
+  background: #f2f6fc;
+  color: #3f5875;
+}
+
+.message-area {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background-color: #f8fbff;
+  background-image:
+    radial-gradient(rgba(91, 130, 184, 0.22) 0.7px, transparent 0.7px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(239, 246, 255, 0.3));
+  background-size: 16px 16px, auto;
+}
+
+.composer {
+  position: relative;
+  z-index: 8;
+  flex: 0 0 auto;
+  min-height: 72px;
+  padding: 11px 14px;
+  border-top: 1px solid rgba(96, 124, 169, 0.22);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(37, 99, 235, 0.055), transparent 44%),
+    linear-gradient(180deg, #ffffff, #f7faff);
+  box-shadow: 0 -12px 32px rgba(15, 35, 75, 0.08);
+}
+
+.composer textarea {
+  min-height: 50px;
+  max-height: 96px;
+  border-color: rgba(86, 116, 165, 0.22);
+  background: #ffffff;
+  color: var(--sd-ink-strong);
+  box-shadow: inset 0 1px 3px rgba(15, 23, 42, 0.035);
+}
+
+.composer textarea::placeholder {
+  color: #7287a2;
+}
+
+.send-button {
+  min-width: 74px;
+  min-height: 46px;
+}
+
+.search-box {
+  border-color: rgba(72, 116, 183, 0.24);
+  background: linear-gradient(145deg, #ffffff, #eff5ff);
+}
+
+.filter-tabs button {
+  color: #536b89;
+}
+
+.filter-tabs button.active {
+  color: var(--sd-brand-blue);
+}
+
+.system-status {
+  color: #047857;
+  background: linear-gradient(145deg, #f0fff8, #dcfce7);
+}
+
+.secondary-button {
+  color: #294666;
+  background: linear-gradient(145deg, #ffffff, #edf4ff);
+}
+
+@media (max-height: 760px) and (min-width: 1101px) {
+  .workspace {
+    padding-top: 14px;
+    padding-bottom: 14px;
+  }
+
+  .topbar {
+    min-height: 64px;
+    margin-bottom: 10px;
+  }
+
+  .metric-row {
+    margin-bottom: 10px;
+  }
+
+  .metric-card {
+    min-height: 96px;
+    padding-top: 13px;
+    padding-bottom: 12px;
+  }
+
+  .metric-card::before {
+    top: 17px;
+  }
+
+  .metric-card::after {
+    top: 26px;
+  }
+}
+
+@media (max-width: 1100px) {
+  body {
+    overflow: auto;
+  }
+
+  .dashboard-shell,
+  .workspace {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  .workspace {
+    display: block;
+  }
+
+  .inbox-grid {
+    min-height: 590px !important;
+  }
+}

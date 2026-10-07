@@ -1,0 +1,450 @@
+/* Team — screen-specific Enterprise UI hardening.
+   Presentation and accessibility only: no ownership, messaging, API or data behavior changes. */
+
+.sx-module .team-chat-manager {
+  min-width: 0;
+}
+
+.sx-module .team-chat-manager :where(button, a, input, select):focus-visible {
+  outline: 3px solid rgba(53, 104, 244, 0.28);
+  outline-offset: 2px;
+}
+
+.sx-module .team-chat-manager :where(button, a) {
+  touch-action: manipulation;
+}
+
+/* Six operational counters are useful together on wide screens, but the
+   generic metric layout becomes overly tall or off-canvas at smaller widths. */
+.sx-module .team-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.sx-module .team-metrics > article {
+  min-width: 0;
+}
+
+.sx-module .team-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(310px, 360px);
+  align-items: start;
+  min-width: 0;
+}
+
+.sx-module .team-queue-card,
+.sx-module .team-agents-card {
+  min-width: 0;
+}
+
+.sx-module .team-panel-header button,
+.sx-module .team-queue-actions button {
+  min-height: 40px;
+  border: 1px solid #dfe4ec;
+  border-radius: 10px;
+  padding: 0 12px;
+  background: #fff;
+  color: #344054;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sx-module .team-panel-header button:hover,
+.sx-module .team-queue-actions button:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.sx-module .team-queue-actions button:not(.ghost):not(.danger):not(.secondary) {
+  border-color: #3568f4;
+  background: #3568f4;
+  color: #fff;
+}
+
+.sx-module .team-queue-actions button.danger {
+  border-color: #fecaca;
+  background: #fff7f7;
+  color: #b42318;
+}
+
+.sx-module .team-queue-actions button.secondary {
+  border-color: #cdd9ff;
+  background: #f3f6ff;
+  color: #2f5fe6;
+}
+
+.sx-module .team-toolbar {
+  align-items: stretch;
+  padding: 12px 16px;
+  border-bottom: 1px solid #edf0f4;
+  background: #fbfcfe;
+}
+
+.sx-module .team-toolbar > input {
+  flex: 1 1 300px;
+  min-width: 180px;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid #dfe4ec;
+  border-radius: 11px;
+  background: #fff;
+  color: #101828;
+}
+
+.sx-module .team-filter-tabs {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable;
+}
+
+.sx-module .team-filter-tabs button {
+  min-height: 36px;
+  white-space: nowrap;
+}
+
+/* TeamChatManager currently emits `active`; shared dashboard CSS still expects
+   `is-active`. Support both so the selected queue filter remains visible. */
+.sx-module .team-filter-tabs button.is-active,
+.sx-module .team-filter-tabs button.active {
+  background: #fff;
+  color: #2f5fe6;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+
+/* The shared stylesheet still targets an older queue DOM shape. Reset those
+   assumptions and style the current article -> main -> actions structure. */
+.sx-module .team-queue-list {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px 16px;
+}
+
+.sx-module .team-queue-item {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #e7ebf1;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.sx-module .team-queue-item.mine {
+  border-color: #cdd9ff;
+  background: #fbfcff;
+  box-shadow: inset 3px 0 0 #3568f4;
+}
+
+.sx-module .team-queue-main {
+  display: grid;
+  align-items: stretch;
+  gap: 10px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  cursor: default;
+}
+
+.sx-module .team-queue-main:hover {
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.sx-module .team-queue-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.sx-module .team-queue-title > div:first-child {
+  min-width: 0;
+}
+
+.sx-module .team-queue-title h4 {
+  margin: 0;
+  color: #101828;
+  font-size: 14px;
+  font-weight: 750;
+  line-height: 1.3;
+}
+
+.sx-module .team-queue-title p {
+  margin: 3px 0 0;
+  color: #667085;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.sx-module .team-queue-badges {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sx-module .team-message-preview {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  color: #475467;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.sx-module .team-queue-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+.sx-module .team-queue-meta > span {
+  min-width: 0;
+  color: #98a2b3;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.sx-module .team-queue-meta > span strong {
+  display: block;
+  margin-top: 2px;
+  color: #344054;
+  font-size: 11px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.sx-module .team-queue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 11px;
+  border-top: 1px solid #edf0f4;
+}
+
+/* Legacy dashboard-system.css gives .team-transfer card-level padding and a
+   top border even though it now lives inside every queue item's action row. */
+.sx-module .team-transfer {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) auto;
+  flex: 1 1 260px;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+
+.sx-module .team-transfer select {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid #dfe4ec;
+  border-radius: 10px;
+  background: #fff;
+  color: #344054;
+}
+
+.sx-module .team-agents-card {
+  position: sticky;
+  top: 88px;
+  max-height: calc(100vh - 112px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.sx-module .team-agent-list > article {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.sx-module .team-agent-list > article > div:nth-child(2) {
+  min-width: 0;
+}
+
+.sx-module .team-agent-list > article > div:nth-child(2) strong,
+.sx-module .team-agent-list > article > div:nth-child(2) p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sx-module .agent-load {
+  text-align: right;
+}
+
+.sx-module .agent-load strong,
+.sx-module .agent-load small {
+  display: block;
+}
+
+.sx-module .team-safety-card {
+  margin: 0 14px 12px;
+  padding: 13px 14px;
+  border-radius: 13px;
+  overflow: visible;
+}
+
+.sx-module .team-safety-card strong {
+  display: block;
+  color: #344054;
+  font-size: 12px;
+}
+
+.sx-module .team-safety-card p {
+  margin-top: 4px;
+  color: #667085;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+@media (max-width: 1350px) {
+  .sx-module .team-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1180px) {
+  .sx-module .team-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sx-module .team-agents-card {
+    position: relative;
+    top: auto;
+    max-height: none;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 767px) {
+  .sx-module .team-chat-manager {
+    gap: 12px;
+  }
+
+  .sx-module .team-metrics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    overflow: visible;
+    padding-bottom: 0;
+    scroll-snap-type: none;
+  }
+
+  .sx-module .team-metrics > article {
+    min-width: 0;
+    min-height: 96px;
+  }
+
+  .sx-module .team-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .sx-module .team-toolbar > input {
+    width: 100%;
+    min-width: 0;
+    font-size: 16px;
+  }
+
+  .sx-module .team-filter-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    overflow: visible;
+    padding: 4px;
+  }
+
+  .sx-module .team-filter-tabs button {
+    width: 100%;
+    min-width: 0;
+    padding-inline: 8px;
+  }
+
+  .sx-module .team-filter-tabs button:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .sx-module .team-panel-header {
+    align-items: center;
+    padding: 14px;
+  }
+
+  .sx-module .team-queue-list {
+    padding: 10px;
+  }
+
+  .sx-module .team-queue-item {
+    padding: 12px;
+  }
+
+  .sx-module .team-queue-title {
+    flex-direction: column;
+  }
+
+  .sx-module .team-queue-badges {
+    justify-content: flex-start;
+  }
+
+  .sx-module .team-queue-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sx-module .team-queue-actions > button {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+  }
+
+  .sx-module .team-transfer {
+    flex-basis: 100%;
+    width: 100%;
+  }
+}
+
+@media (max-width: 430px) {
+  .sx-module .team-panel-header {
+    align-items: flex-start;
+  }
+
+  .sx-module .team-queue-meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sx-module .team-queue-actions > button {
+    flex-basis: 100%;
+    width: 100%;
+  }
+
+  .sx-module .team-transfer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sx-module .team-transfer button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sx-module .team-chat-manager * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

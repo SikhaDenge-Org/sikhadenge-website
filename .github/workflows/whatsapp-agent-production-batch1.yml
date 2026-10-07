@@ -1,0 +1,516 @@
+# Email DRY_RUN scheduler activation CI checkpoint: 2026-09-21
+# Phase21 portable PM2 scheduler checkpoint v2: 2026-09-20
+# Phase21 explicit PM2 scheduler checkpoint: 2026-09-20
+# Phase21 scheduler activation checkpoint v2: 2026-09-20
+# Phase21 scheduler activation checkpoint: 2026-09-19
+# Email E7 hard-bounce suppression deployment marker: 2026-09-19
+# Email E7 Gmail bounce ingest deployment marker: 2026-09-19
+# Email E7 tenant-safe analytics deployment marker: 2026-09-19
+# Email E6 operator UI deployment marker: 2026-09-19
+# Email safety wiring deployment marker: 2026-09-19
+# E4 post-approval readiness alignment marker: 2026-09-17
+# E4 canonical approval recovery deployment marker: 2026-09-17
+# Email lifecycle E4 approval deployment marker: 2026-09-17
+# Internal email test alignment deploy: 2026-09-17
+# Email lifecycle E3 readiness audit deploy: 2026-09-16
+# Email lifecycle provision workflow fix deploy: 2026-09-16
+# Email lifecycle E2 deployment marker: 2026-09-16
+# Email lifecycle E1 deployment marker: 2026-09-16
+# Production deploy trigger: Page 01 login UI — 2026-09-12
+# Retry marker: Base64 production SSH key configured on 2026-08-03
+# Retry marker: corrected public ED25519 host key configured on 2026-08-03
+# Retry marker: canonical pinned host entry for alternate SSH port on 2026-08-03
+# Retry marker: suppress generated staging package lock on 2026-08-03
+# Email DRY_RUN preflight no-match fix deployment marker: 2026-09-15
+# Email scheduler first-run evidence deployment marker: 2026-09-15
+# Email scheduler CJS compatibility fix deployment marker: 2026-09-15
+# Email channel sidebar routing deployment marker: 2026-09-15
+# Email channel sidebar routing retry marker: 2026-09-15
+name: WhatsApp Agent Production Batch 1
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Exact merged release SHA to deploy
+        required: true
+        type: string
+      execute:
+        description: Execute the guarded production batch
+        required: true
+        default: false
+        type: boolean
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-production-batch1.yml"
+      - "apps/whatsapp-agent-dashboard/scripts/engageos-production-*.sh"
+      - "apps/whatsapp-agent-dashboard/scripts/prisma-postgres-cli-url.mjs"
+      - "apps/whatsapp-agent-dashboard/prisma/migrations/**"
+
+permissions:
+  contents: read
+
+
+jobs:
+  production-batch-1:
+    concurrency:
+      group: whatsapp-agent-production
+      cancel-in-progress: false
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.execute == true) ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[production-batch1]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      TARGET_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.release_sha || github.sha }}
+      PRODUCTION_RUN_ID: github-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Checkout exact release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 0
+
+      - name: Validate release and production secrets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          : > production-batch.log
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+
+          missing=0
+          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            if [[ -z "${!variable_name:-}" ]]; then
+              printf 'Missing required production secret: %s\n' "$variable_name" >&2
+              missing=1
+            fi
+          done
+          test "$missing" = "0"
+
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"
+          fi
+          printf 'PASS: RELEASE_AND_SECRET_GATE_COMPLETE\n'
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+
+          private_key_file="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$private_key_file"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$private_key_file"
+          fi
+          chmod 600 "$private_key_file"
+
+          [[ "$SSH_HOST" =~ ^[^[:space:]/]+$ ]]
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          (( SSH_PORT >= 1 && SSH_PORT <= 65535 ))
+
+          read -r _ supplied_key_type supplied_key_material _ <<< "$SSH_HOST_KEY"
+          test "$supplied_key_type" = "ssh-ed25519"
+          test -n "$supplied_key_material"
+          printf '%s %s\n' "$supplied_key_type" "$supplied_key_material" |
+            ssh-keygen -lf - -E sha256 >/dev/null
+
+          if [[ "$SSH_PORT" = "22" ]]; then
+            canonical_host="$SSH_HOST"
+          else
+            canonical_host="[$SSH_HOST]:$SSH_PORT"
+          fi
+          printf '%s %s %s\n' \
+            "$canonical_host" \
+            "$supplied_key_type" \
+            "$supplied_key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+          ssh-keygen -y -f "$private_key_file" >/dev/null
+          ssh-keygen -F "$canonical_host" -f "$HOME/.ssh/known_hosts" >/dev/null
+          printf 'PASS: PINNED_HOST_KEY_CANONICALIZED\n'
+          printf 'PASS: SSH_IDENTITY_CONFIGURED\n'
+
+      - name: Verify pinned SSH transport
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh \
+            -p "$SSH_PORT" \
+            -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" \
+            'test "$(id -u)" = "0" && printf "PASS: PINNED_SSH_TRANSPORT_VERIFIED\n"'
+
+      - name: Execute five-step production batch
+        id: production
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set +e
+          ssh \
+            -p "$SSH_PORT" \
+            -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "TARGET_SHA='$TARGET_SHA' RUN_ID='$PRODUCTION_RUN_ID' bash -s" <<'REMOTE' 2>&1 | tee production-batch.log
+          set -Eeuo pipefail
+
+          LIVE_APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          RELEASE_REF=refs/remotes/origin/release/whatsapp-instagram-agent-flow-20260731
+          STAGE_ROOT="/tmp/sikhadenge-github-production-${RUN_ID}"
+          STAGE_APP="$STAGE_ROOT/apps/whatsapp-agent-dashboard"
+
+          cleanup() {
+            git -C "$LIVE_APP" worktree remove --force "$STAGE_ROOT" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          cd "$LIVE_APP"
+
+          # Remove only stale staging worktrees created by this guarded deploy workflow.
+          # Never touch the live app, persistent backups, uploads, databases, or env files.
+          git worktree prune --expire now || true
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+
+          root = Path("/tmp").resolve()
+          for path in root.glob("sikhadenge-github-production-*"):
+              resolved = path.resolve()
+              if path.is_symlink():
+                  raise SystemExit(f"refusing symlink staging cleanup: {path}")
+              if resolved.parent != root or not resolved.name.startswith("sikhadenge-github-production-"):
+                  raise SystemExit(f"refusing out-of-scope staging cleanup: {resolved}")
+              if resolved.is_dir():
+                  print(f"PRESTAGE_REMOVING_ORPHAN_STAGE={resolved}")
+                  shutil.rmtree(resolved)
+          PY
+          git worktree prune --expire now || true
+
+          free_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"
+          printf 'PRESTAGE_TMP_FREE_KB_AFTER_ORPHAN_CLEANUP=%s\n' "$free_kb"
+          if (( free_kb < 2097152 )); then
+            printf 'INFO: PRESTAGE_LOW_SPACE_CLEANING_NPM_CACHE\n'
+            npm cache clean --force >/dev/null 2>&1 || true
+            free_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"
+            printf 'PRESTAGE_TMP_FREE_KB_AFTER_NPM_CACHE_CLEANUP=%s\n' "$free_kb"
+          fi
+          if (( free_kb < 2097152 )); then
+            printf 'INFO: PRESTAGE_LOW_SPACE_CLEANING_DISPOSABLE_BUILD_CACHES\n'
+            python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import shutil
+          import time
+
+          now = time.time()
+          uid = os.getuid()
+          tmp = Path("/tmp").resolve()
+          prefixes = ("npm-", "tsx-", "node-compile-cache", "v8-compile-cache")
+
+          for path in tmp.iterdir():
+              try:
+                  stat = path.lstat()
+              except FileNotFoundError:
+                  continue
+              if path.is_symlink() or stat.st_uid != uid:
+                  continue
+              if not path.name.startswith(prefixes):
+                  continue
+              if now - stat.st_mtime < 3600:
+                  continue
+              resolved = path.resolve()
+              if resolved.parent != tmp:
+                  continue
+              if resolved.is_dir():
+                  print(f"PRESTAGE_REMOVING_STALE_BUILD_CACHE={resolved.name}")
+                  shutil.rmtree(resolved)
+              elif resolved.is_file():
+                  print(f"PRESTAGE_REMOVING_STALE_BUILD_CACHE_FILE={resolved.name}")
+                  resolved.unlink()
+
+          home = Path.home().resolve()
+          for relative in (".cache/ms-playwright", ".cache/node-gyp"):
+              candidate = home / relative
+              if candidate.is_symlink():
+                  print(f"PRESTAGE_SKIPPING_HOME_CACHE_SYMLINK={relative}")
+                  continue
+              path = candidate.resolve()
+              if home not in path.parents:
+                  raise SystemExit(f"refusing out-of-home cache cleanup: {path}")
+              if path.exists():
+                  print(f"PRESTAGE_REMOVING_HOME_BUILD_CACHE={relative}")
+                  shutil.rmtree(path)
+          PY
+            free_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"
+            printf 'PRESTAGE_TMP_FREE_KB_AFTER_BUILD_CACHE_CLEANUP=%s\n' "$free_kb"
+          fi
+          if (( free_kb < 2097152 )); then
+            printf 'FAIL: PRESTAGE_INSUFFICIENT_DISK_SPACE free_kb=%s required_kb=2097152\n' "$free_kb" >&2
+            exit 36
+          fi
+          printf 'PASS: PRESTAGE_DISK_SPACE_GUARD\n'
+
+          git fetch origin \
+            +refs/heads/release/whatsapp-instagram-agent-flow-20260731:refs/remotes/origin/release/whatsapp-instagram-agent-flow-20260731
+
+          repo_root="$(git rev-parse --show-toplevel)"
+          live_sha="$(git rev-parse HEAD)"
+          release_ref_sha="$(git rev-parse "$RELEASE_REF")"
+          tracked_status="$(git status --porcelain --untracked-files=no)"
+          tracked_dirty_count="$(printf '%s\n' "$tracked_status" | sed '/^$/d' | wc -l | tr -d ' ')"
+
+          printf 'PRESTAGE_LIVE_SHA=%s\n' "$live_sha"
+          printf 'PRESTAGE_RELEASE_REF_SHA=%s\n' "$release_ref_sha"
+          printf 'PRESTAGE_TRACKED_DIRTY_COUNT=%s\n' "$tracked_dirty_count"
+
+          # Read-only dirty-worktree evidence. Emit paths/status and line-count stats only;
+          # never emit file contents or environment values.
+          if [[ -n "$tracked_status" ]]; then
+            printf 'PRESTAGE_TRACKED_STATUS_BEGIN\n'
+            printf '%s\n' "$tracked_status"
+            printf 'PRESTAGE_TRACKED_STATUS_END\n'
+            printf 'PRESTAGE_DIFF_NUMSTAT_BEGIN\n'
+            git diff HEAD --numstat --no-renames
+            printf 'PRESTAGE_DIFF_NUMSTAT_END\n'
+
+            # Batch #12 identified these exact ten tracked production-local paths. Preserve
+            # a private binary-capable patch only when the current dirty set still matches
+            # that reviewed allowlist exactly. Unexpected tracked paths fail closed and are
+            # never copied into the recovery artifact.
+            expected_dirty_paths=(
+              apps/whatsapp-agent-dashboard/app/api/analytics/overview/route.ts
+              apps/whatsapp-agent-dashboard/app/api/conversations/route.ts
+              apps/whatsapp-agent-dashboard/app/globals.css
+              apps/whatsapp-agent-dashboard/app/inbox/page.tsx
+              apps/whatsapp-agent-dashboard/app/layout.tsx
+              apps/whatsapp-agent-dashboard/components/inbox/InboxDashboardV2.tsx
+              apps/whatsapp-agent-dashboard/lib/inbox/conversation-repository.ts
+              apps/whatsapp-agent-dashboard/next-env.d.ts
+              apps/whatsapp-agent-dashboard/package.json
+              apps/whatsapp-agent-dashboard/scripts/masterclass-flow-worker.ts
+            )
+            actual_dirty_paths="$(git -C "$repo_root" diff HEAD --name-only --no-renames | LC_ALL=C sort)"
+            expected_dirty_list="$(printf '%s\n' "${expected_dirty_paths[@]}" | LC_ALL=C sort)"
+            if [[ "$actual_dirty_paths" != "$expected_dirty_list" ]]; then
+              printf 'FAIL: PRESTAGE_DIRTY_PATH_SET_CHANGED\n' >&2
+              exit 35
+            fi
+
+            recovery_dir="/root/sikhadenge-backups/engageos-${RUN_ID}"
+            recovery_patch="$recovery_dir/production-dirty.patch"
+            recovery_encrypted="$recovery_dir/production-dirty.patch.p7m"
+            recovery_manifest="$recovery_dir/production-dirty-manifest.txt"
+            recovery_cert="$recovery_dir/production-dirty-recovery-cert.pem"
+            install -d -m 700 "$recovery_dir"
+            git -C "$repo_root" diff HEAD --binary -- "${expected_dirty_paths[@]}" > "$recovery_patch"
+            test -s "$recovery_patch"
+            chmod 600 "$recovery_patch"
+            patch_sha256="$(sha256sum "$recovery_patch" | awk '{print $1}')"
+
+            command -v openssl >/dev/null
+            cat > "$recovery_cert" <<'CERT'
+          -----BEGIN CERTIFICATE-----
+          MIIERTCCAq2gAwIBAgIUP/Ecu3Ox7+w1uM8MXSBJyadx1NgwDQYJKoZIhvcNAQEL
+          BQAwMjEwMC4GA1UEAwwnRW5nYWdlT1MgUHJvZHVjdGlvbiBSZWNvdmVyeSAyMDI2
+          LTA5LTEwMB4XDTI2MDkwOTIwNTMwMloXDTI2MDkxMTIwNTMwMlowMjEwMC4GA1UE
+          AwwnRW5nYWdlT1MgUHJvZHVjdGlvbiBSZWNvdmVyeSAyMDI2LTA5LTEwMIIBojAN
+          BgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA11Nd/5HVvgGXgNkHmy/mn/IHOscp
+          1QCENwzTGTBRaIgJESRaqjy6vS5cFRRByPkEVB/CsvBe4fO6IoEkrQKHqUkqeAAk
+          tYZRkg+lpYOFUNPWImfAr1ec5dLCHRAlUR+JFi1PLZYivLFTYMPE3fyY2wq8dlmY
+          v5i4Hp9T6iv2FnZjM+lLo7gsavdLBcm7cy9E76QFVe7Vf34bd0dsHNxOLS+xZipv
+          pQ9U9RDCmuS6S37wSr1sNlhzzZuwoox7xNVdvt8VjgSfh4k4EnJWpnOZr1YQAt/r
+          VapRl+79hV4CbSthN/nXSZ14GTyYpHucbYQomINKbMyftBynwfnMI0WsgZj58Oif
+          sVuPzdyLeJXCsO9vNI1b6T+EqJbjxJ8K+RRteQtjzCOXK5CXyySQ7PjF4xv2sOFs
+          +r72+rNE7xK1ZJtedoJHDqDq7on9XG1feJV++Eghads7Kjkmbipzz3gMyXD042dI
+          d6JHemeILbJ1HcGm8A9CTZJWV7/Ub3DM00GpAgMBAAGjUzBRMB0GA1UdDgQWBBSx
+          PlI0B319pJNM+7d1wD83m0CX5zAfBgNVHSMEGDAWgBSxPlI0B319pJNM+7d1wD83
+          m0CX5zAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4IBgQAxg6lHko8k
+          gIktREWCjX8XQtnxNZ7e2QTYwNnRMdDCyeu/mGOnXsPrQV31R17JDvSVHeaCLKcA
+          jsNX0dJsrlEXhlE2nA72eTpU80bdOrpBRVMGBAuHFcVRhft3d3nCRmL+siexG/+R
+          SNbfHGMksIEBXb3RRxcNAKwzIxajtSdLQnfKmvk+lmgRWUYOSmZS2wRdl7sz3UCk
+          jPqlipRN3C7rihKFOqPpjzPiCAqZ7RVDxBLNn3unJk56WeO72RJi61oElys+MLkR
+          VLlx2uBsEgYnnh3aRkoi2+FxEtPsE6n8m2lMQMjqUA5MauFEzxy7joME/xIOKALN
+          cDNv6n9BhUm2JKFJSZETsEOSnw1cYUecsNoh2qrQoDf+F9tiTT+mT22tnp6Vih0+
+          p8JpIJEpZx8ALuN8BRZzCrwl2MYwUC4jdTsFu57ErfokBhqbDRDGFP1BfjcI4tGf
+          OUIxV0IuhICSWDTud+lqh5aJ3PoAhZpJqKhAlPEiRS35HbeFhBXFhBs=
+          -----END CERTIFICATE-----
+          CERT
+            chmod 600 "$recovery_cert"
+            cert_fingerprint="$(openssl x509 -in "$recovery_cert" -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':')"
+            test "$cert_fingerprint" = "B99F9B4D63D2D9D84C8931453036FD66D19816ECED878D4ECE0CB428DDB5318E"
+            openssl cms -encrypt -binary -aes256 \
+              -in "$recovery_patch" \
+              -out "$recovery_encrypted" \
+              -outform DER \
+              "$recovery_cert"
+            test -s "$recovery_encrypted"
+            chmod 600 "$recovery_encrypted"
+            openssl cms -cmsout -inform DER -in "$recovery_encrypted" -noout >/dev/null
+            encrypted_sha256="$(sha256sum "$recovery_encrypted" | awk '{print $1}')"
+
+            {
+              printf 'FORMAT_VERSION=2\n'
+              printf 'RUN_ID=%s\n' "$RUN_ID"
+              printf 'LIVE_SHA=%s\n' "$live_sha"
+              printf 'TARGET_SHA=%s\n' "$TARGET_SHA"
+              printf 'DIRTY_COUNT=%s\n' "$tracked_dirty_count"
+              printf 'PATCH_SHA256=%s\n' "$patch_sha256"
+              printf 'ENCRYPTED_PATCH_SHA256=%s\n' "$encrypted_sha256"
+              printf 'RECOVERY_CERT_SHA256_FINGERPRINT=%s\n' "$cert_fingerprint"
+              printf 'TRACKED_STATUS_BEGIN\n'
+              git -C "$repo_root" status --porcelain --untracked-files=no -- "${expected_dirty_paths[@]}"
+              printf 'TRACKED_STATUS_END\n'
+              printf 'DIFF_NUMSTAT_BEGIN\n'
+              git -C "$repo_root" diff HEAD --numstat --no-renames -- "${expected_dirty_paths[@]}"
+              printf 'DIFF_NUMSTAT_END\n'
+            } > "$recovery_manifest"
+            chmod 600 "$recovery_manifest"
+            printf 'PASS: PRESTAGE_DIRTY_PATCH_PRESERVED_AND_ENCRYPTED sha256=%s encrypted_sha256=%s\n' \
+              "$patch_sha256" "$encrypted_sha256"
+          fi
+
+          if [[ "$release_ref_sha" != "$TARGET_SHA" ]]; then
+            printf 'FAIL: PRESTAGE_RELEASE_REF_MISMATCH\n' >&2
+            exit 31
+          fi
+          printf 'PASS: PRESTAGE_RELEASE_REF_MATCHES_TARGET\n'
+          test "$(git rev-parse "$RELEASE_REF")" = "$TARGET_SHA"
+
+          if [[ -n "$tracked_status" ]]; then
+            printf 'FAIL: PRESTAGE_TRACKED_WORKTREE_DIRTY count=%s\n' "$tracked_dirty_count" >&2
+            exit 32
+          fi
+          printf 'PASS: PRESTAGE_TRACKED_WORKTREE_CLEAN\n'
+          test -z "$(git status --porcelain --untracked-files=no)"
+
+          if [[ ! -d "$LIVE_APP/node_modules" ]]; then
+            printf 'FAIL: PRESTAGE_NODE_MODULES_MISSING\n' >&2
+            exit 33
+          fi
+          printf 'PASS: PRESTAGE_NODE_MODULES_PRESENT\n'
+          test -d "$LIVE_APP/node_modules"
+
+          if git merge-base --is-ancestor HEAD "$TARGET_SHA"; then
+            printf 'PASS: PRESTAGE_LIVE_SHA_IS_ANCESTOR\n'
+          else
+            printf 'FAIL: PRESTAGE_LIVE_SHA_NOT_ANCESTOR live=%s target=%s\n' "$live_sha" "$TARGET_SHA" >&2
+            exit 34
+          fi
+          git merge-base --is-ancestor HEAD "$TARGET_SHA"
+
+          git worktree add --detach "$STAGE_ROOT" "$TARGET_SHA"
+          ln -s "$LIVE_APP/.env" "$STAGE_APP/.env"
+
+          cd "$STAGE_APP"
+          npm install --include=dev --no-audit --no-fund --package-lock=false
+
+          LIVE_APP="$LIVE_APP" \
+          STAGE_APP="$STAGE_APP" \
+          RELEASE_SHA="$TARGET_SHA" \
+          RUN_ID="$RUN_ID" \
+          PM2_PROCESS_NAME=sikhadenge-whatsapp-agent \
+          PUBLIC_URL=https://whatsapp.sikhadenge.in \
+          BACKUP_ROOT=/root/sikhadenge-backups \
+          ENV_FILE="$LIVE_APP/.env" \
+          bash "$STAGE_APP/scripts/engageos-production-batch1.sh"
+          REMOTE
+          ssh_code=${PIPESTATUS[0]}
+          set -e
+          printf 'SSH_EXIT_CODE=%s\n' "$ssh_code" | tee -a production-batch.log
+          exit "$ssh_code"
+
+      - name: Collect protected production evidence
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p production-evidence
+          for file_name in \
+            production-dirty.patch.p7m \
+            production-dirty-manifest.txt \
+            manifest.txt \
+            migration-evidence.txt \
+            deploy-state.txt \
+            post-deploy-evidence.txt \
+            rollback-evidence.txt \
+            batch-result.txt; do
+            scp \
+              -P "$SSH_PORT" \
+              -i "$HOME/.ssh/whatsapp-production" \
+              -o BatchMode=yes \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              -o ConnectTimeout=10 \
+              -o ConnectionAttempts=1 \
+              "$SSH_USER@$SSH_HOST:/root/sikhadenge-backups/engageos-${PRODUCTION_RUN_ID}/${file_name}" \
+              "production-evidence/${file_name}" >/dev/null 2>&1 || true
+          done
+          find production-evidence -maxdepth 1 -type f -print -exec chmod 600 {} \;
+          exit 0
+
+      - name: Verify production evidence integrity
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          required=(
+            manifest.txt
+            migration-evidence.txt
+            deploy-state.txt
+            post-deploy-evidence.txt
+            rollback-evidence.txt
+            batch-result.txt
+          )
+          if [[ "${{ steps.production.outcome }}" == "success" ]]; then
+            for file_name in "${required[@]}"; do
+              test -s "production-evidence/$file_name"
+            done
+          fi
+          if compgen -G "production-evidence/*" > /dev/null; then
+            (
+              cd production-evidence
+              sha256sum * > SHA256SUMS.txt
+              sha256sum --check SHA256SUMS.txt
+            )
+          fi
+          printf 'PASS: PRODUCTION_EVIDENCE_INTEGRITY_VERIFIED\\n'
+
+      - name: Upload production evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatsapp-agent-production-${{ env.PRODUCTION_RUN_ID }}
+          path: |
+            production-batch.log
+            production-evidence
+          if-no-files-found: error
+          retention-days: 14
+
+# Email dry-run rollback hardening deployment marker: 2026-09-15
+# Email sidebar active-state deployment marker: 2026-09-16
+
+# Internal email one-shot test harness deployment marker: 2026-09-16
+
+# Internal email harness deployment retry marker: 2026-09-16
+
+# Internal email harness concurrency-safe deployment marker: 2026-09-16
+
+# Internal verification template harness deployment marker: 2026-09-16

@@ -1,0 +1,587 @@
+/*
+ * Advanced shared module refinement.
+ * Scoped to DashboardModuleShell via .sx-module so login and the rebuilt
+ * Inbox remain isolated. This layer standardises high-density operations
+ * pages without changing component logic or data flow.
+ */
+
+.sx-module {
+  --adv-surface: #ffffff;
+  --adv-surface-soft: #f8fafc;
+  --adv-surface-tint: #f3f6ff;
+  --adv-border: #e5eaf1;
+  --adv-border-strong: #d8e0ea;
+  --adv-text: #101828;
+  --adv-text-soft: #475467;
+  --adv-muted: #667085;
+  --adv-primary: #3568f4;
+  --adv-primary-dark: #2f5fe6;
+  --adv-danger: #d92d20;
+  --adv-success: #067647;
+  --adv-warning: #b54708;
+  --adv-radius-xl: 18px;
+  --adv-radius-lg: 14px;
+  --adv-radius-md: 11px;
+  --adv-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --adv-shadow-md: 0 10px 30px rgba(15, 23, 42, 0.07);
+}
+
+.sx-module .sx-workspace-body {
+  padding-block: clamp(16px, 2vw, 28px);
+}
+
+.sx-module .sx-workspace-body > * {
+  min-width: 0;
+}
+
+.sx-module :where(
+  [class$="-manager"],
+  [class$="-workspace"],
+  [class$="-layout"],
+  [class$="-content"]
+) {
+  min-width: 0;
+}
+
+.sx-module :where(
+  [class$="-metrics"],
+  [class$="-stats"],
+  [class$="-summary"],
+  [class*="metric-grid"],
+  [class*="stats-grid"]
+) {
+  gap: 12px !important;
+}
+
+.sx-module :where(
+  [class$="-metrics"],
+  [class$="-stats"],
+  [class$="-summary"],
+  [class*="metric-grid"],
+  [class*="stats-grid"]
+) > :where(article, div) {
+  min-width: 0;
+}
+
+.sx-module :where(
+  [class$="-card"],
+  [class$="-panel"],
+  [class$="-editor"],
+  [class$="-directory"],
+  [class$="-builder"],
+  [class$="-canvas"],
+  [class$="-inspector"]
+) {
+  border-color: var(--adv-border) !important;
+  box-shadow: var(--adv-shadow-sm);
+}
+
+.sx-module :where(
+  [class$="-card"],
+  [class$="-panel"],
+  [class$="-editor"],
+  [class$="-directory"],
+  [class$="-builder"],
+  [class$="-canvas"],
+  [class$="-inspector"]
+):focus-within {
+  border-color: #c7d5ff !important;
+  box-shadow: 0 0 0 3px rgba(53, 104, 244, 0.07), var(--adv-shadow-sm);
+}
+
+.sx-module :where(
+  [class$="-toolbar"],
+  [class$="-filters"],
+  [class$="-controls"],
+  [class$="-actions"],
+  [class*="filter-bar"],
+  [class*="action-bar"]
+) {
+  min-width: 0;
+}
+
+.sx-module :where(
+  [class$="-toolbar"],
+  [class$="-filters"],
+  [class$="-controls"],
+  [class$="-actions"],
+  [class*="filter-bar"],
+  [class*="action-bar"]
+) > * {
+  min-width: 0;
+}
+
+.sx-module :where(input, select, textarea) {
+  width: auto;
+  max-width: 100%;
+  min-height: 42px;
+  border-color: var(--adv-border-strong) !important;
+  border-radius: var(--adv-radius-md) !important;
+  background: var(--adv-surface) !important;
+  color: var(--adv-text) !important;
+  transition: border-color 130ms ease, box-shadow 130ms ease,
+    background-color 130ms ease;
+}
+
+.sx-module :where(input, select, textarea):hover:not(:disabled) {
+  border-color: #c8d1dc !important;
+}
+
+.sx-module :where(input, select, textarea):focus {
+  border-color: var(--adv-primary) !important;
+  box-shadow: 0 0 0 3px rgba(53, 104, 244, 0.11) !important;
+}
+
+.sx-module :where(textarea) {
+  min-height: 88px;
+  line-height: 1.5;
+}
+
+.sx-module :where(label) {
+  min-width: 0;
+}
+
+.sx-module :where(label > span:first-child, .field-label) {
+  color: var(--adv-text-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sx-module :where(button, a[class*="button"], a[class*="action"]) {
+  min-height: 42px;
+  border-radius: var(--adv-radius-md);
+  font-weight: 650;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.sx-module :where(button, a[class*="button"], a[class*="action"]):hover:not(:disabled) {
+  filter: brightness(0.99);
+}
+
+.sx-module :where(button, a[class*="button"], a[class*="action"]):active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.sx-module :where(
+  button[class*="primary"],
+  button:not([class]),
+  [class$="-save"],
+  [class$="-submit"]
+) {
+  box-shadow: 0 7px 18px rgba(53, 104, 244, 0.16);
+}
+
+.sx-module :where(
+  .danger,
+  [class*="danger"],
+  [class*="delete"],
+  [class*="remove"]
+) {
+  color: var(--adv-danger);
+}
+
+.sx-module :where(
+  [class$="-alert"],
+  [class$="-notice"],
+  [class$="-message"],
+  [role="alert"],
+  [role="status"]
+) {
+  overflow-wrap: anywhere;
+}
+
+.sx-module :where(
+  [class$="-empty"],
+  [class*="empty-state"],
+  [class*="no-results"]
+) {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  min-height: 170px;
+  padding: 28px 20px;
+  color: var(--adv-muted);
+  text-align: center;
+}
+
+.sx-module :where(
+  [class$="-empty"],
+  [class*="empty-state"],
+  [class*="no-results"]
+) strong {
+  color: var(--adv-text);
+  font-size: 15px;
+}
+
+.sx-module :where(
+  [class$="-table-wrap"],
+  [class*="table-container"],
+  [class*="table-scroll"]
+) {
+  max-width: 100%;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sx-module table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.sx-module table :where(th, td) {
+  vertical-align: middle;
+}
+
+.sx-module table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--adv-surface-soft) !important;
+  color: var(--adv-text-soft);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.sx-module table tbody tr {
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.sx-module table tbody tr:hover {
+  background: #f9fbff;
+}
+
+.sx-module table tbody tr.selected,
+.sx-module table tbody tr[aria-selected="true"] {
+  background: var(--adv-surface-tint) !important;
+  box-shadow: inset 3px 0 0 var(--adv-primary);
+}
+
+.sx-module :where(
+  [class$="-pill"],
+  [class$="-badge"],
+  [class$="-chip"],
+  [class*="status-"]
+) {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sx-module :where(dialog, [role="dialog"], [class$="-modal"], [class$="-drawer"]) {
+  max-width: min(94vw, 760px);
+  max-height: min(90dvh, 920px);
+  overflow: auto;
+  border-radius: var(--adv-radius-xl);
+  scrollbar-gutter: stable;
+}
+
+.sx-module :where(
+  [class$="-modal"],
+  [class$="-drawer"],
+  [class$="-editor"],
+  [class$="-inspector"]
+) > header {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(10px);
+}
+
+.sx-module :where(
+  [class$="-form-actions"],
+  [class$="-footer-actions"],
+  [class*="modal-actions"]
+) {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(10px);
+}
+
+.sx-module :where(
+  [class*="kanban"],
+  [class*="pipeline"],
+  [class*="timeline"]
+) {
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sx-module :where(
+  [class*="kanban-column"],
+  [class*="pipeline-column"]
+) {
+  scroll-snap-align: start;
+}
+
+.sx-module :where(
+  [class*="chart"],
+  canvas,
+  svg[role="img"]
+) {
+  max-width: 100%;
+}
+
+.sx-module :where(img, video) {
+  max-width: 100%;
+}
+
+.sx-module :where(
+  [class$="-tabs"],
+  [role="tablist"]
+) {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+}
+
+.sx-module :where(
+  [class$="-tabs"],
+  [role="tablist"]
+)::-webkit-scrollbar {
+  display: none;
+}
+
+.sx-module :where([role="tab"], [class*="tab-button"]) {
+  flex: 0 0 auto;
+  min-height: 42px;
+}
+
+/* Make operational pages breathe on wide displays without letting forms
+   stretch into unreadable full-width rows. */
+@media (min-width: 1440px) {
+  .sx-module .sx-workspace-body {
+    width: min(100%, 1760px);
+  }
+
+  .sx-module :where(
+    [class$="-form"],
+    [class$="-editor"] form,
+    [class*="settings-form"]
+  ) {
+    max-width: 1120px;
+  }
+}
+
+@media (max-width: 1180px) {
+  .sx-module :where(
+    [class$="-layout"],
+    [class$="-grid"],
+    [class$="-workspace"],
+    [class*="split-view"]
+  ) {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .sx-module :where(
+    [class$="-editor"],
+    [class$="-inspector"],
+    [class$="-sidebar-panel"]
+  ) {
+    position: relative !important;
+    top: auto !important;
+    max-height: none !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .sx-module :where(
+    [class$="-toolbar"],
+    [class$="-filters"],
+    [class$="-controls"],
+    [class*="filter-bar"],
+    [class*="action-bar"]
+  ) {
+    align-items: stretch !important;
+    flex-direction: column !important;
+  }
+
+  .sx-module :where(
+    [class$="-toolbar"],
+    [class$="-filters"],
+    [class$="-controls"],
+    [class*="filter-bar"],
+    [class*="action-bar"]
+  ) > :where(div, section) {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .sx-module :where(
+    [class$="-metrics"],
+    [class$="-stats"],
+    [class$="-summary"],
+    [class*="metric-grid"],
+    [class*="stats-grid"]
+  ) {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .sx-module .sx-workspace-body {
+    padding: 12px 10px calc(88px + env(safe-area-inset-bottom));
+  }
+
+  .sx-module :where(
+    [class$="-manager"],
+    [class$="-workspace"],
+    [class$="-content"]
+  ) {
+    gap: 12px !important;
+  }
+
+  .sx-module :where(
+    [class$="-metrics"],
+    [class$="-stats"],
+    [class$="-summary"],
+    [class*="metric-grid"],
+    [class*="stats-grid"]
+  ) {
+    display: flex !important;
+    gap: 10px !important;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    overscroll-behavior-inline: contain;
+    padding-bottom: 2px;
+  }
+
+  .sx-module :where(
+    [class$="-metrics"],
+    [class$="-stats"],
+    [class$="-summary"],
+    [class*="metric-grid"],
+    [class*="stats-grid"]
+  ) > :where(article, div) {
+    flex: 0 0 min(78vw, 270px);
+    scroll-snap-align: start;
+  }
+
+  .sx-module :where(
+    [class$="-toolbar"],
+    [class$="-filters"],
+    [class$="-controls"],
+    [class*="filter-bar"],
+    [class*="action-bar"]
+  ) {
+    position: relative !important;
+    top: auto !important;
+    padding: 10px !important;
+    border-radius: var(--adv-radius-lg) !important;
+  }
+
+  .sx-module :where(
+    [class$="-toolbar"],
+    [class$="-filters"],
+    [class$="-controls"],
+    [class*="filter-bar"],
+    [class*="action-bar"]
+  ) :where(input, select, textarea, button, a) {
+    width: 100%;
+    min-height: 46px;
+  }
+
+  .sx-module :where(
+    [class$="-form-grid"],
+    [class*="fields-grid"],
+    [class*="settings-grid"]
+  ) {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .sx-module :where(
+    [class$="-form-grid"],
+    [class*="fields-grid"],
+    [class*="settings-grid"]
+  ) > .wide {
+    grid-column: auto !important;
+  }
+
+  .sx-module :where(
+    [class$="-form-actions"],
+    [class$="-footer-actions"],
+    [class*="modal-actions"]
+  ) {
+    align-items: stretch !important;
+    flex-direction: column-reverse !important;
+    gap: 8px !important;
+  }
+
+  .sx-module :where(
+    [class$="-form-actions"],
+    [class$="-footer-actions"],
+    [class*="modal-actions"]
+  ) :where(button, a) {
+    width: 100%;
+    min-height: 46px;
+  }
+
+  .sx-module :where(
+    [class$="-card"],
+    [class$="-panel"],
+    [class$="-editor"],
+    [class$="-directory"],
+    [class$="-builder"],
+    [class$="-canvas"],
+    [class$="-inspector"]
+  ) {
+    border-radius: var(--adv-radius-lg) !important;
+  }
+
+  .sx-module :where(
+    [class*="kanban"],
+    [class*="pipeline"]
+  ) {
+    scroll-snap-type: x proximity;
+  }
+
+  .sx-module :where(
+    [class*="kanban-column"],
+    [class*="pipeline-column"]
+  ) {
+    min-width: min(84vw, 320px) !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .sx-module :where(
+    [class$="-metrics"],
+    [class$="-stats"],
+    [class$="-summary"],
+    [class*="metric-grid"],
+    [class*="stats-grid"]
+  ) > :where(article, div) {
+    flex-basis: 84vw;
+  }
+
+  .sx-module :where(
+    [class$="-panel"] > header,
+    [class$="-card"] > header,
+    [class$="-editor"] > header,
+    [class$="-directory"] > header
+  ) {
+    align-items: flex-start !important;
+    flex-direction: column !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sx-module *,
+  .sx-module *::before,
+  .sx-module *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

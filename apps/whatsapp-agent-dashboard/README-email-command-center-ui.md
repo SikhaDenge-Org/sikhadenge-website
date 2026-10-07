@@ -1,0 +1,1 @@
+Scoped Email Command Center UI refresh for /email only. Uses Manrope within the Email page body via next/font/google. Global shell, other channels, and other module typography remain unchanged. Metrics and status views stay data-driven from existing Email APIs. Production validation: TypeScript typecheck, Next.js production build, and Email Command Center scope test pass.

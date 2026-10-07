@@ -1,0 +1,204 @@
+name: WhatsApp Agent UI V2 Reconcile Deploy
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-production-ui-v2-reconcile-deploy.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  reconcile-and-deploy:
+    if: contains(github.event.head_commit.message, '[production-reconcile-deploy]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      TARGET_SHA: ${{ github.sha }}
+      PRODUCTION_RUN_ID: ui-v2-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Checkout exact release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 0
+
+      - name: Validate target and production secrets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          missing=0
+          for variable_name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
+            if [[ -z "${!variable_name:-}" ]]; then
+              printf 'Missing required production secret: %s\n' "$variable_name" >&2
+              missing=1
+            fi
+          done
+          test "$missing" = "0"
+          if [[ -z "${SSH_PORT:-}" ]]; then
+            printf 'SSH_PORT=22\n' >> "$GITHUB_ENV"
+          fi
+          printf 'PASS: TARGET_AND_SECRET_GATE_COMPLETE\n'
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          private_key_file="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$private_key_file"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$private_key_file"
+          fi
+          chmod 600 "$private_key_file"
+          [[ "$SSH_HOST" =~ ^[^[:space:]/]+$ ]]
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
+          (( SSH_PORT >= 1 && SSH_PORT <= 65535 ))
+          read -r _ supplied_key_type supplied_key_material _ <<< "$SSH_HOST_KEY"
+          test "$supplied_key_type" = "ssh-ed25519"
+          test -n "$supplied_key_material"
+          printf '%s %s\n' "$supplied_key_type" "$supplied_key_material" | ssh-keygen -lf - -E sha256 >/dev/null
+          canonical_host="[$SSH_HOST]:$SSH_PORT"
+          printf '%s %s %s\n' "$canonical_host" "$supplied_key_type" "$supplied_key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$private_key_file" >/dev/null
+          ssh-keygen -F "$canonical_host" -f "$HOME/.ssh/known_hosts" >/dev/null
+          printf 'PASS: PINNED_SSH_IDENTITY_CONFIGURED\n'
+
+      - name: Verify pinned SSH transport
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "$SSH_USER@$SSH_HOST" \
+            'test "$(id -u)" = "0" && printf "PASS: PINNED_SSH_TRANSPORT_VERIFIED\n"'
+
+      - name: Hash-lock live reconciliation and run guarded deployment
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "TARGET_SHA='$TARGET_SHA' RUN_ID='$PRODUCTION_RUN_ID' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+
+          LIVE_APP=/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard
+          REPO_ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          RELEASE_BRANCH=release/whatsapp-instagram-agent-flow-20260731
+          RELEASE_REF=refs/remotes/origin/release/whatsapp-instagram-agent-flow-20260731
+          EXPECTED_LIVE_SHA=6cf48dfe8fcd3f14d498dfeb3d1ea70d1be37a8e
+          EXPECTED_PATCH_SHA256=668679fbccc7eed4b189e8ba4f95f3abbb49db19428765e43b6ed0c6558f739a
+          STAGE_ROOT="/tmp/sikhadenge-ui-v2-production-${RUN_ID}"
+          STAGE_APP="$STAGE_ROOT/apps/whatsapp-agent-dashboard"
+          BACKUP_DIR="/root/sikhadenge-backups/${RUN_ID}"
+
+          cleanup_stage() {
+            git -C "$LIVE_APP" worktree remove --force "$STAGE_ROOT" >/dev/null 2>&1 || true
+          }
+          trap cleanup_stage EXIT
+
+          test -d "$LIVE_APP"
+          test "$(git -C "$LIVE_APP" branch --show-current)" = "$RELEASE_BRANCH"
+          git -C "$LIVE_APP" fetch origin \
+            +refs/heads/release/whatsapp-instagram-agent-flow-20260731:$RELEASE_REF
+          test "$(git -C "$LIVE_APP" rev-parse "$RELEASE_REF")" = "$TARGET_SHA"
+          test "$(git -C "$LIVE_APP" rev-parse HEAD)" = "$EXPECTED_LIVE_SHA"
+          git -C "$LIVE_APP" merge-base --is-ancestor "$EXPECTED_LIVE_SHA" "$TARGET_SHA"
+
+          expected_dirty_paths=(
+            apps/whatsapp-agent-dashboard/app/api/analytics/overview/route.ts
+            apps/whatsapp-agent-dashboard/app/api/conversations/route.ts
+            apps/whatsapp-agent-dashboard/app/globals.css
+            apps/whatsapp-agent-dashboard/app/inbox/page.tsx
+            apps/whatsapp-agent-dashboard/app/layout.tsx
+            apps/whatsapp-agent-dashboard/components/inbox/InboxDashboardV2.tsx
+            apps/whatsapp-agent-dashboard/lib/inbox/conversation-repository.ts
+            apps/whatsapp-agent-dashboard/next-env.d.ts
+            apps/whatsapp-agent-dashboard/package.json
+            apps/whatsapp-agent-dashboard/scripts/masterclass-flow-worker.ts
+          )
+
+          actual_dirty_paths="$(git -C "$REPO_ROOT" diff HEAD --name-only --no-renames | LC_ALL=C sort)"
+          expected_dirty_list="$(printf '%s\n' "${expected_dirty_paths[@]}" | LC_ALL=C sort)"
+
+          if [[ -z "$actual_dirty_paths" ]]; then
+            printf 'PASS: LIVE_TRACKED_WORKTREE_ALREADY_CLEAN\n'
+            test -z "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)"
+          elif [[ "$actual_dirty_paths" == "$expected_dirty_list" ]]; then
+            install -d -m 700 "$BACKUP_DIR"
+            recovery_patch="$BACKUP_DIR/production-dirty-before-ui-v2.patch"
+            git -C "$REPO_ROOT" diff HEAD --binary -- "${expected_dirty_paths[@]}" > "$recovery_patch"
+            test -s "$recovery_patch"
+            chmod 600 "$recovery_patch"
+            patch_sha256="$(sha256sum "$recovery_patch" | awk '{print $1}')"
+            printf 'HASH_LOCK_PATCH_SHA256=%s\n' "$patch_sha256"
+            if [[ "$patch_sha256" != "$EXPECTED_PATCH_SHA256" ]]; then
+              printf 'FAIL: HASH_LOCK_PATCH_DIGEST_MISMATCH\n' >&2
+              exit 62
+            fi
+
+            untracked_before_sha="$(git -C "$REPO_ROOT" ls-files --others --exclude-standard -z | sha256sum | awk '{print $1}')"
+            untracked_before_count="$(git -C "$REPO_ROOT" ls-files --others --exclude-standard | wc -l | tr -d ' ')"
+            {
+              printf 'RUN_ID=%s\n' "$RUN_ID"
+              printf 'LIVE_SHA=%s\n' "$EXPECTED_LIVE_SHA"
+              printf 'TARGET_SHA=%s\n' "$TARGET_SHA"
+              printf 'PATCH_SHA256=%s\n' "$patch_sha256"
+              printf 'UNTRACKED_COUNT_BEFORE=%s\n' "$untracked_before_count"
+              printf 'UNTRACKED_SHA_BEFORE=%s\n' "$untracked_before_sha"
+            } > "$BACKUP_DIR/ui-v2-reconciliation-manifest.txt"
+            chmod 600 "$BACKUP_DIR/ui-v2-reconciliation-manifest.txt"
+
+            git -C "$REPO_ROOT" restore --source=HEAD --staged --worktree -- "${expected_dirty_paths[@]}"
+            test -z "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)"
+            untracked_after_sha="$(git -C "$REPO_ROOT" ls-files --others --exclude-standard -z | sha256sum | awk '{print $1}')"
+            untracked_after_count="$(git -C "$REPO_ROOT" ls-files --others --exclude-standard | wc -l | tr -d ' ')"
+            test "$untracked_after_sha" = "$untracked_before_sha"
+            test "$untracked_after_count" = "$untracked_before_count"
+            printf 'PASS: HASH_LOCK_RECONCILIATION_COMPLETE untracked_count=%s\n' "$untracked_after_count"
+          else
+            printf 'HASH_LOCK_ACTUAL_DIRTY_PATHS_BEGIN\n'
+            printf '%s\n' "$actual_dirty_paths"
+            printf 'HASH_LOCK_ACTUAL_DIRTY_PATHS_END\n'
+            printf 'HASH_LOCK_TRACKED_STATUS_BEGIN\n'
+            git -C "$REPO_ROOT" status --porcelain --untracked-files=no
+            printf 'HASH_LOCK_TRACKED_STATUS_END\n'
+            printf 'FAIL: HASH_LOCK_DIRTY_PATH_SET_CHANGED\n' >&2
+            exit 61
+          fi
+
+          test -z "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)"
+          git -C "$LIVE_APP" worktree add --detach "$STAGE_ROOT" "$TARGET_SHA"
+          ln -s "$LIVE_APP/.env" "$STAGE_APP/.env"
+          cd "$STAGE_APP"
+          npm install --include=dev --no-audit --no-fund --package-lock=false
+
+          LIVE_APP="$LIVE_APP" \
+          STAGE_APP="$STAGE_APP" \
+          RELEASE_SHA="$TARGET_SHA" \
+          RUN_ID="$RUN_ID" \
+          PM2_PROCESS_NAME=sikhadenge-whatsapp-agent \
+          PUBLIC_URL=https://whatsapp.sikhadenge.in \
+          BACKUP_ROOT=/root/sikhadenge-backups \
+          BACKUP_DIR="$BACKUP_DIR" \
+          ENV_FILE="$LIVE_APP/.env" \
+          bash "$STAGE_APP/scripts/engageos-production-batch1.sh"
+          REMOTE

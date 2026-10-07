@@ -1,0 +1,438 @@
+/* Template Studio visual refinement layer.
+   Loaded after template-studio.css so this file can safely correct layout
+   behaviour without changing the shared dashboard system. */
+
+.sx-module .template-studio {
+  width: 100%;
+  max-width: 1540px;
+  margin: 0 auto;
+  gap: 16px;
+  container-type: inline-size;
+}
+
+.sx-module .template-metrics {
+  gap: 14px;
+}
+
+.sx-module .template-metrics article {
+  position: relative;
+  min-height: 92px;
+  padding: 17px 18px;
+  overflow: hidden;
+  border-color: #e5e9f2;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+}
+
+.sx-module .template-metrics article::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  content: "";
+  background: #dbe5ff;
+}
+
+.sx-module .template-metrics article:nth-child(2)::before {
+  background: #b7ebcf;
+}
+
+.sx-module .template-metrics article:nth-child(3)::before {
+  background: #fde2a6;
+}
+
+.sx-module .template-metrics article:nth-child(4)::before {
+  background: #fecaca;
+}
+
+.sx-module .template-metrics span {
+  font-weight: 650;
+}
+
+.sx-module .template-metrics strong {
+  margin-top: 10px;
+  font-size: 30px;
+  letter-spacing: -0.03em;
+}
+
+.sx-module .template-studio-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(350px, 390px);
+  gap: 20px;
+}
+
+.sx-module .template-editor,
+.sx-module .template-preview-card,
+.sx-module .template-library {
+  min-width: 0;
+  border-color: #e5e9f2;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.055);
+}
+
+.sx-module .template-editor {
+  overflow: clip;
+}
+
+.sx-module .template-section-heading {
+  min-height: 76px;
+  padding: 19px 22px;
+  background: linear-gradient(180deg, #ffffff 0%, #fcfdff 100%);
+}
+
+.sx-module .template-section-heading h3,
+.sx-module .template-library-toolbar h3 {
+  font-size: 16px;
+  letter-spacing: -0.01em;
+}
+
+.sx-module .template-section-heading small {
+  align-self: center;
+  padding: 6px 10px;
+  border: 1px solid #e3e9f8;
+  border-radius: 999px;
+  background: #f7f9ff;
+  color: #667085;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.sx-module .template-form-grid,
+.sx-module .template-inline-fields {
+  gap: 14px 16px;
+  padding: 20px 22px 0;
+}
+
+.sx-module .template-wide-field {
+  padding: 18px 22px 0;
+}
+
+.sx-module .template-editor label > span {
+  font-size: 12.5px;
+}
+
+.sx-module .template-editor input,
+.sx-module .template-editor select,
+.sx-module .template-library-actions input,
+.sx-module .template-library-actions select,
+.sx-module .template-button-row input,
+.sx-module .template-button-row select {
+  min-height: 43px;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.sx-module .template-editor textarea {
+  min-height: 170px;
+  border-radius: 11px;
+  background: #ffffff;
+}
+
+.sx-module .template-media-uploader {
+  grid-template-columns: minmax(220px, 1fr) minmax(210px, 0.8fr) auto;
+  gap: 14px;
+  margin: 18px 22px 0;
+  padding: 16px;
+  border-color: #93adff;
+  background: linear-gradient(135deg, #f8faff 0%, #f2f6ff 100%);
+}
+
+.sx-module .template-file-picker span {
+  min-height: 43px;
+  padding: 11px 13px;
+  border-radius: 10px;
+}
+
+.sx-module .template-media-uploader button {
+  min-height: 43px;
+  white-space: nowrap;
+}
+
+.sx-module .template-variable-panel,
+.sx-module .template-button-builder {
+  margin: 18px 22px 0;
+  padding: 16px;
+  border-color: #e4e8ef;
+  background: #fafbfc;
+}
+
+.sx-module .template-button-row {
+  grid-template-columns:
+    30px
+    minmax(145px, 0.75fr)
+    minmax(160px, 0.9fr)
+    minmax(220px, 1.35fr)
+    36px;
+  gap: 10px;
+}
+
+.sx-module .template-form-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  margin-top: 20px;
+  padding: 16px 22px;
+  border-top-color: #e4e8ef;
+  background: rgba(249, 250, 252, 0.96);
+  backdrop-filter: blur(10px);
+}
+
+.sx-module .template-form-buttons button {
+  min-height: 42px;
+  padding-right: 16px;
+  padding-left: 16px;
+  white-space: nowrap;
+}
+
+.sx-module .template-preview-card {
+  position: sticky;
+  top: 96px;
+  max-height: calc(100vh - 116px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.sx-module .template-preview-card .template-section-heading {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.sx-module .template-phone-shell {
+  width: calc(100% - 36px);
+  max-width: 340px;
+  margin: 20px auto;
+  border-width: 8px;
+  border-radius: 30px;
+}
+
+.sx-module .template-phone-canvas {
+  min-height: 500px;
+  padding: 18px 12px 24px;
+}
+
+.sx-module .template-message-bubble {
+  width: 100%;
+  max-width: 304px;
+}
+
+.sx-module .template-preview-media {
+  width: 100%;
+  max-height: 340px;
+  object-fit: contain;
+  object-position: center;
+  background: #eef1f5;
+}
+
+.sx-module .template-preview-placeholder {
+  min-height: 210px;
+}
+
+.sx-module .template-preview-body {
+  max-height: 230px;
+  overflow-y: auto;
+  font-size: 12.25px;
+}
+
+.sx-module .template-approval-guide {
+  margin: 0 20px 20px;
+  padding: 16px;
+}
+
+.sx-module .template-library-toolbar {
+  align-items: center;
+  padding: 18px 22px;
+  background: linear-gradient(180deg, #ffffff 0%, #fcfdff 100%);
+}
+
+.sx-module .template-library-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.sx-module .template-library-actions input {
+  min-width: 230px;
+}
+
+.sx-module .template-library-actions button {
+  min-height: 43px;
+  white-space: nowrap;
+}
+
+.sx-module .template-empty {
+  min-height: 210px;
+  display: grid;
+  place-items: center;
+}
+
+@container (max-width: 1160px) {
+  .sx-module .template-studio-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .sx-module .template-preview-card {
+    position: static;
+    display: grid;
+    grid-template-columns: minmax(320px, 410px) minmax(260px, 1fr);
+    max-height: none;
+    overflow: hidden;
+  }
+
+  .sx-module .template-preview-card .template-section-heading {
+    position: static;
+    grid-column: 1 / -1;
+  }
+
+  .sx-module .template-phone-shell {
+    grid-column: 1;
+    align-self: start;
+  }
+
+  .sx-module .template-approval-guide {
+    grid-column: 2;
+    align-self: start;
+    margin: 20px 20px 20px 0;
+  }
+}
+
+@container (max-width: 880px) {
+  .sx-module .template-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sx-module .template-form-grid,
+  .sx-module .template-inline-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .sx-module .template-media-uploader {
+    grid-template-columns: 1fr auto;
+  }
+
+  .sx-module .template-media-copy {
+    grid-column: 1 / -1;
+  }
+
+  .sx-module .template-button-row {
+    grid-template-columns: 30px minmax(150px, 0.85fr) minmax(160px, 1fr) 36px;
+  }
+
+  .sx-module .template-button-row > input:nth-of-type(2),
+  .sx-module .template-button-helper {
+    grid-column: 2 / -1;
+  }
+
+  .sx-module .template-preview-card {
+    grid-template-columns: 1fr;
+  }
+
+  .sx-module .template-phone-shell,
+  .sx-module .template-approval-guide {
+    grid-column: 1;
+  }
+
+  .sx-module .template-approval-guide {
+    margin: 0 20px 20px;
+  }
+
+  .sx-module .template-form-actions,
+  .sx-module .template-library-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .sx-module .template-library-actions {
+    justify-content: flex-start;
+  }
+}
+
+@container (max-width: 560px) {
+  .sx-module .template-metrics {
+    gap: 8px;
+  }
+
+  .sx-module .template-metrics article {
+    min-height: 82px;
+    padding: 14px 15px;
+  }
+
+  .sx-module .template-metrics strong {
+    font-size: 26px;
+  }
+
+  .sx-module .template-section-heading {
+    min-height: auto;
+    padding: 16px;
+  }
+
+  .sx-module .template-section-heading small {
+    display: none;
+  }
+
+  .sx-module .template-form-grid,
+  .sx-module .template-inline-fields,
+  .sx-module .template-wide-field {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .sx-module .template-media-uploader,
+  .sx-module .template-variable-panel,
+  .sx-module .template-button-builder {
+    margin-right: 16px;
+    margin-left: 16px;
+  }
+
+  .sx-module .template-media-uploader {
+    grid-template-columns: 1fr;
+  }
+
+  .sx-module .template-button-row {
+    grid-template-columns: 30px 1fr 36px;
+  }
+
+  .sx-module .template-button-row select,
+  .sx-module .template-button-row input,
+  .sx-module .template-button-helper {
+    grid-column: 2 / 3;
+  }
+
+  .sx-module .template-button-row .template-remove-button {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .sx-module .template-form-actions {
+    position: static;
+    padding: 15px 16px;
+  }
+
+  .sx-module .template-form-buttons {
+    width: 100%;
+  }
+
+  .sx-module .template-form-buttons button {
+    flex: 1 1 100%;
+  }
+
+  .sx-module .template-library-toolbar {
+    padding: 16px;
+  }
+
+  .sx-module .template-library-actions input,
+  .sx-module .template-library-actions select,
+  .sx-module .template-library-actions button {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* Viewport fallback for browsers that do not support container queries. */
+@media (max-width: 1450px) {
+  @supports not (container-type: inline-size) {
+    .sx-module .template-studio-layout {
+      grid-template-columns: 1fr;
+    }
+
+    .sx-module .template-preview-card {
+      position: static;
+      max-height: none;
+    }
+  }
+}

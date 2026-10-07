@@ -1,0 +1,205 @@
+name: WhatsApp Agent Page 02 Production V5
+
+on:
+  push:
+    branches:
+      - release/whatsapp-instagram-agent-flow-20260731
+    paths:
+      - ".github/workflows/whatsapp-agent-production-page02-v5.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-agent-production
+  cancel-in-progress: false
+
+jobs:
+  deploy-page02-v5:
+    if: contains(github.event.head_commit.message, '[production-page02-v5]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: whatsapp-agent-production
+    env:
+      SSH_HOST: ${{ secrets.WHATSAPP_PROD_HOST }}
+      SSH_USER: ${{ secrets.WHATSAPP_PROD_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.WHATSAPP_PROD_SSH_PRIVATE_KEY }}
+      SSH_HOST_KEY: ${{ secrets.WHATSAPP_PROD_SSH_HOST_KEY }}
+      SSH_PORT: ${{ vars.WHATSAPP_PROD_SSH_PORT }}
+      TARGET_SHA: ${{ github.sha }}
+      RUN_ID: page02-v5-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 1
+
+      - name: Configure pinned SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          for v in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do test -n "${!v:-}"; done
+          if [[ -z "${SSH_PORT:-}" ]]; then echo 'SSH_PORT=22' >> "$GITHUB_ENV"; fi
+          install -d -m 700 "$HOME/.ssh"
+          KEY="$HOME/.ssh/whatsapp-production"
+          if [[ "$SSH_PRIVATE_KEY" == *"BEGIN OPENSSH PRIVATE KEY"* ]]; then
+            printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY"
+          else
+            printf '%s' "$SSH_PRIVATE_KEY" | base64 --decode > "$KEY"
+          fi
+          chmod 600 "$KEY"
+          read -r _ key_type key_material _ <<< "$SSH_HOST_KEY"
+          test "$key_type" = ssh-ed25519
+          printf '[%s]:%s %s %s\n' "$SSH_HOST" "$SSH_PORT" "$key_type" "$key_material" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$KEY" >/dev/null
+          ssh -p "$SSH_PORT" -i "$KEY" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "$SSH_USER@$SSH_HOST" 'test "$(id -u)" = 0'
+          echo 'PASS: SSH verified'
+
+      - name: Build and activate exact Page 02
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -p "$SSH_PORT" -i "$HOME/.ssh/whatsapp-production" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "TARGET_SHA='$TARGET_SHA' RUN_ID='$RUN_ID' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          REPO=/var/www/sikhadenge-whatsapp-agent/source
+          BRANCH=release/whatsapp-instagram-agent-flow-20260731
+          REF=refs/remotes/origin/$BRANCH
+          PM2=sikhadenge-whatsapp-agent
+          PAGE_TSX=apps/whatsapp-agent-dashboard/app/inbox/page.tsx
+          PAGE_CSS=apps/whatsapp-agent-dashboard/app/page02-inbox-standard-v16.css
+          STAGE=/tmp/$RUN_ID/app
+          BACKUP=/root/sikhadenge-backups/$RUN_ID
+          RUNTIME=''
+          OLD=''
+          FAILED=''
+          ARMED=0
+
+          rollback() {
+            rc=$?
+            trap - ERR
+            set +e
+            echo "FAIL: deploy rc=$rc"
+            pm2 describe "$PM2" || true
+            pm2 logs "$PM2" --nostream --lines 80 || true
+            ss -ltnp | grep ':3100' || true
+            if [[ "$ARMED" = 1 && -d "$OLD" ]]; then
+              [[ -d "$RUNTIME/.next" ]] && { rm -rf "$FAILED"; mv "$RUNTIME/.next" "$FAILED"; }
+              mv "$OLD" "$RUNTIME/.next"
+              pm2 restart "$PM2" --update-env >/tmp/page02-v5-rollback.log 2>&1 || true
+              sleep 4
+              echo 'ROLLBACK: previous build restored'
+            fi
+            exit "$rc"
+          }
+          trap rollback ERR
+
+          J=$(mktemp)
+          pm2 jlist > "$J"
+          RUNTIME=$(node - "$PM2" "$J" <<'NODE'
+          const fs=require('node:fs');
+          const [name,file]=process.argv.slice(2);
+          const p=JSON.parse(fs.readFileSync(file,'utf8')).find(x=>x.name===name);
+          if(!p?.pm2_env?.pm_cwd) process.exit(2);
+          process.stdout.write(p.pm2_env.pm_cwd);
+          NODE
+          )
+          rm -f "$J"
+          case "$RUNTIME" in /var/www/sikhadenge-whatsapp-agent/*) ;; *) exit 3;; esac
+          test -f "$RUNTIME/.next/BUILD_ID"
+          test -d "$RUNTIME/node_modules"
+          test -f "$RUNTIME/.env"
+          OLD_BUILD=$(cat "$RUNTIME/.next/BUILD_ID")
+          echo "RUNTIME=$RUNTIME"
+          echo "OLD_BUILD=$OLD_BUILD"
+
+          for a in page01-hero-desktop-v17.png page01-hero-tablet-v17.png page01-hero-ultrawide-v17.png; do test -s "$RUNTIME/public/$a"; done
+          mkdir -p "$BACKUP"
+          (cd "$RUNTIME" && sha256sum public/page01-hero-desktop-v17.png public/page01-hero-tablet-v17.png public/page01-hero-ultrawide-v17.png) > "$BACKUP/page01-before.sha256"
+
+          git -C "$REPO" fetch origin "+refs/heads/$BRANCH:$REF"
+          test "$(git -C "$REPO" rev-parse "$REF")" = "$TARGET_SHA"
+          git -C "$REPO" cat-file -e "$TARGET_SHA:$PAGE_TSX"
+          git -C "$REPO" cat-file -e "$TARGET_SHA:$PAGE_CSS"
+
+          rm -rf "/tmp/$RUN_ID"
+          mkdir -p "$STAGE"
+          (cd "$RUNTIME" && tar --exclude='./.next' --exclude='./.next-*' --exclude='./node_modules' -cf - .) | (cd "$STAGE" && tar -xf -)
+          ln -s "$RUNTIME/node_modules" "$STAGE/node_modules"
+          mkdir -p "$STAGE/app/inbox"
+          git -C "$REPO" show "$TARGET_SHA:$PAGE_TSX" > "$STAGE/app/inbox/page.tsx"
+          git -C "$REPO" show "$TARGET_SHA:$PAGE_CSS" > "$STAGE/app/page02-inbox-standard-v16.css"
+          echo 'PASS: exact Page 02 source overlaid'
+
+          cd "$STAGE"
+          npm run typecheck
+          NODE_ENV=production npm run build
+          NEW_BUILD=$(cat .next/BUILD_ID)
+          test -n "$NEW_BUILD"
+          echo "NEW_BUILD=$NEW_BUILD"
+
+          NEW="$RUNTIME/.next-stage-$RUN_ID"
+          OLD="$RUNTIME/.next-before-$RUN_ID"
+          FAILED="$RUNTIME/.next-failed-$RUN_ID"
+          test ! -e "$NEW"
+          test ! -e "$OLD"
+          cp -a .next "$NEW"
+          test "$(cat "$NEW/BUILD_ID")" = "$NEW_BUILD"
+          mv "$RUNTIME/.next" "$OLD"
+          mv "$NEW" "$RUNTIME/.next"
+          ARMED=1
+          pm2 restart "$PM2" --update-env >/tmp/page02-v5-pm2.log 2>&1
+          echo 'PASS: PM2 restarted'
+
+          READY=0
+          LOCAL_INBOX=''
+          for n in $(seq 1 20); do
+            sleep 2
+            LOCAL_INBOX=$(curl --max-time 4 -sS -o /dev/null -w '%{http_code}' 'http://127.0.0.1:3100/inbox?page02=v5' || true)
+            case "$LOCAL_INBOX" in 200|301|302|303|307|308) READY=1; break;; esac
+            echo "WAIT: attempt=$n local_inbox=$LOCAL_INBOX"
+          done
+          test "$READY" = 1
+          test "$(cat "$RUNTIME/.next/BUILD_ID")" = "$NEW_BUILD"
+          echo "PASS: local inbox healthy code=$LOCAL_INBOX"
+
+          PUBLIC_LOGIN=$(curl --max-time 15 -sS -L -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/login?page02=v5' || true)
+          PUBLIC_INBOX=$(curl --max-time 15 -sS -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/inbox?page02=v5' || true)
+          test "$PUBLIC_LOGIN" = 200
+          case "$PUBLIC_INBOX" in 200|301|302|303|307|308) ;; *) exit 7;; esac
+          echo "PASS: public login=$PUBLIC_LOGIN inbox=$PUBLIC_INBOX"
+
+          (cd "$RUNTIME" && sha256sum public/page01-hero-desktop-v17.png public/page01-hero-tablet-v17.png public/page01-hero-ultrawide-v17.png) > "$BACKUP/page01-after.sha256"
+          cmp -s "$BACKUP/page01-before.sha256" "$BACKUP/page01-after.sha256"
+          cat > "$BACKUP/result.txt" <<EOF
+          STATUS=PASS
+          TARGET_SHA=$TARGET_SHA
+          RUNTIME=$RUNTIME
+          BUILD_BEFORE=$OLD_BUILD
+          BUILD_AFTER=$NEW_BUILD
+          LOCAL_INBOX=$LOCAL_INBOX
+          PUBLIC_LOGIN=$PUBLIC_LOGIN
+          PUBLIC_INBOX=$PUBLIC_INBOX
+          PAGE01_PRESERVED=true
+          EOF
+          cat "$BACKUP/result.txt"
+          ARMED=0
+          rm -rf "/tmp/$RUN_ID"
+          trap - ERR
+          echo 'PASS: PAGE02_V5_LIVE'
+          REMOTE
+
+      - name: Verify public domain
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          LOGIN=$(curl --max-time 15 -sS -L -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/login?page02=final-v5')
+          INBOX=$(curl --max-time 15 -sS -o /dev/null -w '%{http_code}' 'https://whatsapp.sikhadenge.in/inbox?page02=final-v5')
+          test "$LOGIN" = 200
+          case "$INBOX" in 200|301|302|303|307|308) ;; *) exit 1;; esac
+          echo "PASS: FINAL PUBLIC login=$LOGIN inbox=$INBOX"

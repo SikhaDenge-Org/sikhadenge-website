@@ -1,0 +1,202 @@
+/*
+ * Final layout repair for the WhatsApp Agent executive UI.
+ * Keeps the visual redesign while correcting desktop breakpoint collapse,
+ * header overlap and nested page scrolling seen on production displays.
+ */
+
+html,
+body {
+  overflow-x: hidden;
+}
+
+.workspace,
+.module-workspace {
+  overflow: visible !important;
+}
+
+.module-workspace {
+  display: block !important;
+}
+
+.module-page-card {
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.module-page-content {
+  overflow: visible !important;
+}
+
+/* Reserve a clear header lane for the signed-in account control. */
+@media (min-width: 1101px) {
+  :root {
+    --wa-sidebar-width: 232px;
+  }
+
+  .topbar {
+    padding-right: 228px !important;
+  }
+
+  .session-toolbar {
+    right: 22px !important;
+    max-width: 205px;
+  }
+}
+
+/*
+ * Windows scaling / browser zoom can expose a 851-980 CSS-pixel viewport on a
+ * normal desktop monitor. Keep a readable navigation rail in that range rather
+ * than switching to the previous 78px icon-only mode.
+ */
+@media (min-width: 851px) and (max-width: 1100px) {
+  :root {
+    --wa-sidebar-width: 196px !important;
+  }
+
+  .dashboard-shell {
+    grid-template-columns: var(--wa-sidebar-width) minmax(0, 1fr) !important;
+  }
+
+  .rail {
+    width: var(--wa-sidebar-width) !important;
+    padding: 12px 10px !important;
+    align-items: stretch !important;
+  }
+
+  .brand-mark {
+    width: 100% !important;
+    height: 50px !important;
+    margin: 0 !important;
+    justify-content: flex-start !important;
+    gap: 9px !important;
+    padding: 6px 8px !important;
+  }
+
+  .brand-mark::before {
+    width: 34px !important;
+    height: 34px !important;
+    flex-basis: 34px !important;
+  }
+
+  .brand-mark::after {
+    display: block !important;
+    font-size: 11px !important;
+    line-height: 1.25 !important;
+  }
+
+  .rail nav {
+    gap: 2px !important;
+    margin: 13px 0 9px !important;
+  }
+
+  .rail nav::before {
+    display: block !important;
+    margin: 1px 8px 5px !important;
+    font-size: 8px !important;
+  }
+
+  .rail-button,
+  .rail-bottom {
+    width: 100% !important;
+    min-height: 34px !important;
+    height: auto !important;
+    margin: 0 !important;
+    justify-content: flex-start !important;
+    padding: 7px 8px 7px 37px !important;
+    color: #aeb9c9 !important;
+    font-size: 10.5px !important;
+    line-height: 1.15 !important;
+  }
+
+  .rail-button.active {
+    color: #ffffff !important;
+  }
+
+  .rail-button::before {
+    left: 10px !important;
+    width: 18px !important;
+    height: 18px !important;
+    transform: translateY(-50%) !important;
+  }
+
+  .rail-bottom {
+    margin-top: auto !important;
+    padding-top: 10px !important;
+  }
+
+  .workspace {
+    padding: 14px 16px 20px !important;
+  }
+
+  .topbar {
+    margin: -14px -16px 14px !important;
+    padding: 10px 190px 10px 16px !important;
+  }
+
+  .topbar-actions {
+    gap: 6px !important;
+    flex-wrap: nowrap !important;
+  }
+
+  .topbar-actions .system-status {
+    display: none !important;
+  }
+
+  .session-toolbar {
+    top: 12px !important;
+    right: 12px !important;
+    max-width: 174px;
+  }
+
+  .metric-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .inbox-grid {
+    height: calc(100vh - 244px) !important;
+    min-height: 540px !important;
+    grid-template-columns: 260px minmax(360px, 1fr) !important;
+  }
+
+  .details-panel {
+    display: none !important;
+  }
+
+  .module-info-grid,
+  .module-status-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+/* Mobile/tablet uses one document scroll; the account control no longer floats
+ * over the page header. */
+@media (max-width: 850px) {
+  .session-toolbar {
+    position: relative !important;
+    inset: auto !important;
+    width: max-content;
+    max-width: calc(100% - 24px);
+    margin: 10px 12px 0 auto !important;
+  }
+
+  .topbar {
+    padding-right: 12px !important;
+  }
+
+  .module-page-card,
+  .module-page-content {
+    overflow: visible !important;
+  }
+
+  .inbox-grid {
+    height: auto !important;
+    min-height: calc(100dvh - 270px) !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .session-toolbar {
+    margin-top: 8px !important;
+  }
+}
