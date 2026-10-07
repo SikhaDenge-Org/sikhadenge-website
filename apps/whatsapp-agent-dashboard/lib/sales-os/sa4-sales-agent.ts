@@ -44,6 +44,7 @@ export interface QualificationSignals {
   interestedCourse?: string | null;
   experienceLevel?: "BEGINNER" | "INTERMEDIATE" | "ADVANCED" | null;
   counselorRequested: boolean;
+  scoreAdjustment: number;
 }
 
 /**
@@ -77,11 +78,18 @@ export function extractSignals(text: string): QualificationSignals {
     experienceLevel = "INTERMEDIATE";
   }
 
+  
+  let scoreAdjustment = 10;
+  if (detectedIntent === "COUNSELLOR_REQUEST") scoreAdjustment += 30;
+  if (detectedIntent === "FEES_QUERY") scoreAdjustment += 20;
+  if (interestedCourse) scoreAdjustment += 15;
+
   return {
     detectedIntent,
     interestedCourse,
     experienceLevel,
-    counselorRequested: detectedIntent === "COUNSELLOR_REQUEST"
+    counselorRequested: detectedIntent === "COUNSELLOR_REQUEST",
+    scoreAdjustment
   };
 }
 

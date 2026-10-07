@@ -56,16 +56,21 @@ export interface WhatsAppSuppressionRecord {
 export function isOptOutKeyword(text: string): boolean {
   if (!text) return false;
   const normalized = text.trim().toLowerCase();
-  const optOutPatterns = [
-    /^stop$/i,
-    /^unsubscribe$/i,
-    /^cancel$/i,
-    /^mat karo$/i,
-    /^message mat karo$/i,
-    /^roko$/i,
-    /^band karo$/i,
-    /^don't text$/i,
-    /^opt out$/i
+
+  // 1. Direct standard keywords
+  if (/^(stop|unsubscribe|cancel|quit|end|roko)$/i.test(normalized)) {
+    return true;
+  }
+
+  // 2. Conversational English & Hinglish opt-out patterns
+  const conversationalPatterns = [
+    /\b(stop|unsubscribe|cancel)\b/i,
+    /(message|msg|text)\s*mat\s*(karo|bhejo|kariye|send)/i,
+    /mat\s*(bhejo|karo|kariye)\s*(message|msg|text)?/i,
+    /(band\s+karo|roko|chup\s+raho|pareshan\s+mat\s+karo|disturb\s+mat\s+karo)/i,
+    /(don\'t|dont)\s*(text|message|contact|send)/i,
+    /opt\s*-?\s*out/i
   ];
-  return optOutPatterns.some((pattern) => pattern.test(normalized));
+
+  return conversationalPatterns.some((pattern) => pattern.test(normalized));
 }
