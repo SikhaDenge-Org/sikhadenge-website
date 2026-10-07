@@ -1,3 +1,16 @@
+
+export function sanitizeToRelativeDay(raw?: string): string {
+  if (!raw) return "Next Wednesday";
+  const val = raw.trim();
+  if (/^next\s+/i.test(val)) return val;
+  const match = val.match(/\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b/i);
+  if (match) {
+    const day = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
+    return `Next ${day}`;
+  }
+  return "Next Wednesday";
+}
+
 import type {
   AgentInput,
   AgentIntent,
@@ -48,6 +61,26 @@ function enabled(): boolean {
   return !["0", "false", "no", "off", "disabled"].includes(value);
 }
 
+
+export function toRelativeDayOnly(rawDate?: string): string {
+  if (!rawDate) return "Next Wednesday";
+  const trimmed = rawDate.trim();
+  
+  // If already relative (e.g. Next Monday, Next Wednesday)
+  if (/^next\s+/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  // Extract day of week if present
+  const match = trimmed.match(/\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b/i);
+  if (match) {
+    const day = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
+    return `Next ${day}`;
+  }
+
+  return "Next Wednesday";
+}
+
 function config(
   override?: AgentInput["masterclass"],
 ): MasterclassConfig {
@@ -59,7 +92,7 @@ function config(
   if (name && dateLabel && timeLabel && communityUrl) {
     return {
       name,
-      dateLabel,
+      dateLabel: toRelativeDayOnly(dateLabel),
       timeLabel,
       communityUrl,
     };
@@ -69,9 +102,7 @@ function config(
     name:
       process.env.MASTERCLASS_NAME?.trim() ||
       "Become AI Expert – Free Masterclass",
-    dateLabel:
-      process.env.MASTERCLASS_DATE_LABEL?.trim() ||
-      "Thursday, 06 August 2026",
+    dateLabel: toRelativeDayOnly(process.env.MASTERCLASS_DATE_LABEL?.trim() || "Next Wednesday"),
     timeLabel: process.env.MASTERCLASS_TIME_LABEL?.trim() || "08:00 PM IST",
     communityUrl:
       process.env.MASTERCLASS_COMMUNITY_URL?.trim() ||
@@ -163,7 +194,7 @@ function result(input: {
 
 function communityCta(input: AgentInput, cfg: MasterclassConfig): string {
   const name = firstName(input);
-  return `${name ? `Hi ${name} 👋` : "Hi Learner 👋"}\n\nAapka registration **${cfg.name}** ke liye successfully receive ho gaya hai ✅\n\n📅 ${cfg.dateLabel}\n⏰ ${cfg.timeLabel}\n💻 Live Online Masterclass\n\nMasterclass ka live joining link, important reminders aur complete details hamari official WhatsApp Community mein share ki jayengi.\n\n👇 Abhi WhatsApp Community join karke apni registration complete karein:\n\n🟢 ${cfg.communityUrl}\n\nCommunity join karne ke baad yahin **JOINED** reply kar dijiye ✅\n\nSikhaDenge Institute 🎓\nLearn • Earn • Grow`;
+  return `${name ? `Hi ${name} 👋` : "Hi Learner 👋"}\n\nAapka registration **${cfg.name}** ke liye successfully receive ho gaya hai ✅\n\n🗓️ ${toRelativeDayOnly(cfg.dateLabel)}\n⏰ ${cfg.timeLabel}\n💻 Live Online Masterclass\n\nMasterclass ka live joining link, important reminders aur complete details hamari official WhatsApp Community mein share ki jayengi.\n\n👇 Abhi WhatsApp Community join karke apni registration complete karein:\n\n🟢 ${cfg.communityUrl}\n\nCommunity join karne ke baad yahin **JOINED** reply kar dijiye ✅\n\nSikhaDenge Institute 🎓\nLearn • Earn • Grow`;
 }
 
 export function generateMasterclassCommunityReply(input: {
@@ -232,7 +263,7 @@ export function generateMasterclassCommunityReply(input: {
 
   if (JOINED_REPLY.test(message)) {
     return result({
-      reply: `Great 🎉\n\nAapne WhatsApp Community successfully join kar li hai ✅\n\n📅 ${cfg.dateLabel}\n⏰ ${cfg.timeLabel}\n\nLive session ka joining link aur reminder community mein share kiya jayega.\n\nEk chhota sa question 😊\nAap AI mainly kis purpose ke liye seekhna chahte hain?\n\n1. Job / Career Growth\n2. Business Growth\n3. Freelancing\n4. Daily Work Productivity\n5. Content Creation\n6. General Learning`,
+      reply: `Great 🎉\n\nAapne WhatsApp Community successfully join kar li hai ✅\n\n🗓️ ${toRelativeDayOnly(cfg.dateLabel)}\n⏰ ${cfg.timeLabel}\n\nLive session ka joining link aur reminder community mein share kiya jayega.\n\nEk chhota sa question 😊\nAap AI mainly kis purpose ke liye seekhna chahte hain?\n\n1. Job / Career Growth\n2. Business Growth\n3. Freelancing\n4. Daily Work Productivity\n5. Content Creation\n6. General Learning`,
       summary: "Recorded community-join confirmation and requested the learner goal.",
       nextQuestion: "Aap AI mainly kis purpose ke liye seekhna chahte hain?",
       leadUpdates: {
@@ -262,7 +293,7 @@ export function generateMasterclassCommunityReply(input: {
 
   if (WHEN_QUERY.test(message)) {
     return result({
-      reply: `📅 ${cfg.dateLabel}\n⏰ ${cfg.timeLabel}\n💻 Live Online Masterclass\n\nLive joining link community mein share hoga:\n\n🟢 ${cfg.communityUrl}\n\nJoin karne ke baad **JOINED** reply kar dijiye ✅`,
+      reply: `🗓️ ${toRelativeDayOnly(cfg.dateLabel)}\n⏰ ${cfg.timeLabel}\n💻 Live Online Masterclass\n\nLive joining link community mein share hoga:\n\n🟢 ${cfg.communityUrl}\n\nJoin karne ke baad **JOINED** reply kar dijiye ✅`,
       summary: "Shared the configured masterclass schedule and community CTA.",
       leadUpdates: commonLeadUpdates,
       intent: "BATCH_SCHEDULE",

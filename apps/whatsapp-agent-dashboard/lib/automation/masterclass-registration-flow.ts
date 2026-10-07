@@ -996,7 +996,7 @@ export async function getMasterclassAgentConfig(): Promise<MasterclassConfig> {
     const config = await getMasterclassFlowConfig();
     return {
       name: "Free AI Expert Masterclass",
-      dateLabel: `${config.classDay}, ${config.classDate}`,
+      dateLabel: config.classDay ? `Next ${config.classDay}` : "Next Wednesday",
       timeLabel: config.classTime,
       communityUrl: config.communityLink,
     };
@@ -1004,7 +1004,7 @@ export async function getMasterclassAgentConfig(): Promise<MasterclassConfig> {
     const fallback = defaultConfig();
     return {
       name: "Free AI Expert Masterclass",
-      dateLabel: `${fallback.classDay}, ${fallback.classDate}`,
+      dateLabel: fallback.classDay ? `Next ${fallback.classDay}` : "Next Wednesday",
       timeLabel: fallback.classTime,
       communityUrl: fallback.communityLink,
     };
@@ -1043,9 +1043,7 @@ export async function getMasterclassAgentConfigForConversation(
 
   return {
     name: "Free AI Expert Masterclass",
-    dateLabel:
-      `${enrollment.snapshot.classDay}, ` +
-      enrollment.snapshot.classDate,
+    dateLabel: enrollment.snapshot.classDay ? `Next ${enrollment.snapshot.classDay}` : "Next Wednesday",
     timeLabel: enrollment.snapshot.classTime,
     communityUrl: enrollment.snapshot.communityLink,
   };
