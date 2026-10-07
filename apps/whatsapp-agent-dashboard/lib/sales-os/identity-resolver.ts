@@ -14,7 +14,7 @@ export async function resolveWhatsAppContext(params: {
 }): Promise<ResolvedContext> {
   const cleanPhone = params.phone.replace(/\D/g, "");
 
-  let contact = await prisma.whatsappContact.findFirst({
+  let contact = await prisma.whatsAppContact.findFirst({
     where: {
       OR: [
         { phone: cleanPhone },
@@ -32,7 +32,7 @@ export async function resolveWhatsAppContext(params: {
   });
 
   if (!contact) {
-    contact = await prisma.whatsappContact.create({
+    contact = await prisma.whatsAppContact.create({
       data: {
         waId: cleanPhone,
         phone: cleanPhone,
@@ -51,7 +51,7 @@ export async function resolveWhatsAppContext(params: {
 
   let conversation = contact.conversations[0];
   if (!conversation) {
-    conversation = await prisma.whatsappConversation.create({
+    conversation = await prisma.whatsAppConversation.create({
       data: {
         contactId: contact.id,
         status: "OPEN",

@@ -8,7 +8,7 @@ export interface SuppressionCheckResult {
 
 export async function checkSuppression(phone: string): Promise<SuppressionCheckResult> {
   const cleanPhone = phone.replace(/\D/g, "");
-  const contact = await prisma.whatsappContact.findFirst({
+  const contact = await prisma.whatsAppContact.findFirst({
     where: {
       OR: [
         { phone: cleanPhone },
@@ -42,7 +42,7 @@ export async function handleInboundOptOut(phone: string, text: string): Promise<
   }
 
   const cleanPhone = phone.replace(/\D/g, "");
-  await prisma.whatsappContact.updateMany({
+  await prisma.whatsAppContact.updateMany({
     where: {
       OR: [
         { phone: cleanPhone },
