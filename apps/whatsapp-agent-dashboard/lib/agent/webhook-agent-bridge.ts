@@ -164,7 +164,6 @@ export async function processWebhookAgentBridge(
         stored.conversation._count.messages === 1;
       const canAutoActivate =
         isFirstMessageForNewLead &&
-        stored.conversation.agentMode !== AgentMode.HUMAN &&
         !stored.conversation.humanTakeoverAt;
 
       let effectiveAgentMode = stored.conversation.agentMode;
