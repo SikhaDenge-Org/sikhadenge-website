@@ -66,6 +66,6 @@ export async function resolveWhatsAppContext(params: {
     conversationId: conversation.id,
     leadId: contact.lead?.id || null,
     agentMode: (conversation.agentMode as "AI" | "HUMAN") || "AI",
-    isOptedOut: !!contact.optedOutAt || contact.consentStatus === "REVOKED"
+    isOptedOut: !!contact.optedOutAt || contact.consentStatus === "OPTED_OUT"
   };
 }
