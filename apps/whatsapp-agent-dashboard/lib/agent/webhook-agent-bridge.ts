@@ -17,6 +17,16 @@ import {
   processInboundAgentLifecycle,
   type LiveAgentLifecycleResult,
 } from "./live-agent-service";
+import {
+  isOptOutKeyword,
+  recordInboundConsent,
+  checkSuppression,
+  isAIHandlingAllowed,
+  extractSignals,
+  updateLeadFromSignals,
+  extractCTWAReferral,
+  attachAttributionToConversation,
+} from "../sales-os";
 
 export type WebhookAgentBridgeResult = {
   matched: number;
@@ -59,7 +69,14 @@ export async function processWebhookAgentBridge(
             id: true,
             agentMode: true,
             humanTakeoverAt: true,
-            lead: { select: { stage: true } },
+            contactId: true,
+            contact: {
+              select: {
+                id: true,
+                phone: true,
+              },
+            },
+            lead: { select: { id: true, stage: true } },
             _count: { select: { messages: true } },
           },
         },
@@ -71,6 +88,75 @@ export async function processWebhookAgentBridge(
     }
 
     result.matched += 1;
+    const messageText = stored.text?.trim() || "";
+    const phone = stored.conversation.contact?.phone || "";
+    const conversationId = stored.conversation.id;
+
+    // --- GATE 1: CTWA Meta Ad Attribution ---
+    try {
+      const rawPayload = payload as Record<string, any> | undefined;
+      const rawMsg = rawPayload?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+      const referral = rawMsg?.referral;
+      const ctwPayload = extractCTWAReferral(referral);
+      if (ctwPayload) {
+        await attachAttributionToConversation({
+          conversationId,
+          referral: ctwPayload,
+        });
+      }
+    } catch (refErr) {
+      console.warn("[sales-os-bridge] CTWA attribution error:", refErr);
+    }
+
+    // --- GATE 2: Opt-Out / STOP Keyword Suppression ---
+    if (messageText && isOptOutKeyword(messageText)) {
+      if (phone) {
+        await recordInboundConsent({
+          phone,
+          keywordMatched: messageText,
+          source: "WHATSAPP_INBOUND",
+        });
+      }
+      await prisma.whatsAppConversation.update({
+        where: { id: conversationId },
+        data: { agentMode: AgentMode.PAUSED },
+      });
+      result.skipped += 1;
+      continue;
+    }
+
+    // --- GATE 3: Global Suppression Check ---
+    if (phone) {
+      const suppression = await checkSuppression(phone);
+      if (suppression.isSuppressed) {
+        result.skipped += 1;
+        continue;
+      }
+    }
+
+    // --- GATE 4: Human Takeover Gate ---
+    const aiAllowed = await isAIHandlingAllowed(conversationId);
+    if (!aiAllowed || stored.conversation.agentMode === AgentMode.HUMAN) {
+      result.handoffs += 1;
+      continue;
+    }
+
+    // --- GATE 5: Lead Qualification & CRM Scoring Update ---
+    if (messageText && stored.conversation.contactId) {
+      try {
+        const signals = extractSignals(messageText);
+        await updateLeadFromSignals({
+          contactId: stored.conversation.contactId,
+          conversationId,
+          phone,
+          signals,
+        });
+      } catch (sigErr) {
+        console.warn("[sales-os-bridge] Qualification signals error:", sigErr);
+      }
+    }
+
+    // --- AI Dispatch & Inbound Lifecycle ---
     let lifecycle: LiveAgentLifecycleResult;
     try {
       const isFirstMessageForNewLead =
@@ -96,7 +182,7 @@ export async function processWebhookAgentBridge(
         stored.direction === MessageDirection.INBOUND &&
         stored.actor === MessageActor.CUSTOMER &&
         stored.type === MessageType.TEXT &&
-        Boolean(stored.text?.trim()) &&
+        Boolean(messageText) &&
         effectiveAgentMode === AgentMode.AI;
 
       if (shouldShowTyping) {
@@ -113,7 +199,6 @@ export async function processWebhookAgentBridge(
           acknowledgedAt = Date.now();
         }
 
-        // Keep the reply unsent for a full delay after Meta acknowledges typing.
         await waitForTypingDelay(acknowledgedAt);
       }
 
@@ -122,6 +207,7 @@ export async function processWebhookAgentBridge(
       result.failed += 1;
       continue;
     }
+
     if (lifecycle.analyzed) result.analyzed += 1;
     if (lifecycle.queued) result.queued += 1;
     if (lifecycle.sent) result.sent += 1;
