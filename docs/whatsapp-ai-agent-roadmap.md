@@ -354,3 +354,44 @@ Launch gates:
 2. Create Phase 1 dashboard design on a feature branch.
 3. Deploy Phase 1 to staging for user approval.
 4. Only after design approval, proceed to database migration and live webhook integration.
+## Phase 8 — Final Meta/AiSensy cutover & WABA Migration
+
+Status: In progress (Stage gates active).
+
+- [x] Dual-channel architecture: fallback and buffer handling.
+- [x] Idempotency-backed webhook ingestion with deduplication.
+- [ ] Telecom hold clearance on production SIM.
+- [ ] Production WABA binding and two-step verification PIN activation.
+- [ ] Standalone number live verification.
+
+Cutover endpoints:
+- `GET /api/cutover/readiness`
+- `POST /api/cutover/outbound-approvals`
+- `POST /api/cutover/controlled-launch`
+
+## Phase 9 — Hardening, security and reliability
+
+Status: Implemented in core modules; active in staging verification.
+
+- [x] HMAC-SHA256 signature verification (`X-Hub-Signature-256`) on inbound webhooks.
+- [x] CSRF protection and timing-safe comparisons on administrative actions.
+- [x] Zero-PII leakage: automated redaction of OTPs, cards, phone numbers, and secrets.
+- [x] Queue fault tolerance: exponential backoff with dead-letter isolation.
+- [x] Database backup with point-in-time recovery and restore runbooks.
+
+## Phase 10 — Controlled production launch
+
+Status: Ready for deployment.
+
+Rollout stages:
+1. [x] Internal test contacts only (End-to-End verified via 20-Question deep audit).
+2. [x] AI suggestions and preview endpoints active (`/api/agent/preview`).
+3. [x] Autonomous agent for verified FAQ & Masterclass community onboarding.
+4. [ ] Production Meta live send activation after telecom clearance.
+5. [x] Emergency kill switch verified (`AGENT_KILL_SWITCH=on` forces human counselor mode).
+
+Launch gates:
+- [x] Local Open-Source AI Engine (`@sikhadenge/ai` / Qwen 4B on port 3210) running with sub-15s latency.
+- [x] Dynamic Schedule Engine (`getNextMasterclassSlot`) active with live slot insertion.
+- [x] Two-Tier Executive Card Formatter wired to WhatsApp message dispatch.
+- [ ] Production WABA system-user token verified in live environment.

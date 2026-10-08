@@ -118,3 +118,21 @@ The agent must not automatically treat a customer's claim as truth. Unknown and 
 - YES CALL conversion rate
 - Counsellor acceptance and final admission rate
 - Complaint and opt-out handling accuracy
+
+## Live Autonomous Execution Architecture
+
+1. **Two-Tier Executive Sales Engine:**
+   - **Brain Tier:** Local open-source inference (`@sikhadenge/ai` / Qwen 4B on port 3210) resolves learner queries with natural Hinglish empathy and zero token timeouts.
+   - **Formatting Tier:** Standardized WhatsApp cards enforce high readability, clear emojis (🗓️, ⏰, 💻, 📜, 🟢, ✅), and active masterclass schedule slots.
+
+2. **7-Stage Lifecycle Coverage:**
+   - Stage 1: Inbound Greeting & Discovery
+   - Stage 2: Curriculum & AI Tool Mastery
+   - Stage 3: Pricing Clarification (100% Free Live Session)
+   - Stage 4: Device & Non-Tech Eligibility Reassurance
+   - Stage 5: Platform (Live Online) & Certificate Credibility
+   - Stage 6: Conversion Action (WhatsApp Community CTA)
+   - Stage 7: Post-Join Onboarding & Link Delivery Timeline
+
+3. **Supervised Counselor Handover:**
+   - Payment inquiries, human counselor requests, and complaints route safely to live staff with zero unverified bot commitments.
