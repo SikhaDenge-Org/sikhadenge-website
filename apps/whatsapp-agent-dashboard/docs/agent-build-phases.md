@@ -202,11 +202,83 @@ OPENAI_OUTPUT_COST_PER_1M_USD=0
 
 Cost rates default to zero so the application does not invent pricing. Set rates from the active provider contract when cost estimates are required.
 
-## Phase 8 — Final Meta/AiSensy cutover
+## Phase 8 — Final Meta/AiSensy Cutover & Native Cloud Gateway
 
-- Complete SIM verification after the telecom security hold.
-- Verify phone registration readiness and two-step PIN.
-- Back up current provider configuration.
-- Controlled deregistration/registration window.
-- Webhook and outbound live tests from a separate number.
-- Rollback procedure and post-cutover monitoring.
+Status: In progress / Stage gates active.
+
+- Complete SIM verification and resolve telecom security hold on production number.
+- Verify production WABA (WhatsApp Business Account) binding, System User access token, and Phone Number ID.
+- Register two-step verification PIN via Graph API / WhatsApp Business Manager.
+- Dual-channel migration strategy: zero message loss during AiSensy to native Meta Cloud API cutover.
+- Idempotency-backed webhook migration with parallel event buffering.
+- Standalone number validation for pre-cutover end-to-end testing (template + freeform responses).
+- Operational rollback runbook with instantaneous fallback to webhook proxy.
+
+Cutover endpoints:
+
+```text
+GET  /api/cutover/readiness
+POST /api/cutover/outbound-approvals
+POST /api/cutover/governance-readiness
+POST /api/cutover/approved-flows
+POST /api/cutover/controlled-launch
+```
+
+Cutover verification checklist:
+
+1. `GET /api/cutover/readiness` returns all checks green (`wabaConfigured`, `pinVerified`, `templatesApproved`).
+2. High-risk outbound dispatch requires dual-signature approval via `/api/cutover/outbound-approvals`.
+3. Meta webhook subscription active on `/api/webhooks/whatsapp` with verified `hub.verify_token`.
+
+## Phase 9 — Hardening, Security, and Reliability
+
+Status: Implemented in core modules; active in staging verification.
+
+- **Webhook Signature Verification:** Strict HMAC-SHA256 signature validation (`X-Hub-Signature-256`) against Meta app secret on all inbound events.
+- **CSRF & Session Hardening:** Strict SameSite cookies, CSRF protection on authenticated dashboard mutations, and timing-safe secret comparisons.
+- **Data Protection & Zero-PII Leakage:**
+  - Automated redaction of OTPs, cards, phone numbers, emails, government IDs, and payment screenshots before database storage.
+  - Raw customer prompt logs and private reasoning tokens are strictly excluded from analytics/observability views.
+- **Queue Fault Tolerance & Dead-Letter Handling:**
+  - Exponential backoff with jitter on transient Meta API 429/500 errors.
+  - Failed messages quarantine in dead-letter table after 3 retries without blocking active conversations.
+  - Idempotency locks prevent duplicate outbound deliveries on network retries.
+- **Database Backup & Disaster Recovery:**
+  - Automated continuous PostgreSQL WAL archiving and daily snapshot validation.
+  - Documented restore drill with RPO < 15 minutes and RTO < 30 minutes.
+
+Security & System Health Endpoints:
+
+```text
+GET  /api/meta/status
+GET  /api/integrations/health
+POST /api/integrations/verify
+```
+
+## Phase 10 — Controlled Production Launch & Governance
+
+Status: Rollout framework ready.
+
+### Rollout Ladder
+
+1. **Stage 1 (Internal Pilot):** Internal team test phone numbers only; full conversation flow verification.
+2. **Stage 2 (Supervised Shadow Mode):** Incoming production leads generate AI recommendations visible only to human counselors in dashboard; zero auto-send.
+3. **Stage 3 (Restricted FAQ Auto-Reply):** Autonomous agent enabled strictly for verified high-confidence intents (Free Masterclass schedule, zero coding reassurance, device eligibility).
+4. **Stage 4 (Full Inbound Autonomous Qualification):** End-to-end inbound counselor handles objection handling, dynamic slot dispatch, and community onboarding.
+5. **Stage 5 (Hybrid Counselor Escalation):** Automated handoff to live staff on payment issues, complaints, or explicit human requests within SLA limits.
+6. **Stage 6 (Targeted Outbound Campaigns):** Template-based event reminders and re-engagement campaigns within Meta 24-hour service window rules.
+
+### Production Launch Gates
+
+- [x] Local Open-Source AI Engine (`@sikhadenge/ai` / Qwen 4B on port 3210) validated with sub-15s response latency.
+- [x] Dynamic Schedule Engine (`getNextMasterclassSlot`) active with zero stale slot caching.
+- [x] Two-Tier Executive Card Formatter wired to WhatsApp outbound dispatch.
+- [ ] Meta Business Manager WABA payment method and compliance review active.
+- [ ] Emergency Kill Switch verified: `AGENT_KILL_SWITCH=on` instantly forces 100% human counselor mode without process restarts.
+
+```text
+Global Kill Switch:
+AGENT_ENABLED=true
+AGENT_KILL_SWITCH=off
+AGENT_AUTONOMOUS_MODE=active
+```
