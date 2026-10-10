@@ -90,10 +90,9 @@ cat > "$TIMER" <<'EOF'
 Description=Check SikhaDenge Golden masterclass funnels every minute
 
 [Timer]
-OnBootSec=30s
-OnUnitActiveSec=60s
+OnActiveSec=30s
+OnUnitInactiveSec=60s
 AccuracySec=5s
-Persistent=true
 Unit=sikhadenge-funnel-golden-guard.service
 
 [Install]
