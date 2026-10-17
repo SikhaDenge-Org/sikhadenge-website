@@ -207,6 +207,74 @@ jobs:
           free_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"
           printf 'PRESTAGE_TMP_FREE_KB_AFTER_ORPHAN_CLEANUP=%s\n' "$free_kb"
           if (( free_kb < 2097152 )); then
+            printf 'INFO: PRESTAGE_LOW_SPACE_PRUNING_OBSOLETE_BUILD_SNAPSHOTS\n'
+
+            PM2_JSON_FILE="$(mktemp)"
+            pm2 jlist > "$PM2_JSON_FILE"
+            RUNTIME_APP="$(node - "$PM2_JSON_FILE" <<'NODE'
+          const fs = require('node:fs');
+          const file = process.argv[2];
+          const entry = JSON.parse(fs.readFileSync(file, 'utf8')).find((item) => item.name === 'sikhadenge-whatsapp-agent');
+          if (!entry) process.exit(1);
+          process.stdout.write(String(entry.pm2_env?.pm_cwd || ''));
+          NODE
+            )"
+            rm -f "$PM2_JSON_FILE"
+            if [[ -z "$RUNTIME_APP" ]]; then RUNTIME_APP="$LIVE_APP"; fi
+            case "$RUNTIME_APP" in
+              /var/www/sikhadenge-whatsapp-agent/*) ;;
+              *) printf 'FAIL: PRESTAGE_UNEXPECTED_RUNTIME_APP=%s\n' "$RUNTIME_APP" >&2; exit 37 ;;
+            esac
+            printf 'PRESTAGE_RUNTIME_APP=%s\n' "$RUNTIME_APP"
+
+            python3 - "$LIVE_APP" "$RUNTIME_APP" <<'PY'
+          from pathlib import Path
+          import shutil
+          import sys
+
+          canonical_live = Path("/var/www/sikhadenge-whatsapp-agent/source/apps/whatsapp-agent-dashboard").resolve()
+          roots = []
+          for raw in sys.argv[1:]:
+              root = Path(raw).resolve()
+              if root == canonical_live:
+                  pass
+              elif not str(root).startswith("/var/www/sikhadenge-whatsapp-agent/"):
+                  raise SystemExit(f"refusing unexpected build snapshot root: {root}")
+              if root not in roots:
+                  roots.append(root)
+
+          retention = {
+              ".next-before-engageos-*": 2,
+              ".next-failed-engageos-*": 1,
+              ".next-stage-engageos-*": 0,
+          }
+
+          removed = 0
+          for root in roots:
+              if not root.is_dir():
+                  raise SystemExit(f"build snapshot root is not a directory: {root}")
+              for pattern, keep in retention.items():
+                  candidates = []
+                  for path in root.glob(pattern):
+                      resolved = path.resolve()
+                      if path.is_symlink():
+                          raise SystemExit(f"refusing symlink build snapshot cleanup: {path}")
+                      if resolved.parent != root:
+                          raise SystemExit(f"refusing out-of-scope build snapshot cleanup: {resolved}")
+                      if path.is_dir():
+                          candidates.append(path)
+                  candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                  for path in candidates[keep:]:
+                      print(f"PRESTAGE_REMOVING_OBSOLETE_BUILD_SNAPSHOT={path}")
+                      shutil.rmtree(path)
+                      removed += 1
+
+          print(f"PRESTAGE_OBSOLETE_BUILD_SNAPSHOTS_REMOVED={removed}")
+          PY
+            free_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"
+            printf 'PRESTAGE_TMP_FREE_KB_AFTER_BUILD_SNAPSHOT_CLEANUP=%s\n' "$free_kb"
+          fi
+          if (( free_kb < 2097152 )); then
             printf 'INFO: PRESTAGE_LOW_SPACE_CLEANING_NPM_CACHE\n'
             npm cache clean --force >/dev/null 2>&1 || true
             free_kb="$(df -Pk /tmp | awk 'NR==2 {print $4}')"
