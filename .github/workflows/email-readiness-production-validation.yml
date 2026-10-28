@@ -34,3 +34,26 @@ jobs:
           npm exec -- tsx tests/email-production-readiness-ui.test.ts
           echo "EMAIL_PRODUCTION_READINESS_SOURCE_CHECKED=true"
           echo "EMAIL_PRODUCTION_DEPLOYED=false"
+      - name: Verify production TypeScript compilation
+        working-directory: apps/whatsapp-agent-dashboard
+        env:
+          DATABASE_URL: postgresql://ci_user:ci_password@localhost:5432/sikhadenge_whatsapp_ci
+        run: npm run typecheck
+      - name: Verify isolated production Next.js build
+        working-directory: apps/whatsapp-agent-dashboard
+        env:
+          DATABASE_URL: postgresql://ci_user:ci_password@localhost:5432/sikhadenge_whatsapp_ci
+          SESSION_SECRET: ci-only-session-secret-please-replace-in-production-1234567890
+          APP_URL: http://127.0.0.1:3100
+        run: npm run build
+      - name: Verify compiled route exists
+        working-directory: apps/whatsapp-agent-dashboard
+        run: |
+          set -Eeuo pipefail
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const manifest = JSON.parse(fs.readFileSync(".next/server/app-paths-manifest.json","utf8"));
+          if (!Object.keys(manifest).some(k => k === "/email/readiness/page")) process.exit(1);
+          console.log("EMAIL_PRODUCTION_COMPILED_ROUTE=PASS");
+          NODE
+          echo "EMAIL_PRODUCTION_DEPLOYED=false"
