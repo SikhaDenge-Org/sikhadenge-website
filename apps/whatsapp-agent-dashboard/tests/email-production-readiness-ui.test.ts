@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 const read=(p:string)=>readFileSync(p,"utf8");
-const base="apps/whatsapp-agent-dashboard/";
+const base="";
 const page=read(base+"app/email/readiness/page.tsx");
 const view=read(base+"modules/email-automation/ui/EmailReadinessDashboard.tsx");
 const nav=read(base+"modules/email-automation/ui/EmailWorkspaceNav.tsx");
