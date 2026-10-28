@@ -7,18 +7,30 @@ permissions:
   contents: read
 jobs:
   contract:
-    runs-on: [self-hosted, Linux, X64, sikhadenge-ci]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install application dependencies
+        working-directory: apps/whatsapp-agent-dashboard
+        run: npm install --include=dev --no-audit --no-fund
+      - name: Generate Prisma client
+        working-directory: apps/whatsapp-agent-dashboard
+        env:
+          DATABASE_URL: postgresql://ci_user:ci_password@localhost:5432/sikhadenge_whatsapp_ci
+        run: npx prisma generate
       - name: Read-only Email source verification
         shell: bash
         run: |
           set -Eeuo pipefail
           cd apps/whatsapp-agent-dashboard
           test -f tests/email-production-readiness-ui.test.ts
-          npx --yes tsx tests/email-production-readiness-ui.test.ts
+          npm exec -- tsx tests/email-production-readiness-ui.test.ts
           echo "EMAIL_PRODUCTION_READINESS_SOURCE_CHECKED=true"
           echo "EMAIL_PRODUCTION_DEPLOYED=false"
