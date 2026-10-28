@@ -1,0 +1,44 @@
+name: Email Readiness Live Baseline Regression Comparison
+on:
+  push:
+    branches: [feature/email-readiness-production-compatible-20261028]
+    paths: ['.github/workflows/email-readiness-baseline-comparison.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        source: [live-baseline, email-candidate]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.source == 'live-baseline' && '8457221860e137cdbdc9a58d82d2f4f25b73a0e6' || 'e6fc0426051859b71f8fced0e6394d48962723ac' }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run equivalent WhatsApp agent regression on pinned refs
+        working-directory: apps/whatsapp-agent-dashboard
+        env:
+          DATABASE_URL: postgresql://ci_user:ci_password@localhost:5432/sikhadenge_whatsapp_ci
+          SHADOW_DATABASE_URL: postgresql://ci_user:ci_password@localhost:5432/sikhadenge_whatsapp_ci_shadow
+          SESSION_SECRET: ci-only-session-secret-please-replace-in-production-1234567890
+          APP_URL: http://localhost:3100
+          INITIAL_ADMIN_EMAIL: admin@example.invalid
+          INITIAL_ADMIN_PASSWORD: CI-only-password-12345
+          INITIAL_ADMIN_NAME: CI Admin
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "REGRESSION_SOURCE=${{ matrix.source }}"
+          echo "REGRESSION_SHA=$(git rev-parse HEAD)"
+          npm install --include=dev --no-audit --no-fund
+          npx prisma generate
+          npm run test:agent
+          echo "REGRESSION_TEST_AGENT=PASS"
+# No production host, credentials, migrations, restarts or email sends.
