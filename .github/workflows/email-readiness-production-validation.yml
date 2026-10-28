@@ -1,0 +1,24 @@
+name: Email Readiness Production Source Validation
+on:
+  push:
+    branches: [feature/email-readiness-production-compatible-20261028]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: [self-hosted, Linux, X64, sikhadenge-ci]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Read-only Email source verification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd apps/whatsapp-agent-dashboard
+          test -f tests/email-production-readiness-ui.test.ts
+          npx --yes tsx tests/email-production-readiness-ui.test.ts
+          echo "EMAIL_PRODUCTION_READINESS_SOURCE_CHECKED=true"
+          echo "EMAIL_PRODUCTION_DEPLOYED=false"
