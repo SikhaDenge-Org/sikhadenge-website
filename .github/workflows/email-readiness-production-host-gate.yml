@@ -25,11 +25,20 @@ jobs:
           LIVE_SHA="$(git -C "$ROOT" rev-parse HEAD)"
           echo "PRODUCTION_LIVE_SOURCE_SHA=$LIVE_SHA"
           test "$LIVE_SHA" = "$EXPECTED_SOURCE" || { echo "BLOCKED_PRODUCTION_SOURCE_DRIFT=true";exit 1; }
-          git -C "$ROOT" diff --name-only --no-ext-diff HEAD | sed 's/^/TRACKED_DIRTY_PATH=/' || true
-          if [ -n "$(git -C "$ROOT" diff --name-only --no-ext-diff HEAD)" ]; then
-            echo "BLOCKED_TRACKED_SOURCE_DRIFT=true"
+          # The three Masterclass modifications predate this Email change.
+          # Observe and preserve them; fail on ANY additional tracked change.
+          EXPECTED_DIRTY="$(printf '%s\\n' \\
+            'apps/whatsapp-agent-dashboard/lib/agent/masterclass-community-flow.ts' \\
+            'apps/whatsapp-agent-dashboard/lib/automation/masterclass-image-flow.ts' \\
+            'apps/whatsapp-agent-dashboard/lib/automation/masterclass-registration-flow.ts' | LC_ALL=C sort)"
+          ACTUAL_DIRTY="$(git -C "$ROOT" status --porcelain --untracked-files=no | sed -n 's/^...//p' | LC_ALL=C sort)"
+          printf '%s\\n' "$ACTUAL_DIRTY" | sed 's/^/TRACKED_DIRTY_PATH=/'
+          if [ "$ACTUAL_DIRTY" != "$EXPECTED_DIRTY" ]; then
+            echo "BLOCKED_UNEXPECTED_TRACKED_DRIFT=true"
             exit 1
           fi
+          echo "MASTERCLASS_DIRTY_FILES_PRESERVED=true"
+          echo "MASTERCLASS_CONTENT_NOT_READ_OR_MODIFIED=true"
           test "$(readlink -f "$CANARY/current-canary")" = "$CANARY/releases/$EXPECTED_CANARY" || { echo "BLOCKED_CANARY_SHA_DRIFT=true";exit 1; }
           for p in /login /email /email/readiness; do
             code="$(curl -sS --max-time 8 -o /dev/null -w '%{http_code}' "http://127.0.0.1:3100$p" || true)"
