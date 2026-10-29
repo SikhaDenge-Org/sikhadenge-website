@@ -13,6 +13,7 @@ const ITEMS = [
   ["Campaigns", "/email/campaigns", "Audience delivery", "◎"],
   ["Sequences", "/email/sequences", "Lifecycle journeys", "⋮"],
   ["Automation", "/email/automation", "Queue & runtime", "ϟ"],
+  ["Readiness", "/email/readiness", "Delivery health", "✓"],
 ] as const;
 
 export default function EmailWorkspaceNav() {

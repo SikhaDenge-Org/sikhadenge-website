@@ -1,0 +1,55 @@
+name: Email Readiness Production Host Gate
+on:
+  push:
+    branches: [feature/email-readiness-production-compatible-20261028]
+    paths: ['.github/workflows/email-readiness-production-host-gate.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  observe:
+    runs-on: [self-hosted, Linux, X64, sikhadenge-ci]
+    timeout-minutes: 6
+    steps:
+      - name: Read-only production identity and route gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ROOT=/var/www/sikhadenge-whatsapp-agent/source
+          CANARY=/var/www/sikhadenge-whatsapp-os
+          EXPECTED_SOURCE=8457221860e137cdbdc9a58d82d2f4f25b73a0e6
+          EXPECTED_CANARY=469059a34bb99d178f88b279d90fd8a3005630d8
+          echo "PRODUCTION_HOST_GATE_BEGIN=true"
+          test "$(id -un)" = github-runner
+          test -d "$ROOT/.git"
+          LIVE_SHA="$(git -C "$ROOT" rev-parse HEAD)"
+          echo "PRODUCTION_LIVE_SOURCE_SHA=$LIVE_SHA"
+          test "$LIVE_SHA" = "$EXPECTED_SOURCE" || { echo "BLOCKED_PRODUCTION_SOURCE_DRIFT=true";exit 1; }
+          # The three Masterclass modifications predate this Email change.
+          # Observe and preserve them; fail on ANY additional tracked change.
+          EXPECTED_DIRTY="$(cat <<'EXPECTED_PATHS'
+          apps/whatsapp-agent-dashboard/lib/agent/masterclass-community-flow.ts
+          apps/whatsapp-agent-dashboard/lib/automation/masterclass-image-flow.ts
+          apps/whatsapp-agent-dashboard/lib/automation/masterclass-registration-flow.ts
+          EXPECTED_PATHS
+          )"
+          ACTUAL_DIRTY="$(git -C "$ROOT" diff HEAD --name-only --no-ext-diff | LC_ALL=C sort)"
+          echo "TRACKED_DIRTY_PATHS_BEGIN"
+          printf '%s\n' "$ACTUAL_DIRTY"
+          echo "TRACKED_DIRTY_PATHS_END"
+          if [ "$ACTUAL_DIRTY" != "$EXPECTED_DIRTY" ]; then
+            echo "BLOCKED_UNEXPECTED_TRACKED_DRIFT=true"
+            exit 1
+          fi
+          echo "MASTERCLASS_DIRTY_FILES_PRESERVED=true"
+          echo "MASTERCLASS_CONTENT_NOT_READ_OR_MODIFIED=true"
+          test "$(readlink -f "$CANARY/current-canary")" = "$CANARY/releases/$EXPECTED_CANARY" || { echo "BLOCKED_CANARY_SHA_DRIFT=true";exit 1; }
+          for p in /login /email /email/readiness; do
+            code="$(curl -sS --max-time 8 -o /dev/null -w '%{http_code}' "http://127.0.0.1:3100$p" || true)"
+            echo "PRODUCTION_ROUTE=$p:$code"
+            case "$p:$code" in /login:200|/email:307|/email:302|/email:303|/email:308|/email/readiness:404) ;; *) echo "BLOCKED_UNEXPECTED_PRODUCTION_ROUTE=true";exit 1;; esac
+          done
+          test "$(curl -sS --max-time 8 -o /dev/null -w '%{http_code}' http://127.0.0.1:3201/api/ready)" = 200
+          echo "EMAIL_PRODUCTION_HOST_PREFLIGHT=PASS"
+          echo "PRODUCTION_DEPLOYMENT_PERFORMED=false"
+# No source changes, credentials, PM2 access, service restarts, Nginx changes or DB writes.
